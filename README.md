@@ -1,4 +1,5 @@
 # CanSNPer2
+CanSNPer2: A toolkit for SNP-typing NGS data. Copyright (C) 2019 David Sundell @ FOI bioinformatics group  VERSION 2.0.1 First release of CanSNPer2  The second release of CanSNPer (CanSNPer2) is exclusively written for python3 CanSNPer2 is simplified from CanSNPer1 stripped to only perform required tasks. It is also written in a modular form with separate classes for each task which allows future extentions such as a sequence read input option planned during 2020.  Requires progressiveMauve  This program is free software: you can redistribute and/or modify the code under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.  You should have received a copy of the GNU General Public License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ## Installation
 
