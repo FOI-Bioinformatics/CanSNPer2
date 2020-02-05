@@ -1,0 +1,11 @@
+build*
+*.pyc
+test*
+*.dmp
+.ctbd
+*.db
+*.txt
+*egg*
+dist*
+results*
+logs
