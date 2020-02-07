@@ -39,12 +39,12 @@ CanSNPer2
 
 ```
 CanSNPer2-database 
-    --database <path_to><database_name>
-    --mod_file <path_to><modification tree (1)>
-    --annotation <path_to><modification annotation (2)>
-    --log database/logs 
-    --parent "A/M.1" 
-    --replace
+    --database <path_to><database_name>               ## CanSNPer2 database file
+    --mod_file <path_to><modification tree (1)>       ## node updates (1)
+    --annotation <path_to><snp annotations (2)>       ## snp annotations (2)
+    --log database/logs                               ## log directory
+    --parent "A/M.1"                                  ## If replacing a branch add parent and replace
+    --replace                                         ## Flag to replace a whole branch from --parent
 ```
 
 ### Create a custom database
