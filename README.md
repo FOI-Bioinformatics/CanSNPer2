@@ -124,6 +124,7 @@ has to be supplied manually. Observe that the first row must contain headers
 | genbank_sequence   |   CP000437.1 |
 
 4) genome reference file
+
 | header | row |
 | --- | --- |
 | genome                |   OSU18 |
