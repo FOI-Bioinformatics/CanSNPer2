@@ -66,6 +66,7 @@ run_options.add_argument('--read_input', 		action='store_true', 				help="Select
 
 '''Remove the two below when script is complete, possibly keep as hidden for debug'''
 run_options.add_argument('--skip_mauve' ,		action='store_true', 				help="If xmfa files already exists skip step")
+run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 run_options.add_argument('--keep_temp',			action='store_true', 				help="keep temporary files")
 
 debugopts = parser.add_argument_group("Logging and debug options")

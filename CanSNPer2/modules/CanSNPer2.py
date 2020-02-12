@@ -44,7 +44,7 @@ class MauveError(Error):
 
 class CanSNPer2(object):
 	"""docstring for CanSNPer2"""
-	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,**kwargs):
+	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,keep_going=False,**kwargs):
 		super(CanSNPer2, self).__init__()
 		self.query = query
 		self.verbose = verbose
@@ -137,15 +137,22 @@ class CanSNPer2(object):
 						print(p.stdout.read().decode('utf-8'),file=log)
 
 					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
-					if exitcode != 0:
+					if exitcode == 11:
+						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}\nThis is typically showing up for bad genome names, script will continue..."")
+					elif exitcode != 0:
+						if not self.keep_going:
+							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode),file=log)
 						error += 1
 						logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=log_f[p.stdout.fileno()],exitcode=exitcode))
 					## Remove process from container
 					processes.remove(p)
-		if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
-			logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
-			raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
-		return
+		if not self.keep_going:
+			if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
+				logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
+				raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
+		else:
+			return 1
+		return 0
 
 	def align(self, query, references=[]):
 		'''Align sequences and run mauve as subprocess'''
@@ -171,7 +178,9 @@ class CanSNPer2(object):
 			logs.append(log_file)               ## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
 		if not self.skip_mauve: ### If mauve command was already run before don´t run mauve return xmfa paths
-			self.run_mauve(commands,logs)
+			ret = self.run_mauve(commands,logs)
+			if ret != 0:
+				return []
 			logger.info("Alignments for {query} complete!".format(query=query))
 		return self.xmfa_files
 
@@ -285,6 +294,10 @@ class CanSNPer2(object):
 			'''
 			xmfa_files = self.align(q)
 
+			if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
+				logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
+				logger.warning("Mauve error skip {sample}".format(q))
+				continue
 			'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 			logger.info("Finding SNPs")
 			SNPS,SNP_info = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=self.export)
