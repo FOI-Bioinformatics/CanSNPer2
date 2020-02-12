@@ -87,6 +87,7 @@ class CanSNPer2(object):
 		self.skip_mauve = kwargs["skip_mauve"]
 		self.save_tree = kwargs["save_tree"]
 		self.keep_temp = kwargs["keep_temp"]
+		self.keep_temp = keep_going
 
 	'''CanSNPer2 get functions'''
 
