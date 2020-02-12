@@ -138,7 +138,7 @@ class CanSNPer2(object):
 
 					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
 					if exitcode == 11:
-						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}\nThis is typically showing up for bad genome names, script will continue..."")
+						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}\nThis is typically showing up for bad genome names, script will continue...")
 					elif exitcode != 0:
 						if not self.keep_going:
 							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode),file=log)
