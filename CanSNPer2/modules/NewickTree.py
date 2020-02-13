@@ -101,7 +101,6 @@ class NewickTree(object):
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
 		self.tree_file = "{outdir}/{name}_CanSNP_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
-
 		## Build the newick tree
 		self.newickTree = str(self.build_tree())
 
@@ -182,15 +181,7 @@ class NewickTree(object):
 				self.nodeDict["root"] = root									## Also add this reference as "root"
 				newickTree = root  												## The master parent will contain the full tree
 				continue
-
 			self.new_node(child,nodes,parent)
-			# try:
-			# 	node = NewickNode(child, nodes[child], self.nodeDict[parent])  		## this works also for root as root has itself as child
-			# except KeyError:
-			# 	logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add: {child}".format(parent=parent,child=child))
-			# self.nodeDict[child] = node  										## add a reference to the node so that children can be added
-			# pnode = self.nodeDict[parent]										## add child to the parent node
-			# pnode.add_child(node)
 		## The newickTree is the same as the master parent (containing the full tree, the root node is defined on row 135)
 		logger.debug("Tree complete, return newickTree")
 		logger.debug(newickTree)
@@ -202,7 +193,7 @@ class NewickTree(object):
 		if not node.is_root():
 			faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
 
-	def draw_ete3_tree(self,snplist):
+	def draw_ete3_tree(self,snplist,called_snps=False):
 		'''Draws a phylogenetic tree using ETE3
 		Keyword arguments:
 		snplist -- a list of the SNP names, positions and state
@@ -251,3 +242,19 @@ class NewickTree(object):
 
 		## Render tree and save to pdf
 		tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
+		dlist = []
+
+		if called_snps:
+			try:
+				for tsnp in called_snps:
+					try:
+						dist = tree.get_distance(tsnp,tree.get_tree_root())
+						dlist.append([dist,tsnp])
+					except ValueError:
+						logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
+				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
+				logger.debug(dlist)
+			except:
+				logger.debug("called_snps failed!")
+				logger.debug(self.newickTree)
+		return dlist[0]

@@ -31,6 +31,7 @@ class ParseXMFA(object):
 		'''Define all base variables'''
 		self.verbose = verbose
 		self.export = kwargs["export"]
+		self.called_snps = []
 
 		## as the snps are ordered according to the reference mauve positions they can be used sequentialy without search
 		'''SNPs will be stored as a sorted set containing (position, refBase, targetBase,SNPname)'''
@@ -54,6 +55,10 @@ class ParseXMFA(object):
 	def get_snps(self):
 		'''Return snps'''
 		return self.SNPS
+
+	def get_called_snps(self):
+		'''Return true snps'''
+		return self.called_snps
 
 	def reverse_complement(self,dna):
 		'''Complement and reverse DNA string'''
@@ -101,6 +106,7 @@ class ParseXMFA(object):
 					_snp = self.rcDict[_snp]
 				if tbase == _snp:           ## SNP is confirmed to be Derived
 					SNP[snp_id] = 1 		## Derived SNP
+					self.called_snps.append(snp_id)
 				elif rbase == _snp:  		## SNP is confirmed to be ancestral
 					SNP[snp_id] = 2			## Ancestral SNP
 				self._next_pos()  ## SNP found get next
@@ -183,5 +189,4 @@ if __name__=="__main__":
 	if args.verbose: print(args)
 	xmfa = ParseXMFA(verbose=args.verbose,mask=args.mask)
 	SNPS = xmfa.run(database=args.database, xmfa=args.xmfa, organism=args.organism,reference=args.reference)
-
-	print(SNPS)
+	logger.info(SNPS)
