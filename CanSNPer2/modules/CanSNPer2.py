@@ -307,8 +307,8 @@ class CanSNPer2(object):
 
 			'''If file export is requested print the result for each SNP location to file'''
 			if self.export:
-				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=qfile.strip(".fasta"),snpfile=self.snpfile)
-				outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=qfile.strip(".fasta"),snpfile=self.snpfile)
+				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+				outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
 
 				logger.info("Printing SNP info to {file}".format(file=outputfile))
 
