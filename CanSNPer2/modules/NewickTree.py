@@ -257,4 +257,8 @@ class NewickTree(object):
 			except:
 				logger.debug("called_snps failed!")
 				logger.debug(self.newickTree)
-		return dlist[0]
+				return [1, "snp call function failed!"]
+		if len(dlist) > 0:
+			return dlist[0]
+		else:
+			return [0, "no snp called"]
