@@ -139,7 +139,8 @@ class CanSNPer2(object):
 
 					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
 					if exitcode == 11:
-						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}\nThis is typically showing up for bad genome names, script will continue...")
+						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
+						logger.warning("This progressiveMauve error is showing up for bad genomes containing short repetative contigs ".format(exitcode=exitcode))
 					elif exitcode != 0:
 						if not self.keep_going:
 							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode),file=log)
@@ -294,7 +295,7 @@ class CanSNPer2(object):
 				if skip_mauve parameter is True this the align function will only format xmfa file paths
 			'''
 			xmfa_files = self.align(q)
-
+			logger.debug(xmfa_files)
 			if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
 				logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
 				logger.warning("Mauve error skip {sample}".format(q))
@@ -305,7 +306,7 @@ class CanSNPer2(object):
 
 			'''If file export is requested print the result for each SNP location to file'''
 			if self.export:
-				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=qfile.strip(".fa"),snpfile=self.snpfile)
+				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=qfile.strip(".fasta"),snpfile=self.snpfile)
 
 				logger.info("Printing SNP info to {file}".format(file=outputfile))
 

@@ -25,6 +25,7 @@ class ParseXMFA(object):
 			 "C" : "G",
 			 "G" : "C",
 			 "-" : "-",
+			 "N" : "N"
 		}
 
 		'''Define all base variables'''
