@@ -95,7 +95,7 @@ class NewickTree(object):
 
 	"""
 
-	def __init__(self, database,name,outdir="./"):
+	def __init__(self, database,name="tree_file",outdir="./"):
 		super(NewickTree, self).__init__()
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
@@ -106,6 +106,9 @@ class NewickTree(object):
 
 	def __repr__(self):
 		return "NewickTree()"
+
+	def print(self):
+		print(self.newickTree)
 
 	def get_tree(self,table="tree"):
 		'''Function that returns the whole tree in the database the script expects
@@ -207,7 +210,7 @@ class NewickTree(object):
 		for n in tree.traverse():
 			# The ancestral node is set to have a red colour
 			nstyle = NodeStyle()
-			nstyle["fgcolor"] = "#BE0508"
+			nstyle["fgcolor"] = "#984EA3"
 			nstyle["size"] = 10
 			nstyle["vt_line_color"] = "#000000"
 			nstyle["hz_line_color"] = "#000000"
@@ -226,7 +229,15 @@ class NewickTree(object):
 					nstyle["hz_line_type"] = 1
 				elif n.name == snp and snplist[snp] == 1:
 					## If the SNP was derived make it green
-					nstyle["fgcolor"] = "#99FF66"
+					nstyle["fgcolor"] = "#7FC97F"
+					nstyle["size"] = 15
+					nstyle["vt_line_color"] = "#000000"
+					nstyle["hz_line_color"] = "#000000"
+					nstyle["vt_line_type"] = 0
+					nstyle["hz_line_type"] = 0
+				elif n.name == snp and snplist[snp] == 3:
+					## If the SNP was neither of ancestral or derived make it blue
+					nstyle["fgcolor"] = "#377EB8"
 					nstyle["size"] = 15
 					nstyle["vt_line_color"] = "#000000"
 					nstyle["hz_line_color"] = "#000000"

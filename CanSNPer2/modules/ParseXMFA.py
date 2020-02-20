@@ -97,18 +97,21 @@ class ParseXMFA(object):
 			if i == snppos:                	## if current possition contains a snp
 				SNP[snp_id] = 0
 				_snp = target[ii]        	## get base in target sequence
-				if self.export:
-					'''Fetch information about snp to allow print to file'''
-					snpinfo = [snp_id,self.reference,str(snppos),rbase,tbase,_snp]
-					self.SNP_info.append(snpinfo)
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
 					_snp = self.rcDict[_snp]
+				if self.export:
+					'''Fetch information about snp to allow print to file'''
+					orig_snp_pos = str(self.snplist[self.current_snp][0])
+					snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
+					self.SNP_info.append(snpinfo)
 				if tbase == _snp:           ## SNP is confirmed to be Derived
 					SNP[snp_id] = 1 		## Derived SNP
 					self.called_snps.append(snp_id)
 				elif rbase == _snp:  		## SNP is confirmed to be ancestral
 					SNP[snp_id] = 2			## Ancestral SNP
+				elif _snp != "-" or _snp != "N":
+					SNP[snp_id] = 3			## Other base than ancestral or derived was found
 				self._next_pos()  ## SNP found get next
 				snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP
 		return SNP

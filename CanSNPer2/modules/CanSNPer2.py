@@ -303,7 +303,7 @@ class CanSNPer2(object):
 				continue
 			'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 			logger.info("Finding SNPs")
-			SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=self.export)
+			SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
 
 			'''If file export is requested print the result for each SNP location to file'''
 			if self.export:
@@ -329,7 +329,7 @@ class CanSNPer2(object):
 				if self.export:
 					with open(outputfile2, "a") as called_out:
 						print("Final SNP: {snp} depth: {depth}".format(snp=final_snp[1],depth=final_snp[0]),file=called_out)
-						logger.info("Final SNP: {snp} depth: {depth}".format(snp=final_snp[1],depth=final_snp[0]))
+				logger.info("Final SNP: {snp} depth: {depth}".format(snp=final_snp[1],depth=final_snp[0]))
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 
