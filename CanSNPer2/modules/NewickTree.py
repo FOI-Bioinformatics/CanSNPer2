@@ -261,7 +261,7 @@ class NewickTree(object):
 				logger.debug("Parent ok continue")
 				lcount+=1
 			_dist,_node = dist,node
-		return False,False
+		return False,False,dlist
 
 	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True):
 		'''Draws a phylogenetic tree using ETE3
