@@ -38,10 +38,6 @@ class MauveError(Error):
 	"""docstring for MauveE"""
 	pass
 
-
-
-
-
 class CanSNPer2(object):
 	"""docstring for CanSNPer2"""
 	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,keep_going=False,**kwargs):
@@ -248,7 +244,7 @@ class CanSNPer2(object):
 		for job in jobs:
 			job.join()
 		for j in jobs:
-			## Merge SNP dictionaries
+			## Merge SNP result dictionaries
 			SNPS = dict(**SNPS, **result_queue.get())
 			if self.export:
 				### join SNP info files
@@ -324,16 +320,17 @@ class CanSNPer2(object):
 							print("\t".join(snp),file=called_out)
 						print("\t".join(snp),file=snplist_out)
 
-
-
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 			final_snp = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
 			if self.export:
+				SNP = final_snp[1]
+				if not SNP:
+					SNP = "NA"
 				with open(outputfile2, "a") as called_out:
-					if final_snp:
-						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
-			if final_snp:
-				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]))
+					print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
+
+				print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+			logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]))
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 
@@ -342,4 +339,3 @@ class CanSNPer2(object):
 			self.cleanup()
 
 		logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir+"/"))
-		if self.export and final_snp: print(final_snp[1])

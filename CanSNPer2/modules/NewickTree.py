@@ -351,7 +351,6 @@ class NewickTree(object):
 			except KeyError as e:
 				logger.error("KeyError, {e}".format(e=e))
 				logger.debug("called_snps failed!")
-				logger.debug(self.newickTree)
 				return False
 		else:
 			return False
