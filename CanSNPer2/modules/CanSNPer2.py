@@ -124,7 +124,7 @@ class CanSNPer2(object):
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
-			logger.info(command)            ## In verbose mode print the actual mauve command
+			logger.debug(command)            ## In verbose mode print the actual mauve command
 			p = Popen(command.split(" "),  stdout=PIPE, stderr=STDOUT)  ##Split command to avoid shell=True pipe stdout and stderr to stdout
 			log_f[p.stdout.fileno()] = logs[i]      ## Store the reference to the correct log file
 			processes.append(p)
@@ -188,12 +188,12 @@ class CanSNPer2(object):
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name,called_snps):
+	def create_tree(self,SNPS,name,called_snps,save_tree):
 		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
 			and outputs a pdf file
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir)
-		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps)
+		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree)
 		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
 		return final_snp
 
@@ -303,8 +303,11 @@ class CanSNPer2(object):
 				continue
 			'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 			logger.info("Finding SNPs")
-			SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
-
+			try:
+				SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
+			except FileNotFoundError:
+				logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+				continue
 			'''If file export is requested print the result for each SNP location to file'''
 			if self.export:
 				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
@@ -324,12 +327,13 @@ class CanSNPer2(object):
 
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
-			if self.save_tree:
-				final_snp = self.create_tree(SNPS,self.query_name,called_snps)
-				if self.export:
-					with open(outputfile2, "a") as called_out:
-						print("Final SNP: {snp} depth: {depth}".format(snp=final_snp[1],depth=final_snp[0]),file=called_out)
-				logger.info("Final SNP: {snp} depth: {depth}".format(snp=final_snp[1],depth=final_snp[0]))
+			final_snp = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
+			if self.export:
+				with open(outputfile2, "a") as called_out:
+					if final_snp:
+						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
+			if final_snp:
+				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]))
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 
@@ -338,4 +342,4 @@ class CanSNPer2(object):
 			self.cleanup()
 
 		logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir+"/"))
-		if self.export: print(final_snp[1])
+		if self.export and final_snp: print(final_snp[1])
