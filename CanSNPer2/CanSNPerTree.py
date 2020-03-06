@@ -55,9 +55,9 @@ required_arguments.add_argument('-db',  '--database', 	metavar='', 						help='C
 
 output_options = parser.add_argument_group("Output options")
 output_options.add_argument('-o', 	 '--outdir', 	metavar='DIR', default="results",		help="Output directory")
-output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snpfile.txt",	help="specify name of export and include called snp output")
-output_options.add_argument('--save_tree',			metavar='PREFIX', type=bool, 	default=True, 			help='Save tree as PDF using ETE3 (default True)')
-output_options.add_argument('--export', 			action='store_false',				help="Don´t print output to file")
+output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snpfile",	help="specify name of export and include called snp output")
+output_options.add_argument('--save_tree',			action='store_true',				help='Save tree as PDF using ETE3 (default False)')
+output_options.add_argument('--no_export', 			action='store_false',				help="Add argument to stop default snpfile and snpcalled file output.")
 
 run_options = parser.add_argument_group("Run options")
 run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
@@ -138,7 +138,7 @@ def main():
 									save_tree=args.save_tree,
 									keep_temp= args.keep_temp,
 									workdir=args.workdir,
-									export=args.export,
+									export=args.no_export,
 									snpfile=args.snpfile,
 									database=args.database,
 									#initiate=args.initiate,

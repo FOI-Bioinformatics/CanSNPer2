@@ -215,7 +215,7 @@ class CanSNPer2(object):
 		results.put(XMFA_obj.get_snps())
 		if self.export:
 			export_results.put(XMFA_obj.get_snp_info())
-			called_snps.put(XMFA_obj.get_called_snps())
+		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
 	def find_snps(self,XMFA_obj,xmfa_file,organism,results=[],export_results=[],called_snps=[]):
@@ -224,7 +224,7 @@ class CanSNPer2(object):
 		results.put(XMFA_obj.get_snps())
 		if self.export:
 			export_results.put(XMFA_obj.get_snp_info())
-			called_snps.put(XMFA_obj.get_called_snps())
+		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
 	def find_snps_multiproc(self,xmfa_obj,xmfa_files,organism,export=False):
@@ -249,7 +249,7 @@ class CanSNPer2(object):
 			if self.export:
 				### join SNP info files
 				SNP_info+= export_queue.get()
-				called_snps+=called_queue.get()
+			called_snps+=called_queue.get()
 		return SNPS,SNP_info,called_snps
 
 	def run(self,database,organism):
@@ -278,7 +278,7 @@ class CanSNPer2(object):
 					snpfile=self.snpfile,
 					verbose=self.verbose)  ## Create XMFA object and connect to database
 		'''Walk through the list of queries supplied'''
-		if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
+		if not self.skip_mauve: logger.info("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
 		for q in self.query:            ## For each query file_path
 			qfile = q.rsplit("/")[-1]   ## Remove path from query name
 			self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
@@ -302,12 +302,13 @@ class CanSNPer2(object):
 			try:
 				SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
 			except FileNotFoundError:
-				logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+				logger.warning("One or several xmfa files were not found for {qfile}, continue with next file".format(qfile=qfile))
 				continue
 			'''If file export is requested print the result for each SNP location to file'''
 			if self.export:
-				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
-				outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+				snpfile = self.snpfile.rsplit(".txt",1)[0]
+				outputfile = "{outdir}/{xmfa}_{snpfile}.txt".format(outdir=self.outdir,xmfa=self.query_name,snpfile=snpfile)
+				outputfile2 = "{outdir}/{xmfa}_{snpfile}_called.txt".format(outdir=self.outdir,xmfa=self.query_name,snpfile=snpfile)
 
 				logger.info("Printing SNP info to {file}".format(file=outputfile))
 
@@ -323,17 +324,17 @@ class CanSNPer2(object):
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 			final_snp = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
 			if final_snp:
+				SNP = final_snp[1]
+				if not SNP:
+					SNP = "NA"
 				if self.export:
-					SNP = final_snp[1]
-					if not SNP:
-						SNP = "NA"
 					with open(outputfile2, "a") as called_out:
 						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
-
-					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]))
+				print("{SNP}\t{query}".format(query=qfile, SNP=SNP))
 			else:
 				logger.info("SNP could not be called for {query}".format(query=self.query_name))
+				print("{SNP}\t{query}".format(query=qfile, SNP="NA"))
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 

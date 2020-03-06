@@ -96,12 +96,12 @@ class NewickTree(object):
 
 	"""
 
-	def __init__(self, database,name="tree_file",outdir="./"):
+	def __init__(self, database,name="newick",outdir="./"):
 		super(NewickTree, self).__init__()
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
-		self.tree_file = "{outdir}/{name}_CanSNP_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
+		self.tree_file = "{outdir}/{name}_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
 		## Build the newick tree
 		self.newickTree = str(self.build_tree())
 
