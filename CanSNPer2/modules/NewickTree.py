@@ -323,7 +323,7 @@ class NewickTree(object):
 			tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
 		dlist = []
 		confirmed = [False,0]
-		logger.info(called_snps)
+		logger.info("Called snps: {called}".format(called=called_snps))
 		if called_snps:
 			logger.info("Call SNPs!")
 			try:
@@ -336,6 +336,9 @@ class NewickTree(object):
 						logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
 				logger.info(dlist)
+				if len(dlist) < 3: ## the number of SNPs found is too small to be valid,
+					logger.debug("The number of SNPs found is too small to be valid, Cannot call SNPs")
+					return False
 				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
 				dist,node,dlist = self._check_start(dlist)
 				if not node:
@@ -353,6 +356,7 @@ class NewickTree(object):
 				logger.debug("called_snps failed!")
 				return False
 		else:
+			logger.debug("No snps were called!")
 			return False
 		if confirmed[0] and len(dlist) > 0:
 			return dlist[0]
