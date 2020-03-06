@@ -107,8 +107,8 @@ class NewickTree(object):
 
 		## Tree colors
 		self.snp_colors = {
-			"derived": "#7FC97F", 			## Red
-			"ancestral":"#984EA3" , 		## Green
+			"derived": "#63e563", 			## Green
+			"ancestral":"#984EA3" , 		## Purple
 			"non_aligned": "#DDDDDD", 		## Grey
 			"other_base":"#377EB8"			## Blue
 		}

@@ -71,7 +71,7 @@ run_options.add_argument('--keep_temp',			action='store_true', 				help="keep te
 
 debugopts = parser.add_argument_group("Logging and debug options")
 debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify reference directory")
-debugopts.add_argument('--logs', 			metavar='', default="logs/", 								help="Specify log directory")
+debugopts.add_argument('--logdir', 			metavar='', default="logs/", 								help="Specify log directory")
 debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,					help="Verbose output")
 debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")
 debugopts.add_argument('--supress',	action='store_const', const=logging.ERROR,	default=logging.WARNING,	help="Supress warnings")
@@ -99,10 +99,17 @@ elif args.verbose:
 if args.skip_mauve and not args.keep_temp: ## Make sure keep temp is default if --skip_mauve is used
 	args.keep_temp = True
 
+'''Make sure log directory path exists'''
+logdircreated = False
+if not os.path.exists(args.logdir):
+	logdircreated = True
+	os.makedirs(args.logdir)
+
+
 from datetime import date,time
 t = time()
 today = date.today()
-logpath = args.logs+"CanSNPer2-"+today.strftime("%b-%d-%Y")+"{}.log"
+logpath = args.logdir+"CanSNPer2-"+today.strftime("%b-%d-%Y")+"{}.log"
 if os.path.exists(logpath):
 	logpath=logpath.format("-{:%H:%M}".format(t))
 else: logpath = logpath.format("")
@@ -117,6 +124,7 @@ logging.basicConfig(
 	        logging.StreamHandler()
 	    ])
 logger = logging.getLogger(__name__)
+if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
 
 '''Fix temp path''' ## If tmp is in standard root folder create sub folder for CanSNPer2
 if args.tmpdir.rstrip("/") == "/tmp": ## Only root tmp name was chosen
@@ -136,7 +144,7 @@ def main():
 									verbose=args.verbose,
 									outdir=args.outdir,
 									tmpdir=args.tmpdir,
-									logdir=args.logs.rstrip("/")+"/",
+									logdir=args.logdir.rstrip("/")+"/",
 									skip_mauve=args.skip_mauve,
 									save_tree=args.save_tree,
 									keep_temp= args.keep_temp,

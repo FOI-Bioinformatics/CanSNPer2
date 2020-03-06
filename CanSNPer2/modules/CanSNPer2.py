@@ -70,9 +70,6 @@ class CanSNPer2(object):
 			os.makedirs(self.tmpdir)
 
 		self.logdir = kwargs["logdir"]
-		if not os.path.exists(self.logdir):
-			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
-			os.makedirs(self.logdir)
 
 		self.outdir = kwargs["outdir"]
 		if not os.path.exists(self.outdir):
