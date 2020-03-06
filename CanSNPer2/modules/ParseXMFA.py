@@ -25,11 +25,13 @@ class ParseXMFA(object):
 			 "C" : "G",
 			 "G" : "C",
 			 "-" : "-",
+			 "N" : "N"
 		}
 
 		'''Define all base variables'''
 		self.verbose = verbose
 		self.export = kwargs["export"]
+		self.called_snps = []
 
 		## as the snps are ordered according to the reference mauve positions they can be used sequentialy without search
 		'''SNPs will be stored as a sorted set containing (position, refBase, targetBase,SNPname)'''
@@ -53,6 +55,10 @@ class ParseXMFA(object):
 	def get_snps(self):
 		'''Return snps'''
 		return self.SNPS
+
+	def get_called_snps(self):
+		'''Return true snps'''
+		return self.called_snps
 
 	def reverse_complement(self,dna):
 		'''Complement and reverse DNA string'''
@@ -91,17 +97,21 @@ class ParseXMFA(object):
 			if i == snppos:                	## if current possition contains a snp
 				SNP[snp_id] = 0
 				_snp = target[ii]        	## get base in target sequence
-				if self.export:
-					'''Fetch information about snp to allow print to file'''
-					snpinfo = [snp_id,self.reference,str(snppos),rbase,tbase,_snp]
-					self.SNP_info.append(snpinfo)
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
 					_snp = self.rcDict[_snp]
+				if self.export:
+					'''Fetch information about snp to allow print to file'''
+					orig_snp_pos = str(self.snplist[self.current_snp][0])
+					snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
+					self.SNP_info.append(snpinfo)
 				if tbase == _snp:           ## SNP is confirmed to be Derived
 					SNP[snp_id] = 1 		## Derived SNP
+					self.called_snps.append(snp_id)
 				elif rbase == _snp:  		## SNP is confirmed to be ancestral
 					SNP[snp_id] = 2			## Ancestral SNP
+				elif _snp != "-" or _snp != "N":
+					SNP[snp_id] = 3			## Other base than ancestral or derived was found
 				self._next_pos()  ## SNP found get next
 				snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP
 		return SNP
@@ -182,5 +192,4 @@ if __name__=="__main__":
 	if args.verbose: print(args)
 	xmfa = ParseXMFA(verbose=args.verbose,mask=args.mask)
 	SNPS = xmfa.run(database=args.database, xmfa=args.xmfa, organism=args.organism,reference=args.reference)
-
-	print(SNPS)
+	logger.info(SNPS)

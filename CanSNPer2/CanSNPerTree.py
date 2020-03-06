@@ -54,10 +54,10 @@ required_arguments.add_argument('-db',  '--database', 	metavar='', 						help='C
 #parser.add_argument('--load_snp_annotation',metavar='', default=False, 			help="On initiation supply annotation for the snps")
 
 output_options = parser.add_argument_group("Output options")
-output_options.add_argument('-o', 	 '--outdir', 	metavar='', default="results",		help="Output directory")
-output_options.add_argument('--snpfile', 			metavar='', default="snpfile.txt",	help="specify name of export")
-output_options.add_argument('--save_tree',			type=bool, 	default=True, 			help='Save tree as PDF using ETE3 (default True)')
-output_options.add_argument('--export', 			action='store_true',				help="export a txt file with SNP results")
+output_options.add_argument('-o', 	 '--outdir', 	metavar='DIR', default="results",		help="Output directory")
+output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snpfile.txt",	help="specify name of export and include called snp output")
+output_options.add_argument('--save_tree',			metavar='PREFIX', type=bool, 	default=True, 			help='Save tree as PDF using ETE3 (default True)')
+output_options.add_argument('--export', 			action='store_false',				help="Don´t print output to file")
 
 run_options = parser.add_argument_group("Run options")
 run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
@@ -66,6 +66,7 @@ run_options.add_argument('--read_input', 		action='store_true', 				help="Select
 
 '''Remove the two below when script is complete, possibly keep as hidden for debug'''
 run_options.add_argument('--skip_mauve' ,		action='store_true', 				help="If xmfa files already exists skip step")
+run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 run_options.add_argument('--keep_temp',			action='store_true', 				help="keep temporary files")
 
 debugopts = parser.add_argument_group("Logging and debug options")

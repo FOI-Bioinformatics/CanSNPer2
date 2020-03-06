@@ -38,13 +38,9 @@ class MauveError(Error):
 	"""docstring for MauveE"""
 	pass
 
-
-
-
-
 class CanSNPer2(object):
 	"""docstring for CanSNPer2"""
-	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,**kwargs):
+	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,keep_going=False,**kwargs):
 		super(CanSNPer2, self).__init__()
 		self.query = query
 		self.verbose = verbose
@@ -87,6 +83,7 @@ class CanSNPer2(object):
 		self.skip_mauve = kwargs["skip_mauve"]
 		self.save_tree = kwargs["save_tree"]
 		self.keep_temp = kwargs["keep_temp"]
+		self.keep_going = keep_going
 
 	'''CanSNPer2 get functions'''
 
@@ -123,7 +120,7 @@ class CanSNPer2(object):
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
-			logger.info(command)            ## In verbose mode print the actual mauve command
+			logger.debug(command)            ## In verbose mode print the actual mauve command
 			p = Popen(command.split(" "),  stdout=PIPE, stderr=STDOUT)  ##Split command to avoid shell=True pipe stdout and stderr to stdout
 			log_f[p.stdout.fileno()] = logs[i]      ## Store the reference to the correct log file
 			processes.append(p)
@@ -137,15 +134,23 @@ class CanSNPer2(object):
 						print(p.stdout.read().decode('utf-8'),file=log)
 
 					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
-					if exitcode != 0:
+					if exitcode == 11:
+						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
+						logger.warning("This progressiveMauve error is showing up for bad genomes containing short repetative contigs ".format(exitcode=exitcode))
+					elif exitcode != 0:
+						if not self.keep_going:
+							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode))
 						error += 1
 						logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=log_f[p.stdout.fileno()],exitcode=exitcode))
 					## Remove process from container
 					processes.remove(p)
-		if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
-			logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
-			raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
-		return
+		if not self.keep_going:
+			if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
+				logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
+				raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
+		else:
+			return 1
+		return 0
 
 	def align(self, query, references=[]):
 		'''Align sequences and run mauve as subprocess'''
@@ -171,20 +176,22 @@ class CanSNPer2(object):
 			logs.append(log_file)               ## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
 		if not self.skip_mauve: ### If mauve command was already run before don´t run mauve return xmfa paths
-			self.run_mauve(commands,logs)
+			ret = self.run_mauve(commands,logs)
+			if ret != 0:
+				return []
 			logger.info("Alignments for {query} complete!".format(query=query))
 		return self.xmfa_files
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name):
+	def create_tree(self,SNPS,name,called_snps,save_tree):
 		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
 			and outputs a pdf file
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir)
-		newickTree.draw_ete3_tree(SNPS)
+		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree)
 		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
-		return
+		return final_snp
 
 	def read_query_textfile_input(self,query_file):
 		'''If query input is a text file, parse file'''
@@ -205,21 +212,19 @@ class CanSNPer2(object):
 	def parse_xmfa(XMFA_obj, xmfa_file, organism,results=[]):
 		'''Process xmfa file using ParseXMFA object'''
 		XMFA_obj.run(xmfa_file, organism)
-		snps = XMFA_obj.get_snps()
-		results.put(snps)
+		results.put(XMFA_obj.get_snps())
 		if self.export:
-			allSNP = XMFA_obj.get_snp_info()
-			results.put(allSNP)
+			export_results.put(XMFA_obj.get_snp_info())
+			called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
-	def find_snps(self,XMFA_obj,xmfa_file,organism,results=[],export_results=[]):
+	def find_snps(self,XMFA_obj,xmfa_file,organism,results=[],export_results=[],called_snps=[]):
 		'''Align sequences to references and return SNPs'''
 		XMFA_obj.run(xmfa_file, organism)
-		snps = XMFA_obj.get_snps()
-		results.put(snps)
+		results.put(XMFA_obj.get_snps())
 		if self.export:
-			allSNPs = XMFA_obj.get_snp_info()
-			export_results.put(allSNPs)
+			export_results.put(XMFA_obj.get_snp_info())
+			called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
 	def find_snps_multiproc(self,xmfa_obj,xmfa_files,organism,export=False):
@@ -227,22 +232,25 @@ class CanSNPer2(object):
 		jobs = []
 		SNPS = {}
 		SNP_info = []
+		called_snps = []
 		result_queue = Queue()
 		export_queue = Queue()
+		called_queue = Queue()
 		for xmfa_file in xmfa_files:
-			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file,organism ,result_queue,export_queue))
+			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file,organism ,result_queue,export_queue,called_queue))
 			p.start()
 			jobs.append(p)
 			sleep(0.05) ## A short sleep to make sure all threads do not initiate access to the database file simultanously
 		for job in jobs:
 			job.join()
 		for j in jobs:
-			## Merge SNP dictionaries
+			## Merge SNP result dictionaries
 			SNPS = dict(**SNPS, **result_queue.get())
 			if self.export:
 				### join SNP info files
 				SNP_info+= export_queue.get()
-		return SNPS,SNP_info
+				called_snps+=called_queue.get()
+		return SNPS,SNP_info,called_snps
 
 	def run(self,database,organism):
 		'''Run CanSNPer2'''
@@ -284,27 +292,48 @@ class CanSNPer2(object):
 				if skip_mauve parameter is True this the align function will only format xmfa file paths
 			'''
 			xmfa_files = self.align(q)
-
+			logger.debug(xmfa_files)
+			if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
+				logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
+				logger.warning("Mauve error skip {sample}".format(q))
+				continue
 			'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 			logger.info("Finding SNPs")
-			SNPS,SNP_info = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=self.export)
-
+			try:
+				SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
+			except FileNotFoundError:
+				logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+				continue
 			'''If file export is requested print the result for each SNP location to file'''
 			if self.export:
-				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=qfile.strip(".fa"),snpfile=self.snpfile)
+				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+				outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
 
 				logger.info("Printing SNP info to {file}".format(file=outputfile))
 
 				'''Print SNPs to tab separated file'''
-				with open(outputfile,"w") as snplist_out:
+				with open(outputfile,"w") as snplist_out, open(outputfile2, "w") as called_out:
 					print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=snplist_out)
+					print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
 					for snp in SNP_info:
+						if snp[0] in called_snps:
+							print("\t".join(snp),file=called_out)
 						print("\t".join(snp),file=snplist_out)
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
-			if self.save_tree:
-				self.create_tree(SNPS,self.query_name)
+			final_snp = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
+			if final_snp:
+				if self.export:
+					SNP = final_snp[1]
+					if not SNP:
+						SNP = "NA"
+					with open(outputfile2, "a") as called_out:
+						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
 
+					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]))
+			else:
+				logger.info("SNP could not be called for {query}".format(query=self.query_name))
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 

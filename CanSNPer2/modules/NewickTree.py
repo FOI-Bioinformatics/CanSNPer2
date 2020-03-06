@@ -47,6 +47,7 @@ class NewickNode(object):
 		self.__class__.print_opt = "newick" ## The default behaviour of this class is to print out a
 											## 		newick tree from the given node (as root)
 
+
 	def __str__(self):
 		'''The print function of NewickNode allows any node to print all its children in newick format or the lineage to root
 			There is also an option to print just the name of a node
@@ -95,18 +96,28 @@ class NewickTree(object):
 
 	"""
 
-	def __init__(self, database,name,outdir="./"):
+	def __init__(self, database,name="tree_file",outdir="./"):
 		super(NewickTree, self).__init__()
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
 		self.tree_file = "{outdir}/{name}_CanSNP_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
-
 		## Build the newick tree
 		self.newickTree = str(self.build_tree())
 
+		## Tree colors
+		self.snp_colors = {
+			"derived": "#7FC97F", 			## Red
+			"ancestral":"#984EA3" , 		## Green
+			"non_aligned": "#DDDDDD", 		## Grey
+			"other_base":"#377EB8"			## Blue
+		}
+
 	def __repr__(self):
 		return "NewickTree()"
+
+	def print(self):
+		print(self.newickTree)
 
 	def get_tree(self,table="tree"):
 		'''Function that returns the whole tree in the database the script expects
@@ -182,18 +193,10 @@ class NewickTree(object):
 				self.nodeDict["root"] = root									## Also add this reference as "root"
 				newickTree = root  												## The master parent will contain the full tree
 				continue
-
 			self.new_node(child,nodes,parent)
-			# try:
-			# 	node = NewickNode(child, nodes[child], self.nodeDict[parent])  		## this works also for root as root has itself as child
-			# except KeyError:
-			# 	logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add: {child}".format(parent=parent,child=child))
-			# self.nodeDict[child] = node  										## add a reference to the node so that children can be added
-			# pnode = self.nodeDict[parent]										## add child to the parent node
-			# pnode.add_child(node)
 		## The newickTree is the same as the master parent (containing the full tree, the root node is defined on row 135)
 		logger.debug("Tree complete, return newickTree")
-		logger.debug(newickTree)
+		#logger.debug(newickTree)
 		return newickTree
 
 	def CanSNPer_tree_layout(self,node):
@@ -202,7 +205,65 @@ class NewickTree(object):
 		if not node.is_root():
 			faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
 
-	def draw_ete3_tree(self,snplist):
+	def _confirm_path(self,dist_list,called_snps,snplist):
+		'''Confirm path of snps'''
+		try:
+			logger.debug("Confirm path")
+			count = 0
+			logger.info(dist_list)
+			dist,node = dist_list
+			while node:
+				if node.name == "ROOT":
+					pass
+				elif node.name in called_snps and snplist[node.name] != 2:
+					logger.debug("count1")
+					count +=1
+				else: ## If ancestral node is found in the path it means it is confirmed ancestral, therefore the current path is not correct!
+					count = 0
+				node = node.up
+			logger.debug(count)
+			quota = float(count)/dist
+			logger.info("Confirm quota: {quota}".format(quota=quota))
+			if quota > 0.7 and count >=3:
+				return True,count
+			return False,count
+		except KeyError as e:
+			logger.error("KeyError, {e}".format(e=e))
+			logger.critical("Could not confirm path!")
+
+	def _check_start(self,dlist):
+		'''Check so that the most distant node actually have support for at least three parents, else check the next deepest node'''
+		n=1
+		f_dist,f_node = dlist[n]
+		_dist,_node = dlist[n]
+		sublist = dlist[n:] ## remove first element
+		lcount = 0
+		logger.debug("Check which start node is the deepest with at least three available parents")
+		logger.debug(dlist)
+		for dist,node in sublist:
+			logger.debug("1-{dist}: {node}".format(dist=dist,node=node))
+			logger.debug("2-{dist}: {node}".format(dist=_dist,node=_node))
+			if _dist != dist+1:
+				logger.debug("Not equal test new")
+				lcount = 0
+				n+=1
+				f_dist,f_node = dist,node ## Final node
+				#sublist = dlist[n:] ## remove first n elements
+			elif lcount >= 3:
+				logger.debug("Final count ok return")
+				if n > 1:
+					sublist = dlist[n-1:] ## remove elements -1
+					logger.debug(sublist)
+				else:
+					sublist = dlist
+				return f_dist,f_node,sublist
+			else:
+				logger.debug("Parent ok continue")
+				lcount+=1
+			_dist,_node = dist,node
+		return False,False,dlist
+
+	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True):
 		'''Draws a phylogenetic tree using ETE3
 		Keyword arguments:
 		snplist -- a list of the SNP names, positions and state
@@ -212,11 +273,11 @@ class NewickTree(object):
 			tree = Tree(self.newickTree, format=1)
 		except:
 			logger.debug(self.newickTree)
-		tree_depth = int(tree.get_distance(tree.get_farthest_leaf()[0]))
+		farthest_leaf, tree_depth = tree.get_farthest_leaf()
 		for n in tree.traverse():
 			# The ancestral node is set to have a red colour
 			nstyle = NodeStyle()
-			nstyle["fgcolor"] = "#BE0508"
+			nstyle["fgcolor"] = self.snp_colors["ancestral"]
 			nstyle["size"] = 10
 			nstyle["vt_line_color"] = "#000000"
 			nstyle["hz_line_color"] = "#000000"
@@ -227,7 +288,7 @@ class NewickTree(object):
 			for snp in snplist.keys():
 				if n.name == snp and snplist[snp] == 0:
 					# If the SNP is missing due to a gap, make it grey
-					nstyle["fgcolor"] = "#DDDDDD"
+					nstyle["fgcolor"] = self.snp_colors["non_aligned"]
 					nstyle["size"] = 10
 					nstyle["vt_line_color"] = "#DDDDDD"
 					nstyle["hz_line_color"] = "#DDDDDD"
@@ -235,7 +296,15 @@ class NewickTree(object):
 					nstyle["hz_line_type"] = 1
 				elif n.name == snp and snplist[snp] == 1:
 					## If the SNP was derived make it green
-					nstyle["fgcolor"] = "#99FF66"
+					nstyle["fgcolor"] = self.snp_colors["derived"]
+					nstyle["size"] = 15
+					nstyle["vt_line_color"] = "#000000"
+					nstyle["hz_line_color"] = "#000000"
+					nstyle["vt_line_type"] = 0
+					nstyle["hz_line_type"] = 0
+				elif n.name == snp and snplist[snp] == 3:
+					## If the SNP was neither of ancestral or derived make it blue
+					nstyle["fgcolor"] = self.snp_colors["other_base"]
 					nstyle["size"] = 15
 					nstyle["vt_line_color"] = "#000000"
 					nstyle["hz_line_color"] = "#000000"
@@ -250,4 +319,48 @@ class NewickTree(object):
 		scale_factor = 500								# Tree scale factor, increases depth of tree to allow a higher resolution tree
 
 		## Render tree and save to pdf
-		tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
+		if save_tree:
+			tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
+		dlist = []
+		confirmed = [False,0]
+		logger.info("Called snps: {called}".format(called=called_snps))
+		if called_snps:
+			logger.info("Call SNPs!")
+			try:
+				troot = tree.get_tree_root()
+				for tsnp in called_snps:
+					try:
+						dist = tree.get_distance(tsnp,troot)
+						dlist.append([dist,tsnp])
+					except ValueError:
+						logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
+				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
+				logger.info(dlist)
+				if len(dlist) < 3: ## the number of SNPs found is too small to be valid,
+					logger.debug("The number of SNPs found is too small to be valid, Cannot call SNPs")
+					return False
+				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
+				dist,node,dlist = self._check_start(dlist)
+				if not node:
+					logger.info("No reasonable start node found!")
+					confirmed = [False,0]
+				else:#dist,node = dlist[0]
+					logger.info("Confirm path to deepest leaf!")
+					node = tree.search_nodes(name=node)[0]
+					### Loop different nodes
+					confirmed = self._confirm_path([dist,node],called_snps,snplist)
+					dlist[0].append(confirmed)
+				logger.debug(dlist)
+			except KeyError as e:
+				logger.error("KeyError, {e}".format(e=e))
+				logger.debug("called_snps failed!")
+				return False
+		else:
+			logger.debug("No snps were called!")
+			return False
+		if confirmed[0] and len(dlist) > 0:
+			return dlist[0]
+		elif not confirmed[0]:
+			return [dist, "snp series could not be confirmed ",confirmed]
+		else:
+			return [dist, "no snp called",confirmed]

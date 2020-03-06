@@ -10,9 +10,10 @@ import sqlite3
 import logging
 #logger = logging.getLogger(__name__)
 
-#from CanSNPer2.modules.ReadCanSNP_tables import ReadCanSNPer
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
+from flextaxd.modules.WriteTaxonomy import WriteTaxonomy
+from CanSNPer2.modules.NewickTree import NewickTree
 import flextaxd
 
 def get_read_modules():
@@ -26,7 +27,7 @@ def get_read_modules():
 	return read_modules
 
 supported_input = set(get_read_modules())
-supported_output = set(["cansnper","ncbi","tab","newick"])
+supported_output = set(["tab", "newick"])# set(["cansnper","ncbi","tab","newick"])
 
 
 import argparse
@@ -54,8 +55,11 @@ modify_database.add_argument('--replace',     action='store_true',              
 #modify_database.add_argument('--add_snp',     metavar='',                                 	help="Add a single snp,  parent,node,children")
 
 
-export_database = parser.add_argument_group("Export tree")
-export_database.add_argument('--export_tree', metavar='', choices=supported_output, 		help="Export tree to text format")
+export_database = parser.add_argument_group("Export database")
+export_database.add_argument('--export',  action='store_true',					help="Export database to text format (exports tree and annotation file)")
+export_database.add_argument('--export_format', metavar='', default='tab',  				choices=supported_output, help="Select output format [{format}]".format(format=", ".join(supported_output)))
+export_database.add_argument('-o', '--outdir', metavar='',									help="outdir for database export!")
+
 
 debugopts = parser.add_argument_group("Logging and debug options")
 debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp",						help="Specify tmp directory default (/tmp)")
@@ -108,6 +112,18 @@ logger = logging.getLogger(__name__)
 def main():
 	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
 	logger.debug(args)
+	if args.export: ## Dump database to file
+		if args.export_format == "newick":
+			logger.info("Export Newick tree!")
+			NT = NewickTree(args.database, outdir=args.outdir)
+			NT.print()
+		else:
+			logger.info("Export CanSNPer2 database")
+			WriteObj = WriteTaxonomy( args.outdir,database=args.database, minimal=True, separator="\t", prefix="annotation,snptree",desc=True)
+			WriteObj.set_order(True)
+			WriteObj.names()
+			WriteObj.nodes()
+		exit()
 	if not args.create:
 		'''This should be reprogrammed so that one can add annotations without supplying a mod file!'''
 		CanSNPer2Mod_DB = ModifyCanSNPer2Database(**vars(args))
