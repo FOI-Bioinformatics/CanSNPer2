@@ -96,6 +96,9 @@ if args.debug:
 elif args.verbose:
 	logval = args.verbose
 
+if args.skip_mauve and not args.keep_temp: ## Make sure keep temp is default if --skip_mauve is used
+	args.keep_temp = True
+
 from datetime import date,time
 t = time()
 today = date.today()
