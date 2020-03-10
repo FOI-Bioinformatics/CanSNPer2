@@ -19,9 +19,8 @@ python setup.py install
 * FlexTaxD
 * progressiveMauve
 
-## Usage
-
-### Run canSNPer
+## Quick start
+Run analysis using canSNPer2
 
 ```
 CanSNPer2 
@@ -35,103 +34,8 @@ CanSNPer2
     *.fa                                              ## Any number of fasta files to run
 ```
 
-### Modify database
 
-```
-CanSNPer2-database 
-    --database <path_to><database_name>               ## CanSNPer2 database file
-    --mod_file <path_to><modification tree (1)>       ## node updates (1)
-    --annotation <path_to><snp annotations (2)>       ## snp annotations (2)
-    --log database/logs                               ## log directory
-    --parent "A/M.1"                                  ## If replacing a branch add parent and replace
-    --replace                                         ## Flag to replace a whole branch from --parent
-```
-
-### Create a custom database
-
-```
-CanSNPer2-database 
-    --database <path_to><database_name>               ## CanSNPer2 database file 
-    --tree <CanSNPer[1/2]_tree file>                  ## Format (1) or cansnper1 formatted file
-    --annotation <CanSNPer[1/2]_snpfile>              ## snp annotations (2)
-    --reference <CanSNPer2_genomesfile>               ## Annotation of genome references to which snps are annotated (4)
-    --source_type CanSNPer(if CanSNPer1)              ## If input is formatted according to cansnper1
-    --create 
-    --log <path to log folder>
-```
-
-
-### Download references
-
-```
-CanSNPer2-download 
-    --database <path_to><database_name>               ## CanSNPer2 database file (must have genome annotation loaded)
-    --source genbank                                  ## Source refseq or genbank
-    --outdir references                               ## reference directory (default ./reference)
-```
-
-## CanSNPer2 source file format.
-
-
-### Modify database
-
-1) Tree file (for updating the database)
-
-The CanSNPer2 tree file must contain two columns with child and parent
-
-| header | row |
-| --- | --- |
-| child               |   B.6 |
-| parent              |   B.2 |
-| rank                |   species    |
-
-
-2) snp annotation file
-
-The CanSNPer2 snpfile contains all four columns defining a SNP as well as two annotations
-to the published paper (reference) and the genome_id specified in the genome file.
-In difference to canSNPer 1 the species column is not required
-as different species are expected to be placed in different databases,
-(or specified with the --organism parameter might be depricated)
-
-| header | row |
-| --- | --- |
-| snp_id                |   B.2 |
-| strain                |  francisella |
-| reference             |   Birdsell2014 |
-| genome                | FSC200 |
-| position              |   \<pos\> |
-| ancestral_base        |   A |
-| derived_base          |   T |
-
-### Create database
-
-3) Genome file
-
-The CanSNPer2 genomes file contains information about the reference sequences,
-The file has 7 columns. However only the first column is nessesary for running CanSNPer,
-But then the automatic download script won't work and the correct reference sequences
-has to be supplied manually. Observe that the first row must contain headers
-
-| header | row |
-| ------- | -------- |
-| genome_id          |   OSU18 |
-| strain             |   OSU18 |
-| refseq_id          |   GCA_000014605.1 |
-| genbank_id         |   GCF_000014605.1 |
-| assembly_name      |   ASM1460v1 |
-| refseq_sequence    |   NC_008369.1 |
-| genbank_sequence   |   CP000437.1 |
-
-4) genome reference file
-
-| header | row |
-| --- | --- |
-| genome                |   OSU18 |
-| strain                |  OSU18 |
-| genbank_id            |   GCA_000014605.1 |
-| refseq_id             | GCF_000014605.1 |
-| assembly_name         |   ASM1460v1 |
+Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki). 
 
 About this software
 ===================
