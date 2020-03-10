@@ -5,7 +5,7 @@ setup(
     name="CanSNPer2",
     version=__version__,
     url="https://git-int.foi.se/bioinfo/cansnper2",
-    description="CanSNPer2: A toolkit for SNP-typing using NGS data.",
+    description="CanSNPer2: A toolkit for SNP-typing bacterial genomes.",
     license="GPLv3'",
 
     # Author details
