@@ -5,7 +5,7 @@ setup(
     name="CanSNPer2",
     version=__version__,
     url="https://git-int.foi.se/bioinfo/cansnper2",
-    description="CanSNPer2: A toolkit for SNP-typing using NGS data.",
+    description="CanSNPer2: A toolkit for SNP-typing bacterial genomes.",
     license="GPLv3'",
 
     # Author details
@@ -22,6 +22,6 @@ setup(
     packages=find_packages(exclude=['contrib', 'docs', 'test*']),
     #py_modules=['CanSNPer2.modules.ParseXMFA',"CanSNPer2.modules.DatabaseConnection","CanSNPer2.modules.CanSNPer2","CanSNPer2.modules.NewickTree"],
     entry_points={'console_scripts': [  'CanSNPer2=CanSNPer2.CanSNPerTree:main',
-                                        'CanSNPer2-database=CanSNPer2.SNPDatabase:main',## Moved to FlexTaxD v0.1.45
+                                        'CanSNPer2-database=CanSNPer2.SNPDatabase:main',
                                         'CanSNPer2-download=CanSNPer2.DownloadGenomes:main'
                                         ]})
