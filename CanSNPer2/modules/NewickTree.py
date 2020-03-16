@@ -233,18 +233,19 @@ class NewickTree(object):
 
 	def _check_start(self,dlist):
 		'''Check so that the most distant node actually have support for at least three parents, else check the next deepest node'''
-		n=1
+		n=0
 		f_dist,f_node = dlist[n]
 		_dist,_node = dlist[n]
-		sublist = dlist[n:] ## remove first element
+		sublist = dlist[n:] ## remove first element si that first node is child of the first object in the list
 		lcount = 0
 		logger.debug("Check which start node is the deepest with at least three available parents")
 		logger.debug(dlist)
+		logger.debug(sublist)
 		for dist,node in sublist:
 			logger.debug("1-{dist}: {node}".format(dist=dist,node=node))
 			logger.debug("2-{dist}: {node}".format(dist=_dist,node=_node))
-			if _dist != dist+1:
-				logger.debug("Not equal test new")
+			if (_dist != dist+1) and (_dist != dist):
+				logger.debug("Leaf does not have parent support go to next leaf!")
 				lcount = 0
 				n+=1
 				f_dist,f_node = dist,node ## Final node
