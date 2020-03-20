@@ -319,15 +319,17 @@ class CanSNPer2(object):
 						print("\t".join(snp),file=snplist_out)
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
-			final_snp = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
+			final_snp,msg = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
 			if final_snp:
 				SNP = final_snp[1]
 				if not SNP:
 					SNP = "NA"
+					msg = msg
 				if self.export:
+					outstring = "Final SNP: {snp} found/depth: {found}/{depth} {msg}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1],msg=msg)
 					with open(outputfile2, "a") as called_out:
-						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
-				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=final_snp[1],depth=int(final_snp[0]),found=final_snp[2][1]))
+						print(outstring,file=called_out)
+				logger.info(outstring)
 				print("{SNP}\t{query}".format(query=qfile, SNP=SNP))
 			else:
 				logger.info("SNP could not be called for {query}".format(query=self.query_name))

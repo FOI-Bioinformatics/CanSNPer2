@@ -329,39 +329,51 @@ class NewickTree(object):
 			logger.info("Call SNPs!")
 			try:
 				troot = tree.get_tree_root()
+				'''Calculate the distance from all nodes to the root'''
 				for tsnp in called_snps:
 					try:
 						dist = tree.get_distance(tsnp,troot)
 						dlist.append([dist,tsnp])
 					except ValueError:
-						logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
+						if tsnp == "T/N.1":
+							dlist.append([0,tsnp])
+						else:
+							logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
+				## Sort the list of distances from deepest
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
 				logger.info(dlist)
+
 				if len(dlist) < 3: ## the number of SNPs found is too small to be valid,
-					logger.debug("The number of SNPs found is too small to be valid, Cannot call SNPs")
-					return False
+					msg = "The number of SNPs found is too small (min 3), Cannot call SNPs."
+					logger.debug(msg)
+					return False,msg
 				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
 				dist,node,dlist = self._check_start(dlist)
 				if not node:
-					logger.info("No reasonable start node found!")
-					confirmed = [False,0]
+					msg = "No valid start SNP found."
+					logger.info(msg)
+					return False,msg
 				else:#dist,node = dlist[0]
-					logger.info("Confirm path to deepest leaf!")
+					logger.debug("Calling SNP")
 					node = tree.search_nodes(name=node)[0]
 					### Loop different nodes
 					confirmed = self._confirm_path([dist,node],called_snps,snplist)
 					dlist[0].append(confirmed)
+					msg = "Final SNP called."
+					logger.info(msg)
 				logger.debug(dlist)
 			except KeyError as e:
 				logger.error("KeyError, {e}".format(e=e))
-				logger.debug("called_snps failed!")
-				return False
+				msg = "called_snps function failed, KeyError {e}".format(e=e)
+				logger.debug(msg)
+				return False,msg
 		else:
-			logger.debug("No snps were called!")
-			return False
+			msg = "No SNPs were called."
+			logger.debug(msg)
+			return False,msg
 		if confirmed[0] and len(dlist) > 0:
-			return dlist[0]
+			return dlist[0],msg
 		elif not confirmed[0]:
-			return [dist, "snp series could not be confirmed ",confirmed]
+			return [dist, msg,confirmed],msg
 		else:
-			return [dist, "no snp called",confirmed]
+			return [dist, msg,confirmed],msg
