@@ -28,7 +28,7 @@ CanSNPer2 sample.fasta --database francisella_tularensis.db -o results --save_tr
 ```
 references.txt
 ```
-#genome strain  genbank_id      refseq_id       assembly_name
+genome strain  genbank_id      refseq_id       assembly_name
 OSU18   OSU18   GCA_000014605.1 GCF_000014605.1 ASM1460v1
 FSC200  FSC200  GCA_000168775.2 GCF_000168775.2 ASM16877v2
 FTNF002-00      FTNF002-00      GCA_000017785.1 GCF_000017785.1 ASM1778v1
