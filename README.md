@@ -60,15 +60,40 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-CanSNPer2 
-    --database <path_to><database_name>               ## CanSNPer2 database file
-    --refdir test/references/                         ## directory where references are located if not present see CanSNPer2-download
-    --export (export snpfile)                         ## output snpfile
-    --snpfile snptest2.txt                            ## name of snp <tab delim> output
-    -o results                                        ## output directory
-    --save_tree <prefix>                              ## prefix for CanSNPer2 tree output (pdf)
-    --tmpdir /tmp/                                    ## Select tempdir default global tmp
-    *.fa                                              ## Any number of fasta files to run
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--snpfile FILENAME] [--save_tree] [--no_export] [--refdir] [--workdir] [--read_input] [--skip_mauve]
+                 [--keep_going] [--keep_temp] [--tmpdir] [--logdir] [--verbose] [--debug] [--supress] [--organism]
+                 [query [query ...]]
+
+CanSNPer2
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --organism            Specify organism
+
+Required arguments:
+  query                 File(s) to align (fasta)
+  -db , --database      CanSNP database
+
+Output options:
+  -o DIR, --outdir DIR  Output directory
+  --snpfile FILENAME    specify name of export and include called snp output
+  --save_tree           Save tree as PDF using ETE3 (default False)
+  --no_export           Add argument to stop default snpfile and snpcalled file output.
+
+Run options:
+  --refdir              Specify reference directory
+  --workdir             Change workdir default (./)
+  --read_input          Select if input is reads not fasta
+  --skip_mauve          If xmfa files already exists skip step
+  --keep_going          If Error occurs, continue with the rest of samples
+  --keep_temp           keep temporary files
+
+Logging and debug options:
+  --tmpdir              Specify reference directory
+  --logdir              Specify log directory
+  --verbose             Verbose output
+  --debug               Debug output
+  --supress             Supress warnings
 ```
 
 
