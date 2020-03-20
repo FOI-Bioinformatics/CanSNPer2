@@ -20,8 +20,45 @@ python setup.py install
 * progressiveMauve
 
 ## Quick start
-Run analysis using canSNPer2
+Create database, download references and run CanSNPer2
+```sh
+CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
+CanSNPer2-download --database francisella_tularensis.db -o references
+CanSNPer2 sample.fasta -db francisella_tularensis.db -o results --save_tree --refdir references --snpfile 200320
+```
+references.txt
+```
+#genome strain  genbank_id      refseq_id       assembly_name
+OSU18   OSU18   GCA_000014605.1 GCF_000014605.1 ASM1460v1
+FSC200  FSC200  GCA_000168775.2 GCF_000168775.2 ASM16877v2
+FTNF002-00      FTNF002-00      GCA_000017785.1 GCF_000017785.1 ASM1778v1
+LVS     LVS     GCA_000009245.1 GCF_000009245.1 ASM924v1
+SCHUS4.2        SCHUS4  GCA_000008985.1 GCF_000008985.1 ASM898v1
 
+```
+snps.txt (NEW headerline)
+```
+snp_id	strain	reference	genome	position	derived_base	ancestral_base
+T/N.1	francisella	Svensson2009	SCHUS4.2	83976	A	G
+T.1	francisella	Svensson2009	SCHUS4.2	1165688	G	A
+M.1	francisella	Vogler2009	SCHUS4.2	75124	T	C
+A/M.1	francisella	Vogler2009	SCHUS4.2	1491914	A	G
+A.1	francisella	Vogler2009	SCHUS4.2	397639	T	C
+B.1	francisella	Birdsell2014	OSU18	1710718	T	C
+...
+```
+tree.txt
+```
+T/N.1
+T/N.1	T.1		
+T/N.1	T.1	B.1
+T/N.1	T.1	A/M.1
+T/N.1	T.1	A/M.1	A.1
+T/N.1	T.1	A/M.1	M.1
+...
+
+```
+CanSNPer2 help
 ```
 CanSNPer2 
     --database <path_to><database_name>               ## CanSNPer2 database file
