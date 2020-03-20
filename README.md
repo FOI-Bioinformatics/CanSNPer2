@@ -24,7 +24,7 @@ Create database, download references and run CanSNPer2
 ```sh
 CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
 CanSNPer2-download --database francisella_tularensis.db -o references
-CanSNPer2 sample.fasta -db francisella_tularensis.db -o results --save_tree --refdir references --snpfile 200320
+CanSNPer2 sample.fasta --database francisella_tularensis.db -o results --save_tree --refdir references --snpfile 200320
 ```
 references.txt
 ```
