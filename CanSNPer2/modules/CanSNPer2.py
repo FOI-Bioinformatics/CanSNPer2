@@ -321,7 +321,7 @@ class CanSNPer2(object):
 						print("\t".join(snp),file=snplist_out)
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
-			final_snp = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
+			final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
 			if self.export:
 				SNP = final_snp[1]
 				if not SNP:

@@ -236,7 +236,8 @@ class NewickTree(object):
 		n=0
 		f_dist,f_node = dlist[n]
 		_dist,_node = dlist[n]
-		sublist = dlist[n:] ## remove first element si that first node is child of the first object in the list
+		sublist = dlist[n:] ## remove first element is that first node is child of the first object in the list
+		n+=1
 		lcount = 0
 		logger.debug("Check which start node is the deepest with at least three available parents")
 		logger.debug(dlist)
@@ -252,7 +253,7 @@ class NewickTree(object):
 				#sublist = dlist[n:] ## remove first n elements
 			elif lcount >= 3:
 				logger.debug("Final count ok return")
-				if n > 1:
+				if n >= 1:
 					sublist = dlist[n-1:] ## remove elements -1
 					logger.debug(sublist)
 				else:
@@ -324,6 +325,7 @@ class NewickTree(object):
 			tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
 		dlist = []
 		confirmed = [False,0]
+		final = "NA"
 		logger.info("Called snps: {called}".format(called=called_snps))
 		if called_snps:
 			logger.info("Call SNPs!")
@@ -349,6 +351,7 @@ class NewickTree(object):
 					return False,msg
 				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
 				dist,node,dlist = self._check_start(dlist)
+				print(dlist)
 				if not node:
 					msg = "No valid start SNP found."
 					logger.info(msg)
@@ -359,6 +362,7 @@ class NewickTree(object):
 					### Loop different nodes
 					confirmed = self._confirm_path([dist,node],called_snps,snplist)
 					dlist[0].append(confirmed)
+					final = node.name.strip()
 					msg = "Final SNP called."
 					logger.info(msg)
 				logger.debug(dlist)
@@ -374,6 +378,6 @@ class NewickTree(object):
 		if confirmed[0] and len(dlist) > 0:
 			return dlist[0],msg
 		elif not confirmed[0]:
-			return [dist, msg,confirmed],msg
+			return dlist[0],msg
 		else:
-			return [dist, msg,confirmed],msg
+			return dlist[0],msg
