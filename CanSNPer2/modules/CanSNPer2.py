@@ -329,11 +329,14 @@ class CanSNPer2(object):
 						SNP = "NA"
 					with open(outputfile2, "a") as called_out:
 						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
-
 					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 			else:
+				if self.export:
+					with open(outputfile2, "a") as called_out:
+						print("No SNP could be confirmed!", file=called_out)
 				logger.info(message)
+
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 
