@@ -360,10 +360,11 @@ class NewickTree(object):
 					node = tree.search_nodes(name=node)[0]
 					### Loop different nodes
 					confirmed = self._confirm_path([dist,node],called_snps,snplist)
-					dlist[0].append(confirmed)
-					final = node.name.strip()
-					msg = "Final SNP called."
-					logger.info(msg)
+					if confirmed[0]:
+						dlist[0].append(confirmed)
+						final = node.name.strip()
+						msg = "Final SNP called."
+						logger.info(msg)
 				logger.debug(dlist)
 			except KeyError as e:
 				logger.error("KeyError, {e}".format(e=e))
