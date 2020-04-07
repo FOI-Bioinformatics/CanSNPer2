@@ -334,7 +334,7 @@ class CanSNPer2(object):
 			else:
 				if self.export:
 					with open(outputfile2, "a") as called_out:
-						print("No SNP could be confirmed!", file=called_out)
+						print("Final SNP: No SNP could be confirmed!", file=called_out)
 				logger.info(message)
 
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
