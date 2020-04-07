@@ -322,15 +322,18 @@ class CanSNPer2(object):
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 			final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
-			if self.export:
-				SNP = final_snp[1]
-				if not final_snp[2][0]:  ## if snp was never confirmed print NA
-					SNP = "NA"
-				with open(outputfile2, "a") as called_out:
-					print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
+			if final_snp:
+				if self.export:
+					SNP = final_snp[1]
+					if not final_snp[2][0]:  ## if snp was never confirmed print NA
+						SNP = "NA"
+					with open(outputfile2, "a") as called_out:
+						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
 
-				print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
-			logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
+					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
+			else:
+				logger.info(message)
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 

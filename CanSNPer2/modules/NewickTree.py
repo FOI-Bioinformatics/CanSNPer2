@@ -377,9 +377,4 @@ class NewickTree(object):
 			msg = "No SNPs were called."
 			logger.debug(msg)
 			return False,msg
-		if confirmed[0] and len(dlist) > 0:
-			return dlist[0],msg
-		elif not confirmed[0]:
-			return dlist[0],msg
-		else:
-			return dlist[0],msg
+		return dlist[0],msg
