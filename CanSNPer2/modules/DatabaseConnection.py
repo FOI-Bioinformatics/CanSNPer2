@@ -343,6 +343,7 @@ class XMFAFunctions(DatabaseConnection):
 	"""CanSNPerdb database function class contains multiple additional database
 		functions to simplify data access related to the website, its a subclass of DatabaseConnection"""
 	def __init__(self, database, verbose=False):
+		import time
 		super().__init__(database,verbose)
 		logging.info("Load XMFAFunctions")
 		### store DatabaseConnection object reference
@@ -350,6 +351,13 @@ class XMFAFunctions(DatabaseConnection):
 	'''
 		XMFAfunctions
 	'''
+	def get_results(self,snp_string,reference):
+		SNPs = {}
+		res = self.query(snp_string, (reference,),getres=True)
+		for strain, pos,tbase,rbase,SNP in res.fetchall():
+			SNPs[pos] = tuple([pos,rbase, tbase,SNP])
+		return SNPs
+
 	def get_snps(self, organism,reference="SCHUS4.2"):
 		'''Returns a list of all SNPs and their positions.
 		Keyword arguments:
@@ -357,22 +365,28 @@ class XMFAFunctions(DatabaseConnection):
 		returns: results as a dictionary with tuple SNP for each position {pos: (pos, refBase, TargetBase, SNPid)}
 				 and a list of positions sorted ASC
 		'''
-		SNPs = {}
-		# res = self.query("""SELECT Strain, Position, Derived_base, Ancestral_base, SNP
-		# 								FROM {organism}
-		# 								WHERE Strain = ?
-		# 							""".format(organism=organism), (reference,))
 		snp_string = """SELECT genome, position, derived_base, ancestral_base, snp_id
 										FROM snp_annotation
 										LEFT JOIN snp_references on (snp_references.id = snp_annotation.genome_i)
 										WHERE genome = ?
 									"""
-		res = self.query(snp_string, (reference,),getres=True)
-		for strain, pos,tbase,rbase,SNP in res.fetchall():
-			SNPs[pos] = tuple([pos,rbase, tbase,SNP])
+		# res = self.query(snp_string, (reference,),getres=True)
+		# for strain, pos,tbase,rbase,SNP in res.fetchall():
+		# 	SNPs[pos] = tuple([pos,rbase, tbase,SNP])
+		SNPs = self.get_results(snp_string,reference)
 		if len(SNPs) == 0:
-			logger.debug(snp_string)
-			raise ValueError("No SNP's for {reference} was found in the database".format(reference=reference))
+			logger.debug("Connection Error no SNPs found in database, retry?")
+			self.disconnect()  ## Disconnect from database
+			time.sleep(1)  ## Sleep one second
+			logger.debug("Reconnect!") ## Reconnect to database
+			self.conn = self.connect(self.database)
+			self.cursor = self.create_cursor(self.conn)
+			### Try to fetch results again
+			SNPs = self.get_results(snp_string,reference)
+			if len(SNPs) == 0:
+				logger.error("No SNPs could be found in database (after one retry!) check your database!")
+				logger.debug(snp_string)
+				raise ValueError("No SNP's was found in the database for reference: {reference}".format(reference=reference))
 		snp_positions = list(SNPs.keys())
 		snp_positions.sort()
 		return SNPs,snp_positions

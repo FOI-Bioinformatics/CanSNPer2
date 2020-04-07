@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-from CanSNPer2.modules.CanSNPer2 import __version__
+from CanSNPer2.CanSNPerTree import __version__
 
 setup(
     name="CanSNPer2",
