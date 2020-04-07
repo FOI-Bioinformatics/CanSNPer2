@@ -189,7 +189,7 @@ if __name__=="__main__":
 
 	args = parser.parse_args()
 
-	if args.verbose: print(args)
+	logger.debug(args)
 	xmfa = ParseXMFA(verbose=args.verbose,mask=args.mask)
 	SNPS = xmfa.run(database=args.database, xmfa=args.xmfa, organism=args.organism,reference=args.reference)
 	logger.info(SNPS)
