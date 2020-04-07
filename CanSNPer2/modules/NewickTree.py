@@ -351,7 +351,6 @@ class NewickTree(object):
 					return False,msg
 				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
 				dist,node,dlist = self._check_start(dlist)
-				print(dlist)
 				if not node:
 					msg = "No valid start SNP found."
 					logger.info(msg)
