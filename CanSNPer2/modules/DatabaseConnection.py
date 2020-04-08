@@ -19,6 +19,7 @@ __status__ = "Production"
 __partof__ = "CanSNPer2"
 
 import logging
+import time
 logger = logging.getLogger(__name__)
 
 class ConnectionError(Exception):
@@ -343,7 +344,6 @@ class XMFAFunctions(DatabaseConnection):
 	"""CanSNPerdb database function class contains multiple additional database
 		functions to simplify data access related to the website, its a subclass of DatabaseConnection"""
 	def __init__(self, database, verbose=False):
-		import time
 		super().__init__(database,verbose)
 		logging.info("Load XMFAFunctions")
 		### store DatabaseConnection object reference
