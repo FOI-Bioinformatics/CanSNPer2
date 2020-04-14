@@ -19,7 +19,6 @@ __status__ = "Production"
 __partof__ = "CanSNPer2"
 
 import logging
-import time
 logger = logging.getLogger(__name__)
 
 class ConnectionError(Exception):
@@ -344,6 +343,7 @@ class XMFAFunctions(DatabaseConnection):
 	"""CanSNPerdb database function class contains multiple additional database
 		functions to simplify data access related to the website, its a subclass of DatabaseConnection"""
 	def __init__(self, database, verbose=False):
+		import time
 		super().__init__(database,verbose)
 		logging.info("Load XMFAFunctions")
 		### store DatabaseConnection object reference
@@ -375,18 +375,9 @@ class XMFAFunctions(DatabaseConnection):
 		# 	SNPs[pos] = tuple([pos,rbase, tbase,SNP])
 		SNPs = self.get_results(snp_string,reference)
 		if len(SNPs) == 0:
-			logger.debug("Connection Error no SNPs found in database, retry?")
-			self.disconnect()  ## Disconnect from database
-			time.sleep(1)  ## Sleep one second
-			logger.debug("Reconnect!") ## Reconnect to database
-			self.conn = self.connect(self.database)
-			self.cursor = self.create_cursor(self.conn)
-			### Try to fetch results again
-			SNPs = self.get_results(snp_string,reference)
-			if len(SNPs) == 0:
-				logger.error("No SNPs could be found in database (after one retry!) check your database!")
-				logger.debug(snp_string)
-				raise ValueError("No SNP's was found in the database for reference: {reference}".format(reference=reference))
+			logger.error("No SNPs could be found in database check your database connection!")
+			logger.debug(snp_string)
+			raise ValueError("No SNP's was found in the database for reference: {reference}".format(reference=reference))
 		snp_positions = list(SNPs.keys())
 		snp_positions.sort()
 		return SNPs,snp_positions

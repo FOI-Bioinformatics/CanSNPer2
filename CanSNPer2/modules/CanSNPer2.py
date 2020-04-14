@@ -313,6 +313,7 @@ class CanSNPer2(object):
 						print("\t".join(snp),file=snplist_out)
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
+			SNP = "NA" ## Default message if SNP cannot be confirmed
 			final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
 			if final_snp:
 				if self.export:
@@ -321,14 +322,13 @@ class CanSNPer2(object):
 						SNP = "NA"
 					with open(outputfile2, "a") as called_out:
 						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
-					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 			else:
 				if self.export:
 					with open(outputfile2, "a") as called_out:
-						print("Final SNP: No SNP could be confirmed!", file=called_out)
+						print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 				logger.info(message)
-
+			print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 			'''Clean references to aligned xmfa files between queries if several was supplied'''
 			self.xmfa_files = []
 
