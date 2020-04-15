@@ -69,6 +69,7 @@ run_options.add_argument('--min_required_hits', type=int, default=3, 				help="M
 run_options.add_argument('--skip_mauve' ,		action='store_true', 				help="If xmfa files already exists skip step")
 run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 run_options.add_argument('--keep_temp',			action='store_true', 				help="keep temporary files")
+run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
 
 debugopts = parser.add_argument_group("Logging and debug options")
 debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify reference directory")
@@ -153,7 +154,8 @@ def main():
 									export=args.no_export,
 									snpfile=args.snpfile,
 									database=args.database,
-									min_required_hits=args.min_required_hits
+									min_required_hits=args.min_required_hits,
+									rerun=args.rerun
 									#initiate=args.initiate,
 									#annotation=args.load_snp_annotation,
 					)

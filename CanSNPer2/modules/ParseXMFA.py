@@ -150,12 +150,15 @@ class ParseXMFA(object):
 		'''read xmfa file'''
 		if not f:
 			f = self.xmfa
-		with open(f) as fin:
-			#### Each aligned sequence part is separated by = sign, so start with splitting the sequences into pairs of sequence
-			seqPairs = fin.read().strip().split("=")
-			for seqP in seqPairs:
-				### Join together all SNPs found in data
-				self.SNPS = dict(**self.SNPS, **self.read_sequence(seqP))
+		try:
+			with open(f) as fin:
+				#### Each aligned sequence part is separated by = sign, so start with splitting the sequences into pairs of sequence
+				seqPairs = fin.read().strip().split("=")
+				for seqP in seqPairs:
+					### Join together all SNPs found in data
+					self.SNPS = dict(**self.SNPS, **self.read_sequence(seqP))
+		except FileNotFoundError:
+			return False
 		return self.SNPS
 
 	def run(self, xmfa, organism,reference=False,database=False):
