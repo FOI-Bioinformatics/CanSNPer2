@@ -253,7 +253,6 @@ class CanSNPer2(object):
 
 	def run(self,database,organism):
 		'''Run CanSNPer2'''
-		#print("Running CanSNPer2 version-{version}".format(version=__version__))
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
 
 		'''Read query input file if a txt file is supplied insead of fasta files'''

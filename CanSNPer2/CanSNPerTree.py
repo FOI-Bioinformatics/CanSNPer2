@@ -156,6 +156,7 @@ def main():
 									database=args.database,
 									min_required_hits=args.min_required_hits,
 									rerun=args.rerun
+	)
 
 	'''Run CanSNPer2'''
 	CanSNPer2_obj.run(database=args.database,organism=args.organism)
