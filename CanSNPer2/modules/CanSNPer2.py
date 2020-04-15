@@ -30,6 +30,10 @@ class MauveError(Error):
 	"""docstring for MauveE"""
 	pass
 
+class CanSNPer2Error(Error):
+	"""docstring for MauveE"""
+	pass
+
 class CanSNPer2(object):
 	"""docstring for CanSNPer2"""
 	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,keep_going=False,**kwargs):
@@ -43,6 +47,8 @@ class CanSNPer2(object):
 		self.snpfile = kwargs["snpfile"]
 		self.database = database
 		self.min_required_hits = kwargs["min_required_hits"]
+		self.rerun = kwargs["rerun"]
+
 		#self.initiate = kwargs["initiate"]
 		#self.annotation = kwargs["annotation"]
 
@@ -273,65 +279,75 @@ class CanSNPer2(object):
 		'''Walk through the list of queries supplied'''
 		if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
 		for q in self.query:            ## For each query file_path
-			qfile = q.rsplit("/")[-1]   ## Remove path from query name
-			self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
-
-			logger.info("Running CanSNPer2 on {query}".format(query=qfile))
-
-			if not self.skip_mauve: ### If mauve command was already run before skip step
-				logger.info("Run mauve alignments")
-
-			'''For each query fasta align to all CanSNP references the reference folder
-				if skip_mauve parameter is True this the align function will only format xmfa file paths
-			'''
-			xmfa_files = self.align(q)
-			logger.debug(xmfa_files)
-			if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
-				logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
-				logger.warning("Mauve error skip {sample}".format(q))
-				continue
-			'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
-			logger.info("Finding SNPs")
 			try:
-				SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
-			except FileNotFoundError:
-				logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
-				continue
-			'''If file export is requested print the result for each SNP location to file'''
-			if self.export:
+				qfile = q.rsplit("/")[-1]   ## Remove path from query name
+				self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
 				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
-				outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+				if os.path.exists(outputfile) and not self.rerun:
+					logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
+					continue
+				logger.info("Running CanSNPer2 on {query}".format(query=qfile))
+				if not self.skip_mauve: ### If mauve command was already run before skip step
+					logger.info("Run mauve alignments")
 
-				logger.info("Printing SNP info to {file}".format(file=outputfile))
-
-				'''Print SNPs to tab separated file'''
-				with open(outputfile,"w") as snplist_out, open(outputfile2, "w") as called_out:
-					print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=snplist_out)
-					print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
-					for snp in SNP_info:
-						if snp[0] in called_snps:
-							print("\t".join(snp),file=called_out)
-						print("\t".join(snp),file=snplist_out)
-
-			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
-			SNP = "NA" ## Default message if SNP cannot be confirmed
-			final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits)
-			if final_snp:
+				'''For each query fasta align to all CanSNP references the reference folder
+					if skip_mauve parameter is True this the align function will only format xmfa file paths
+				'''
+				xmfa_files = self.align(q)
+				logger.debug(xmfa_files)
+				if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
+					logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
+					logger.warning("Mauve error skip {sample}".format(q))
+					self.xmfa_files = []
+					continue
+				'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
+				logger.info("Finding SNPs")
+				try:
+					SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
+				except FileNotFoundError:
+					logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+					self.xmfa_files = []
+					continue
+				'''If file export is requested print the result for each SNP location to file'''
 				if self.export:
-					SNP = final_snp[1]
-					if not final_snp[2][0]:  ## if snp was never confirmed print NA
-						SNP = "NA"
-					with open(outputfile2, "a") as called_out:
-						print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
-				logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
-			else:
-				if self.export:
-					with open(outputfile2, "a") as called_out:
-						print("Final SNP: {snp}".format(snp=SNP), file=called_out)
-				logger.info(message)
-			print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
-			'''Clean references to aligned xmfa files between queries if several was supplied'''
-			self.xmfa_files = []
+					outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+					outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+
+					logger.info("Printing SNP info to {file}".format(file=outputfile))
+
+					'''Print SNPs to tab separated file'''
+					with open(outputfile,"w") as snplist_out, open(outputfile2, "w") as called_out:
+						print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=snplist_out)
+						print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
+						for snp in SNP_info:
+							if snp[0] in called_snps:
+								print("\t".join(snp),file=called_out)
+							print("\t".join(snp),file=snplist_out)
+
+				'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
+				SNP = "NA" ## Default message if SNP cannot be confirmed
+				final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits)
+				if final_snp:
+					if self.export:
+						SNP = final_snp[1]
+						if not final_snp[2][0]:  ## if snp was never confirmed print NA
+							SNP = "NA"
+						with open(outputfile2, "a") as called_out:
+							print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
+					logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
+				else:
+					if self.export:
+						with open(outputfile2, "a") as called_out:
+							print("Final SNP: {snp}".format(snp=SNP), file=called_out)
+					logger.info(message)
+				print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+				'''Clean references to aligned xmfa files between queries if several was supplied'''
+				self.xmfa_files = []
+			except:
+				if not self.keep_going:
+					raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)")
+				logger.debug("An error occured during processing of {file}".format(file=self.query_name))
+
 
 		'''Finally clean up temporary folder when all alignments and trees has been printed!'''
 		if not self.keep_temp: ## if keep temp is turned on do not remove away alignments
