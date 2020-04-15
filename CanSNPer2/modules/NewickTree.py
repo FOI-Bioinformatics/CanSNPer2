@@ -63,7 +63,7 @@ class NewickNode(object):
 			if len(self.children) > 0 and self.parent:
 				return "({children}){name}".format(name=self.name,children=",".join(str(child) for child in self.children))
 			elif not self.parent:  #Only the root node has this property
-				return "({children})ROOT;".format(children=",".join(str(child) for child in self.children))
+				return "(({children}){parent})ROOT;".format(children=",".join(str(child) for child in self.children),parent=self.name)
 			else:
 				return "{name}".format(name=self.name)
 		else:
@@ -96,12 +96,13 @@ class NewickTree(object):
 
 	"""
 
-	def __init__(self, database,name="newick",outdir="./"):
+	def __init__(self, database,name="newick",outdir="./",min_required_hits=3):
 		super(NewickTree, self).__init__()
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
 		self.tree_file = "{outdir}/{name}_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
+		self.min_required_hits = min_required_hits
 		## Build the newick tree
 		self.newickTree = str(self.build_tree())
 
@@ -224,7 +225,7 @@ class NewickTree(object):
 			logger.debug(count)
 			quota = float(count)/dist
 			logger.info("Confirm quota: {quota}".format(quota=quota))
-			if quota > 0.7 and count >=3:
+			if quota > 0.7 and count >=self.min_required_hits:
 				return True,count
 			return False,count
 		except KeyError as e:
@@ -251,7 +252,7 @@ class NewickTree(object):
 				n+=1
 				f_dist,f_node = dist,node ## Final node
 				#sublist = dlist[n:] ## remove first n elements
-			elif lcount >= 3:
+			elif lcount >= self.min_required_hits:
 				logger.debug("Final count ok return")
 				if n >= 1:
 					sublist = dlist[n-1:] ## remove elements -1
@@ -263,6 +264,8 @@ class NewickTree(object):
 				logger.debug("Parent ok continue")
 				lcount+=1
 			_dist,_node = dist,node
+			if lcount >= self.min_required_hits and len(dlist) <= self.min_required_hits:
+				return f_dist,f_node,dlist
 		return False,False,dlist
 
 	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True):
@@ -312,7 +315,8 @@ class NewickTree(object):
 					nstyle["hz_line_color"] = "#000000"
 					nstyle["vt_line_type"] = 0
 					nstyle["hz_line_type"] = 0
-			n.set_style(nstyle)
+			if n.name != "ROOT": ## Root should be just a line not a false "ancenstral node"
+				n.set_style(nstyle)
 		ts = TreeStyle()
 		ts.show_leaf_name = False  						# Do not print(leaf names, they are added in layout)
 		ts.show_scale = False  							# Do not show the scale
@@ -344,9 +348,10 @@ class NewickTree(object):
 				## Sort the list of distances from deepest
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
 				logger.info(dlist)
-
-				if len(dlist) < 3: ## the number of SNPs found is too small to be valid,
-					msg = "The number of SNPs found is too small (min 3), Cannot call SNPs."
+				logger.info(len(dlist))
+				logger.info(self.min_required_hits)
+				if len(dlist) < self.min_required_hits: ## the number of SNPs found is too small to be valid,
+					msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(min=self.min_required_hits)
 					logger.debug(msg)
 					return False,msg
 				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
