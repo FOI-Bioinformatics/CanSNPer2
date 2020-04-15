@@ -48,6 +48,7 @@ class CanSNPer2(object):
 		self.database = database
 		self.min_required_hits = kwargs["min_required_hits"]
 		self.rerun = kwargs["rerun"]
+
 		#self.initiate = kwargs["initiate"]
 		#self.annotation = kwargs["annotation"]
 
