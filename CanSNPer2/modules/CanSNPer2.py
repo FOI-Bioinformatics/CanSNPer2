@@ -279,8 +279,12 @@ class CanSNPer2(object):
 		if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
 		for q in self.query:            ## For each query file_path
 			try:
-				qfile = q.rsplit("/")[-1]   ## Remove path from query name
 				self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
+
+				qfile = q.rsplit("/")[-1]   ## Remove path from query name
+				if not os.path.exists(q):
+					raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
+
 				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
 				if os.path.exists(outputfile) and not self.rerun:
 					logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))

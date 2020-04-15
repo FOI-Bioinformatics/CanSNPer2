@@ -155,6 +155,7 @@ def main():
 									snpfile=args.snpfile,
 									database=args.database,
 									min_required_hits=args.min_required_hits,
+									keep_going=args.keep_going,
 									rerun=args.rerun
 	)
 
