@@ -35,7 +35,7 @@ __credits__ 	= ["David Sundell"]
 __license__ 	= "GPLv3"
 __maintainer__ 	= "FOI bioinformatics group"
 __email__ 		= ["bioinformatics@foi.se", "david.sundell@foi.se"]
-__date__ 		= "2020-04-07"
+__date__ 		= "2020-04-15"
 __status__ 		= "Production"
 
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2
@@ -63,6 +63,7 @@ run_options = parser.add_argument_group("Run options")
 run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
 run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
+run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
 
 '''Remove the two below when script is complete, possibly keep as hidden for debug'''
 run_options.add_argument('--skip_mauve' ,		action='store_true', 				help="If xmfa files already exists skip step")
@@ -152,6 +153,7 @@ def main():
 									export=args.no_export,
 									snpfile=args.snpfile,
 									database=args.database,
+									min_required_hits=args.min_required_hits
 									#initiate=args.initiate,
 									#annotation=args.load_snp_annotation,
 					)

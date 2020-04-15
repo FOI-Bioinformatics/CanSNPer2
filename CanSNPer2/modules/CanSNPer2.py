@@ -42,6 +42,7 @@ class CanSNPer2(object):
 		self.export = kwargs["export"]
 		self.snpfile = kwargs["snpfile"]
 		self.database = database
+		self.min_required_hits = kwargs["min_required_hits"]
 		#self.initiate = kwargs["initiate"]
 		#self.annotation = kwargs["annotation"]
 
@@ -176,11 +177,11 @@ class CanSNPer2(object):
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name,called_snps,save_tree):
+	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits):
 		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
 			and outputs a pdf file
 		'''
-		newickTree = NewickTree(self.database,name,self.outdir)
+		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits)
 		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree)
 		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
 		return final_snp
@@ -314,7 +315,7 @@ class CanSNPer2(object):
 
 			'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 			SNP = "NA" ## Default message if SNP cannot be confirmed
-			final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree)
+			final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits)
 			if final_snp:
 				if self.export:
 					SNP = final_snp[1]
