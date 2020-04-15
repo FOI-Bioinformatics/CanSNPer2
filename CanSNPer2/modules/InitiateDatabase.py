@@ -79,7 +79,7 @@ class CanSNPDatabase(DatabaseFunctions):
 		if kwargs["tree"]:
 			logger.debug("Loading module ReadTaxonomy{type}".format(type=source_type))
 			read_module = dynamic_import("flextaxd.modules", "ReadTaxonomy{type}".format(type=source_type))
-			read_obj = read_module(kwargs["tree"], database=kwargs["database"],root_name="T/N.1",rank="family",verbose=kwargs["verbose"])
+			read_obj = read_module(kwargs["tree"], database=kwargs["database"],root_name=False,rank="family",verbose=kwargs["verbose"])
 			read_obj.verbose = kwargs["verbose"]                                                          ## Set verbose mode
 			logger.info("Parse taxonomy")
 			read_obj.parse_taxonomy()                                                           ## Parse taxonomy file
@@ -89,20 +89,6 @@ class CanSNPDatabase(DatabaseFunctions):
 		if kwargs["annotation"]:
 			logger.info("Load annotation file!")
 			self.load_cansnp_annotation(kwargs["annotation"])
-		# if kwargs["reference_annotation"]:													## load genome references!
-		# 	logger.info("Load references into database!")
-		# 	self.load_cansnp_references(kwargs["reference_annotation"])
-
-	# def get_snps(self, database=False,table="snp_annotation"):
-	# 	'''Retrieve the whole node info table of the database to decrease the number of database calls!'''
-	# 	nodeDict = {}
-	# 	QUERY = '''SELECT node_id,snp_id FROM {table}'''.format(table=table)
-	# 	if not database:
-	# 		database = self.database
-	# 	for node in self.query(QUERY).fetchall():
-	# 		nodeDict[node[0]] = node[1]
-	# 		nodeDict[node[1]] = node[0]
-	# 	return nodeDict
 
 	def add_annotation(self, data, id=False,genome_i=False):
 		'''Add snp annotation to annotation table'''
