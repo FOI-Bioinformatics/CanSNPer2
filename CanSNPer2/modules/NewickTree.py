@@ -12,17 +12,6 @@ import sys
 import logging
 logger = logging.getLogger(__name__)
 
-
-__version__ = "2.0.1"
-__author__ = "David Sundell"
-__credits__ = ["David Sundell"]
-__license__ = "GPLv3"
-__maintainer__ = "FOI bioinformatics group"
-__email__ = ["bioinformatics@foi.se", "david.sundell@foi.se"]
-__date__ = "2019-06-07"
-__status__ = "Production"
-__partof__ = "CanSNPer2"
-
 class NewickNode(object):
 	"""The NewickNode class stores the information of a taxonomy node
 			ID

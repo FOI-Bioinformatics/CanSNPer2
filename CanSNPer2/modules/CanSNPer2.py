@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
+from CanSNPer2.modules.ParseReads import ParseReads
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.CanSNPerTree import __version__
 
@@ -83,6 +84,10 @@ class CanSNPer2(object):
 		self.save_tree = kwargs["save_tree"]
 		self.keep_temp = kwargs["keep_temp"]
 		self.keep_going = keep_going
+
+		'''Read parameters'''
+		self.reads = False
+		self.paired = False
 
 	'''CanSNPer2 get functions'''
 
@@ -251,8 +256,50 @@ class CanSNPer2(object):
 				called_snps+=called_queue.get()
 		return SNPS,SNP_info,called_snps
 
+	def align_fasta(self,database,organism,q):
+		'''Align fasta files witn progressiveMauve and return Called SNPs'''
+		if not self.skip_mauve: ### If mauve command was already run before skip step
+			logger.info("\tRun mauve alignments")
+
+		'''For each query fasta file; align to all CanSNP references in the reference folder
+			if the skip_mauve parameter is True this the align function will only format xmfa file paths
+		'''
+		xmfa_files = self.align(q)
+		logger.debug(xmfa_files)
+		if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
+			logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
+			logger.warning("Mauve error skip {sample}".format(q))
+			self.xmfa_files = []
+			return False,False,False
+
+		'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
+		logger.info("Finding SNPs")
+		try:
+			SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=self.parse_obj,xmfa_files=xmfa_files,organism=organism,export=True)
+		except FileNotFoundError:
+			logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+			self.xmfa_files = []
+			return False,False,False
+		'''Clean references to aligned xmfa files between queries if several was supplied'''
+		self.xmfa_files = []
+		return SNPS,SNP_info,called_snps
+
+	def aling_reads(self,database,organism,fastqfile):
+		'''Map read files to reference call SNPs and match to reference database, return called SNPSs'''
+		return
+
 	def run(self,database,organism):
-		'''Run CanSNPer2'''
+		'''Main function of CanSNPer2
+				For fasta file input:
+					1. Align sequences with progressiveMauve
+					2. Parse XMFA files and find SNPs
+				Alternatively input can be reads (available from CanSNPer v2.2.0):
+					1. Align reads to the available references with (bwa-mem; illumina, minimap2; nanopore, iontorrent)
+					2. Perform SNPcalling and compare SNPs to reference database
+				3. Create a tree visualising SNPs found in sequence
+				3b. If requested create a list with SNPs and their status
+				4. Clean up tmp directory
+		'''
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
 
 		'''Read query input file if a txt file is supplied insead of fasta files'''
@@ -260,57 +307,51 @@ class CanSNPer2(object):
 			logger.info("Textfile input was found, parsing filepaths in {q} file".format(q=self.query[0]))
 			self.query=self.read_query_textfile_input(self.query)
 
-
-		'''Main function of CanSNPer2
-				1. Align sequences with progressiveMauve
-				2. Parse XMFA files and find SNPs
-				3. Create a tree visualising SNPs found in sequence
-				3b. If requested create a list with SNPs and their status
-				4. Clean up tmp directory
-				'''
-
-		''' Create ParseXMFA object'''
-		parse_xmfa_obj = ParseXMFA(
-					database=database,
-					export=self.export,
-					snpfile=self.snpfile,
-					verbose=self.verbose)  ## Create XMFA object and connect to database
+		if not self.reads:
+			''' Create ParseXMFA object'''
+			self.parse_obj = ParseXMFA(
+						database=database,
+						export=self.export,
+						snpfile=self.snpfile,
+						verbose=self.verbose)  ## Create XMFA object and connect to database
+		else:
+			self.parse_obj = ParseReads(
+						database=database,
+						export=self.export,
+						snpfile=self.snpfile,
+						verbose=self.verbose  ## Create ParseRead object and connect to database
+			)
 		'''Walk through the list of queries supplied'''
-		if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
+		if not self.skip_mauve: logger.info("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
 		for q in self.query:            ## For each query file_path
+			'''This try except function caches all possible errors downstream to allow keep_going to skip all errors and proceed with other genomes'''
 			try:
-				self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
+				self.query_name = os.path.basename(q).strip(".gz").rsplit(".",1)[0]  ## get name of file and remove ending
 
-				qfile = q.rsplit("/")[-1]   ## Remove path from query name
+				qfile = q.rsplit("/")[-1].split("_R1")[0]   ## Remove path and Read identifier from query name
+
+				'''Test if the input fasta/fastq file exists, if not raise a FileNotFoundError'''
 				if not os.path.exists(q):
 					raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
+				if self.paired: ## Paired end reads also check so that the reverse read exists
+					if not os.path.exists(q.replace("R1","R2")):
+						raise FileNotFoundError("Input reverse read file: {qfile} was not found!".format(qfile=q.replace("R1","R2")))
 
+				'''Create path for output file and check if it already exists, if rerun is not set to true skip file!'''
 				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
 				if os.path.exists(outputfile) and not self.rerun:
 					logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
 					continue
-				logger.info("Running CanSNPer2 on {query}".format(query=qfile))
-				if not self.skip_mauve: ### If mauve command was already run before skip step
-					logger.info("Run mauve alignments")
 
-				'''For each query fasta align to all CanSNP references the reference folder
-					if skip_mauve parameter is True this the align function will only format xmfa file paths
-				'''
-				xmfa_files = self.align(q)
-				logger.debug(xmfa_files)
-				if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
-					logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
-					logger.warning("Mauve error skip {sample}".format(q))
-					self.xmfa_files = []
+				logger.info("Running CanSNPer2 on {query}".format(query=qfile))
+
+				if self.reads:
+					SNPS,SNP_info,called_snps = self.align_reads(database,organism,q)
+				else:
+					SNPS,SNP_info,called_snps = self.align_fasta(database,organism,q)
+				if not SNPS and not SNP_info and not called_snps:
 					continue
-				'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
-				logger.info("Finding SNPs")
-				try:
-					SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
-				except FileNotFoundError:
-					logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
-					self.xmfa_files = []
-					continue
+
 				'''If file export is requested print the result for each SNP location to file'''
 				if self.export:
 					outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
@@ -344,8 +385,6 @@ class CanSNPer2(object):
 							print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 					logger.info(message)
 				print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
-				'''Clean references to aligned xmfa files between queries if several was supplied'''
-				self.xmfa_files = []
 			except:
 				if not self.keep_going:
 					raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)")
