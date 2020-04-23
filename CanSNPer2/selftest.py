@@ -14,5 +14,7 @@ try:
 except ImportError:
 	raise ImportError("flextaxd could not be found!")
 
-print("required python packages installed!")
+
+def main():
+	print("required python packages installed!")
 
