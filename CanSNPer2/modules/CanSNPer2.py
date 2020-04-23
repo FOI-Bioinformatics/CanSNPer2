@@ -84,6 +84,15 @@ class CanSNPer2(object):
 		self.keep_temp = kwargs["keep_temp"]
 		self.keep_going = keep_going
 
+		if kwargs["summary"]:
+			self.summary_set = set()
+			self.called_genome = {}
+			self.summary = True
+		else:
+			self.summary = False
+
+		self.no_export = False
+
 	'''CanSNPer2 get functions'''
 
 	def get_xmfa(self):
@@ -212,18 +221,16 @@ class CanSNPer2(object):
 		'''Process xmfa file using ParseXMFA object'''
 		XMFA_obj.run(xmfa_file, organism)
 		results.put(XMFA_obj.get_snps())
-		if self.export:
-			export_results.put(XMFA_obj.get_snp_info())
-			called_snps.put(XMFA_obj.get_called_snps())
+		export_results.put(XMFA_obj.get_snp_info())
+		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
 	def find_snps(self,XMFA_obj,xmfa_file,organism,results=[],export_results=[],called_snps=[]):
 		'''Align sequences to references and return SNPs'''
 		XMFA_obj.run(xmfa_file, organism)
 		results.put(XMFA_obj.get_snps())
-		if self.export:
-			export_results.put(XMFA_obj.get_snp_info())
-			called_snps.put(XMFA_obj.get_called_snps())
+		export_results.put(XMFA_obj.get_snp_info())
+		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
 	def find_snps_multiproc(self,xmfa_obj,xmfa_files,organism,export=False):
@@ -245,10 +252,9 @@ class CanSNPer2(object):
 		for j in jobs:
 			## Merge SNP result dictionaries
 			SNPS = dict(**SNPS, **result_queue.get())
-			if self.export:
-				### join SNP info files
-				SNP_info+= export_queue.get()
-				called_snps+=called_queue.get()
+			### join SNP info files
+			SNP_info+= export_queue.get()
+			called_snps+=called_queue.get()
 		return SNPS,SNP_info,called_snps
 
 	def run(self,database,organism):
@@ -285,7 +291,7 @@ class CanSNPer2(object):
 				if not os.path.exists(q):
 					raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
 
-				outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+				outputfile = "{outdir}/{xmfa}.{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
 				if os.path.exists(outputfile) and not self.rerun:
 					logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
 					continue
@@ -313,29 +319,34 @@ class CanSNPer2(object):
 					continue
 				'''If file export is requested print the result for each SNP location to file'''
 				if self.export:
-					outputfile = "{outdir}/{xmfa}_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
-					outputfile2 = "{outdir}/{xmfa}_called_snps_{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+					outputfile = "{outdir}/{xmfa}_not_called.txt".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+					outputfile2 = "{outdir}/{xmfa}.{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
 
 					logger.info("Printing SNP info to {file}".format(file=outputfile))
-
+					self.csnpdict = {}
 					'''Print SNPs to tab separated file'''
-					with open(outputfile,"w") as snplist_out, open(outputfile2, "w") as called_out:
+					with open(outputfile,"w") as snplist_out:
 						print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=snplist_out)
-						print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
 						for snp in SNP_info:
 							if snp[0] in called_snps:
-								print("\t".join(snp),file=called_out)
-							print("\t".join(snp),file=snplist_out)
+								self.csnpdict[snp[0]] = snp
+							else:
+								print("\t".join(snp),file=snplist_out)
 
 				'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 				SNP = "NA" ## Default message if SNP cannot be confirmed
-				final_snp,message = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits)
+				final_snp,message,called = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits)
 				if final_snp:
+					SNP = final_snp[1]
+					if not final_snp[2][0]:  ## if snp was never confirmed print NA
+						SNP = "NA"
 					if self.export:
-						SNP = final_snp[1]
-						if not final_snp[2][0]:  ## if snp was never confirmed print NA
-							SNP = "NA"
-						with open(outputfile2, "a") as called_out:
+						with open(outputfile2, "w") as called_out:
+							if True:
+								print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
+								for snp in called:
+									print("\t".join(self.csnpdict[snp[1]]),file=called_out)
+							print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
 							print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
 					logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 				else:
@@ -343,7 +354,11 @@ class CanSNPer2(object):
 						with open(outputfile2, "a") as called_out:
 							print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 					logger.info(message)
-				print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+				if self.summary and SNP != "NA":
+					self.summary_set |= set([SNP])
+					self.called_genome[SNP] = self.query_name
+				if self.export:
+					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 				'''Clean references to aligned xmfa files between queries if several was supplied'''
 				self.xmfa_files = []
 			except:
@@ -351,7 +366,24 @@ class CanSNPer2(object):
 					raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)")
 				logger.debug("An error occured during processing of {file}".format(file=self.query_name))
 
-
+		if self.summary:
+			'''Turn all base nodes grey and only color final SNPs and print called'''
+			if not self.no_export:
+				summarypath = "{outdir}/summary_final.snps".format(outdir=self.outdir)
+				with open(summarypath,"w") as summaryout:
+					for snp in SNPS:
+						if len(set([snp]) & self.summary_set)>0:
+							### called, change color to green
+							SNPS[snp] = 1
+							### print to summary file
+							print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
+						else:
+							### not called change color to purple
+							SNPS[snp] = 2
+				'''Print summary tree showing all unique SNPs in the final tree'''
+				self.create_tree(SNPS,"summary",self.summary_set,True,min_required_hits=self.min_required_hits)
+			else:
+				logger.warning("No export parameter is used, summary won´t be printed!")
 		'''Finally clean up temporary folder when all alignments and trees has been printed!'''
 		if not self.keep_temp: ## if keep temp is turned on do not remove away alignments
 			self.cleanup()

@@ -36,8 +36,7 @@ class ParseXMFA(object):
 		## as the snps are ordered according to the reference mauve positions they can be used sequentialy without search
 		'''SNPs will be stored as a sorted set containing (position, refBase, targetBase,SNPname)'''
 		self.SNPS = {}
-		if self.export:
-			self.SNP_info = []
+		self.SNP_info = []
 
 		'''Mask option, for distant relatives false SNPs near edges of alignments may become a problem,
 			this option allows masking of SNPs placed within n bases of the edge of an alignment'''
@@ -100,11 +99,11 @@ class ParseXMFA(object):
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
 					_snp = self.rcDict[_snp]
-				if self.export:
-					'''Fetch information about snp to allow print to file'''
-					orig_snp_pos = str(self.snplist[self.current_snp][0])
-					snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
-					self.SNP_info.append(snpinfo)
+				'''Fetch information about snp to allow print to file'''
+				orig_snp_pos = str(self.snplist[self.current_snp][0])
+				snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
+				self.SNP_info.append(snpinfo)
+
 				if tbase == _snp:           ## SNP is confirmed to be Derived
 					SNP[snp_id] = 1 		## Derived SNP
 					self.called_snps.append(snp_id)

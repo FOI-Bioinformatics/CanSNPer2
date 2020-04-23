@@ -3,7 +3,7 @@
 CanSNPer2: A toolkit for SNP-typing NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
-VERSION 2.0.3 release of CanSNPer2
+VERSION 2.0.4 release of CanSNPer2
 
 The second release of CanSNPer (CanSNPer2) is exclusively written for python3
 CanSNPer2 is simplified from CanSNPer1 stripped to only perform
@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 oname = __name__
 __name__ 		= "CanSNPer2"
-__version__ 	= "2.0.3"
+__version__ 	= "2.0.4"
 __author__ 		= "David Sundell"
 __credits__ 	= ["David Sundell"]
 __license__ 	= "GPLv3"
@@ -55,9 +55,10 @@ required_arguments.add_argument('-db',  '--database', 	metavar='', 						help='C
 
 output_options = parser.add_argument_group("Output options")
 output_options.add_argument('-o', 	 '--outdir', 	metavar='DIR', default="results",		help="Output directory")
-output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snpfile",	help="specify name of export and include called snp output")
+output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snps",	help="specify name of export and include called snp output")
 output_options.add_argument('--save_tree',			action='store_true',				help='Save tree as PDF using ETE3 (default False)')
 output_options.add_argument('--no_export', 			action='store_false',				help="Add argument to stop default snpfile and snpcalled file output.")
+output_options.add_argument('--summary',			action='store_true',				help="When running multiple files output final SNP summary\n and a tree with all final SNPs")
 
 run_options = parser.add_argument_group("Run options")
 run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
@@ -156,7 +157,8 @@ def main():
 									database=args.database,
 									min_required_hits=args.min_required_hits,
 									keep_going=args.keep_going,
-									rerun=args.rerun
+									rerun=args.rerun,
+									summary=args.summary
 	)
 
 	'''Run CanSNPer2'''

@@ -6,7 +6,15 @@ Module to read and write newick trees
 '''
 from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from ete3 import Tree, faces, AttrFace, TreeStyle, NodeStyle
+from ete3 import Tree, AttrFace, TreeStyle, NodeStyle
+'''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.
+	It fails due to faces not being available in that ete3 version on import, but it works when ete3 is
+	 being installed manually using conda.
+'''
+try:
+	from ete3 import faces
+except ImportError:
+	logger.warning("ImportError for the funtion faces of the ete3 package, install the latest version of ete3!")
 
 import sys
 import logging
@@ -282,23 +290,25 @@ class NewickTree(object):
 		for n in tree.traverse():
 			# The ancestral node is set to have a red colour
 			nstyle = NodeStyle()
-			nstyle["fgcolor"] = self.snp_colors["ancestral"]
+			# If the SNP is missing due to a gap, make it grey
+			nstyle["fgcolor"] = self.snp_colors["non_aligned"]
 			nstyle["size"] = 10
-			nstyle["vt_line_color"] = "#000000"
-			nstyle["hz_line_color"] = "#000000"
-			nstyle["vt_line_type"] = 0
-			nstyle["hz_line_type"] = 0
+			nstyle["vt_line_color"] = "#DDDDDD"
+			nstyle["hz_line_color"] = "#DDDDDD"
+			nstyle["vt_line_type"] = 1
+			nstyle["hz_line_type"] = 1
 			nstyle["vt_line_width"] = 2
 			nstyle["hz_line_width"] = 2
 			for snp in snplist.keys():
-				if n.name == snp and snplist[snp] == 0:
-					# If the SNP is missing due to a gap, make it grey
-					nstyle["fgcolor"] = self.snp_colors["non_aligned"]
+				if n.name == snp and snplist[snp] == 2:
+					nstyle["fgcolor"] = self.snp_colors["ancestral"]
 					nstyle["size"] = 10
-					nstyle["vt_line_color"] = "#DDDDDD"
-					nstyle["hz_line_color"] = "#DDDDDD"
-					nstyle["vt_line_type"] = 1
-					nstyle["hz_line_type"] = 1
+					nstyle["vt_line_color"] = "#000000"
+					nstyle["hz_line_color"] = "#000000"
+					nstyle["vt_line_type"] = 0
+					nstyle["hz_line_type"] = 0
+					nstyle["vt_line_width"] = 2
+					nstyle["hz_line_width"] = 2
 				elif n.name == snp and snplist[snp] == 1:
 					## If the SNP was derived make it green
 					nstyle["fgcolor"] = self.snp_colors["derived"]
@@ -347,9 +357,6 @@ class NewickTree(object):
 							logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
 				## Sort the list of distances from deepest
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
-				logger.info(dlist)
-				logger.info(len(dlist))
-				logger.info(self.min_required_hits)
 				if len(dlist) < self.min_required_hits: ## the number of SNPs found is too small to be valid,
 					msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(min=self.min_required_hits)
 					logger.debug(msg)
@@ -365,7 +372,9 @@ class NewickTree(object):
 					node = tree.search_nodes(name=node)[0]
 					### Loop different nodes
 					confirmed = self._confirm_path([dist,node],called_snps,snplist)
-					dlist[0].append(confirmed)
+					called = dlist[0]+[confirmed]
+					dlist = sorted(dlist,key=lambda l:l[0], reverse=False)
+					#dlist[0].append(confirmed)
 					if confirmed[0]:
 						final = node.name.strip()
 						msg = "Final SNP called: {snp}".format(snp=final)
@@ -381,5 +390,5 @@ class NewickTree(object):
 		else:
 			msg = "No SNPs were called."
 			logger.debug(msg)
-			return False,msg
-		return dlist[0],msg
+			return False,msg,[]
+		return called,msg,dlist
