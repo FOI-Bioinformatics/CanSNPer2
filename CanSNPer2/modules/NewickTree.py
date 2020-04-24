@@ -360,13 +360,13 @@ class NewickTree(object):
 				if len(dlist) < self.min_required_hits: ## the number of SNPs found is too small to be valid,
 					msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(min=self.min_required_hits)
 					logger.debug(msg)
-					return False,msg
+					return False,msg,[]
 				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
 				dist,node,dlist = self._check_start(dlist)
 				if not node:
 					msg = "No valid start SNP found."
 					logger.info(msg)
-					return False,msg
+					return False,msg,[]
 				else:#dist,node = dlist[0]
 					logger.debug("Calling SNP")
 					node = tree.search_nodes(name=node)[0]
@@ -386,7 +386,7 @@ class NewickTree(object):
 				logger.error("KeyError, {e}".format(e=e))
 				msg = "called_snps function failed, KeyError {e}".format(e=e)
 				logger.debug(msg)
-				return False,msg
+				return False,msg,[]
 		else:
 			msg = "No SNPs were called."
 			logger.debug(msg)
