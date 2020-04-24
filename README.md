@@ -28,8 +28,7 @@ Download references for that database
 CanSNPer2-download --database downloaded_database.db
 ```
 
-Run your genomes
-
+Run genomes
 ```sh
 CanSNPer2 --database downloaded_database.db fastadir/\*.fasta --summary
 ```
@@ -77,15 +76,17 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_export] [--refdir] [--workdir] [--read_input] [--skip_mauve]
-                 [--keep_going] [--keep_temp] [--tmpdir] [--logdir] [--verbose] [--debug] [--supress] [--organism]
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_export]
+                 [--refdir] [--workdir]
+                 [--read_input] [--skip_mauve]
+                 [--keep_going] [--keep_temp]
+                 [--tmpdir] [--logdir] [--verbose] [--debug] [--supress]
                  [query [query ...]]
 
 CanSNPer2
 
 optional arguments:
   -h, --help            show this help message and exit
-  --organism            Specify organism
 
 Required arguments:
   query                 File(s) to align (fasta)
@@ -101,12 +102,14 @@ Run options:
   --refdir              Specify reference directory
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
-  --min_required_hits MIN_REQUIRED_HITS
+                        (not implemeted expected for version v2.1.0)
+  --min_required_hits   MIN_REQUIRED_HITS
                         Minimum sequential hits to call a SNP!
-  --skip_mauve          If xmfa files already exists skip step
   --keep_going          If Error occurs, continue with the rest of samples
-  --keep_temp           keep temporary files
   --rerun               Rerun already processed files (else skip if result file exists)
+
+  --keep_temp           keep temporary files
+  --skip_mauve          If xmfa files already exists skip step
 
 Logging and debug options:
   --tmpdir              Specify reference directory
