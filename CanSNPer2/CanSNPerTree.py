@@ -58,7 +58,7 @@ output_options.add_argument('-o', 	 '--outdir', 	metavar='DIR', default="results
 output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snps",	help="specify name of export and include called snp output")
 output_options.add_argument('--save_tree',			action='store_true',				help='Save tree as PDF using ETE3 (default False)')
 output_options.add_argument('--no_export', 			action='store_false',				help="Add argument to stop default snpfile and snpcalled file output.")
-output_options.add_argument('--summary',			action='store_true',				help="When running multiple files output final SNP summary\n and a tree with all final SNPs")
+output_options.add_argument('--summary',			action='store_true',				help="Output final SNP summary file and a tree with all called SNPs")
 
 run_options = parser.add_argument_group("Run options")
 run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")

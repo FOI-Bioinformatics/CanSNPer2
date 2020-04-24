@@ -1,5 +1,5 @@
 # CanSNPer2
-The second release of CanSNPer (CanSNPer2) is exclusively written for python3. CanSNPer2 is simplified from CanSNPer1 stripped to only perform required tasks. It is also written in a modular form with separate classes for each task which allows future extentions such as a sequence read input option planned during 2020. 
+The second release of CanSNPer (CanSNPer2) is exclusively written for python3. CanSNPer2 is simplified from CanSNPer1 stripped to only perform required tasks. It is also written in a modular form with separate classes for each task which allows future extentions such as a sequence read input option planned during 2020.
 
 ## Installation
 Installing using bioconda
@@ -19,7 +19,24 @@ python setup.py install
 * FlexTaxD
 * progressiveMauve
 
-## Quick start
+## Use CanSNPer2 (for custom databases see below)
+Download database from https://github.com/FOI-Bioinformatics/CanSNPer2-data
+
+Download references for that database
+
+```sh
+CanSNPer2-download --database downloaded_database.db
+```
+
+Run your genomes
+
+```sh
+CanSNPer2 --database downloaded_database.db fastadir/\*.fasta --summary
+```
+
+The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree pdf with all SNPs from set colored.
+
+## Quick start custom databases
 Create database, download references and run CanSNPer2
 ```sh
 CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
@@ -79,14 +96,18 @@ Output options:
   --snpfile FILENAME    specify name of export and include called snp output
   --save_tree           Save tree as PDF using ETE3 (default False)
   --no_export           Add argument to stop default snpfile and snpcalled file output.
+  --summary             Output final SNP summary file and a tree with all called SNPs
 
 Run options:
   --refdir              Specify reference directory
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
+  --min_required_hits MIN_REQUIRED_HITS
+                        Minimum sequential hits to call a SNP!
   --skip_mauve          If xmfa files already exists skip step
   --keep_going          If Error occurs, continue with the rest of samples
   --keep_temp           keep temporary files
+  --rerun               Rerun already processed files (else skip if result file exists)
 
 Logging and debug options:
   --tmpdir              Specify reference directory
@@ -97,7 +118,7 @@ Logging and debug options:
 ```
 
 
-Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki). 
+Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki).
 
 About this software
 ===================
@@ -109,8 +130,8 @@ under the [GPL-3.0 license](LICENSE).
 If you experience any difficulties with this software, or you have suggestions, or want
 to contribute directly, you have the following options:
 
-- submit a bug report or feature request to the 
+- submit a bug report or feature request to the
   [issue tracker](https://github.com/FOI-Bioinformatics/CanSNPer2/issues)
-- contribute directly to the source code through the 
+- contribute directly to the source code through the
   [github](https://github.com/FOI-Bioinformatics/CanSNPer2) repository. 'Pull requests' are
   especially welcome.
