@@ -192,12 +192,12 @@ class CanSNPer2(object):
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits):
+	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,summary=False):
 		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
 			and outputs a pdf file
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits)
-		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree)
+		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree,summary=summary)
 		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
 		return final_snp
 
@@ -256,6 +256,38 @@ class CanSNPer2(object):
 			SNP_info+= export_queue.get()
 			called_snps+=called_queue.get()
 		return SNPS,SNP_info,called_snps
+
+	def read_result_dir(self):
+		'''Fetch all final SNPs from result file after run to produce summary'''
+		snplist = set()
+		for root, dirs, files in os.walk(self.outdir, topdown=False):
+			for f in files:
+				if f.endswith(".snps"):
+					with open(os.path.join(root,f)) as snpfile:
+						for row in snpfile:
+							if row.startswith("SNP path:"):
+								snplist.add(row.split(";")[-1].strip())
+		return snplist
+
+	def print_summary(self):
+		'''Create summary file and tree'''
+		summarypath = "{outdir}/summary_final.snps".format(outdir=self.outdir)
+		SNPS = self.read_result_dir()
+		with open(summarypath,"w") as summaryout:
+			for snp in SNPS:
+				print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
+				# if len(set([snp]) & self.summary_set)>0:
+				# 	### called, change color to green
+				# 	SNPS[snp] = 1
+				# 	### print to summary file
+				# 	print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
+				# else:
+				# 	### not called change color to purple
+				# 	SNPS[snp] = 2
+
+
+		'''Print summary tree showing all unique SNPs in the final tree'''
+		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
 
 	def run(self,database,organism):
 		'''Run CanSNPer2'''
@@ -367,23 +399,7 @@ class CanSNPer2(object):
 				logger.debug("An error occured during processing of {file}".format(file=self.query_name))
 
 		if self.summary:
-			'''Turn all base nodes grey and only color final SNPs and print called'''
-			if not self.no_export:
-				summarypath = "{outdir}/summary_final.snps".format(outdir=self.outdir)
-				with open(summarypath,"w") as summaryout:
-					for snp in SNPS:
-						if len(set([snp]) & self.summary_set)>0:
-							### called, change color to green
-							SNPS[snp] = 1
-							### print to summary file
-							print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
-						else:
-							### not called change color to purple
-							SNPS[snp] = 2
-				'''Print summary tree showing all unique SNPs in the final tree'''
-				self.create_tree(SNPS,"summary",self.summary_set,True,min_required_hits=self.min_required_hits)
-			else:
-				logger.warning("No export parameter is used, summary won´t be printed!")
+			self.print_summary()
 		'''Finally clean up temporary folder when all alignments and trees has been printed!'''
 		if not self.keep_temp: ## if keep temp is turned on do not remove away alignments
 			self.cleanup()

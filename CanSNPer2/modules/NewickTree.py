@@ -276,7 +276,7 @@ class NewickTree(object):
 				return f_dist,f_node,dlist
 		return False,False,dlist
 
-	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True):
+	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True,summary=False):
 		'''Draws a phylogenetic tree using ETE3
 		Keyword arguments:
 		snplist -- a list of the SNP names, positions and state
@@ -299,8 +299,13 @@ class NewickTree(object):
 			nstyle["hz_line_type"] = 1
 			nstyle["vt_line_width"] = 2
 			nstyle["hz_line_width"] = 2
-			for snp in snplist.keys():
-				if n.name == snp and snplist[snp] == 2:
+			if len(snplist) > 0:
+				try:
+					snpvalue = snplist[n.name]
+				except KeyError:
+					'''SNP not in list make grey'''
+					continue
+				if snpvalue == 2:
 					nstyle["fgcolor"] = self.snp_colors["ancestral"]
 					nstyle["size"] = 10
 					nstyle["vt_line_color"] = "#000000"
@@ -309,7 +314,7 @@ class NewickTree(object):
 					nstyle["hz_line_type"] = 0
 					nstyle["vt_line_width"] = 2
 					nstyle["hz_line_width"] = 2
-				elif n.name == snp and snplist[snp] == 1:
+				elif snpvalue == 1:
 					## If the SNP was derived make it green
 					nstyle["fgcolor"] = self.snp_colors["derived"]
 					nstyle["size"] = 15
@@ -317,7 +322,7 @@ class NewickTree(object):
 					nstyle["hz_line_color"] = "#000000"
 					nstyle["vt_line_type"] = 0
 					nstyle["hz_line_type"] = 0
-				elif n.name == snp and snplist[snp] == 3:
+				elif snpvalue == 3:
 					## If the SNP was neither of ancestral or derived make it blue
 					nstyle["fgcolor"] = self.snp_colors["other_base"]
 					nstyle["size"] = 15
@@ -325,6 +330,16 @@ class NewickTree(object):
 					nstyle["hz_line_color"] = "#000000"
 					nstyle["vt_line_type"] = 0
 					nstyle["hz_line_type"] = 0
+			elif called_snps:
+				if set([n.name]) & set(called_snps):
+					### Only care about called SNPs and color all green
+					nstyle["fgcolor"] = self.snp_colors["derived"]
+					nstyle["size"] = 15
+				nstyle["vt_line_color"] = "#000000"
+				nstyle["hz_line_color"] = "#000000"
+				nstyle["vt_line_type"] = 0
+				nstyle["hz_line_type"] = 0
+
 			if n.name != "ROOT": ## Root should be just a line not a false "ancenstral node"
 				n.set_style(nstyle)
 		ts = TreeStyle()
@@ -337,6 +352,8 @@ class NewickTree(object):
 		## Render tree and save to pdf
 		if save_tree:
 			tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
+			if summary:
+				return
 		dlist = []
 		confirmed = [False,0]
 		final = "NA"
