@@ -1,5 +1,16 @@
 # CanSNPer2
-The second release of CanSNPer (CanSNPer2) is exclusively written for python3. CanSNPer2 is simplified from CanSNPer1 stripped to only perform required tasks. It is also written in a modular form with separate classes for each task which allows future extentions such as a sequence read input option planned during 2020.
+CanSNPer2: A toolkit for SNP-typing NGS data.
+
+Future planned implementations
+* Read input - Call SNPs directly from reads instead of an assembly
+
+Databases supplied can be found at https://github.com/FOI-Bioinformatics/CanSNPer2-data
+
+* SARS-CoV-2
+* Francisella tularensis
+* Brucella
+* Yersinia pestis
+* Bacillus anthracis
 
 ## Installation
 Installing using bioconda
@@ -13,36 +24,42 @@ Installing from the repository
 python setup.py install
 ```
 
-## Requirements
+## Requirements (for manual install conda will install all dependencies)
 
 * ETE3
-* FlexTaxD
+* FlexTaxD - https://github.com/FOI-Bioinformatics/flextaxd
 * progressiveMauve
 
-## Use CanSNPer2 (for custom databases see below)
-Download database from https://github.com/FOI-Bioinformatics/CanSNPer2-data
+Read input (not yet implemeted)
+* BWA
+* Minimap2
 
-Download references for that database
+## User guide CanSNPer2 (for custom databases see below)
+1. Download pre-built databases from https://github.com/FOI-Bioinformatics/CanSNPer2-data
+
+2. Download references for database
 
 ```sh
 CanSNPer2-download --database downloaded_database.db
 ```
 
-Run genomes
+3. Run genomes
 ```sh
-CanSNPer2 --database downloaded_database.db fastadir/\*.fasta --summary
+CanSNPer2 --database downloaded_database.db fastadir/*.fasta --summary
 ```
 
 The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree pdf with all SNPs from set colored.
 
+For more options CanSNPer2 --help
+
 ## Quick start custom databases
-Create database, download references and run CanSNPer2
+Create database, download references annotated in the database and run CanSNPer2
 ```sh
 CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
-CanSNPer2-download --database francisella_tularensis.db -o references
-CanSNPer2 sample.fasta --database francisella_tularensis.db -o results --save_tree --refdir references
+CanSNPer2-download --database francisella_tularensis.db
+CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --save_tree
 ```
-references.txt
+Example structure of references.txt
 ```
 genome strain  genbank_id      refseq_id       assembly_name
 OSU18   OSU18   GCA_000014605.1 GCF_000014605.1 ASM1460v1
@@ -52,7 +69,7 @@ LVS     LVS     GCA_000009245.1 GCF_000009245.1 ASM924v1
 SCHUS4.2        SCHUS4  GCA_000008985.1 GCF_000008985.1 ASM898v1
 
 ```
-snps.txt (NEW headerline)
+Example structure of snps.txt (NEW headerline)
 ```
 snp_id	strain	reference	genome	position	derived_base	ancestral_base
 T/N.1	francisella	Svensson2009	SCHUS4.2	83976	A	G
@@ -63,7 +80,7 @@ A.1	francisella	Vogler2009	SCHUS4.2	397639	T	C
 B.1	francisella	Birdsell2014	OSU18	1710718	T	C
 ...
 ```
-tree.txt
+Example structure of tree.txt
 ```
 T/N.1
 T/N.1	T.1		
@@ -72,6 +89,7 @@ T/N.1	T.1	A/M.1
 T/N.1	T.1	A/M.1	A.1
 T/N.1	T.1	A/M.1	M.1
 ...
+
 
 ```
 CanSNPer2 help
