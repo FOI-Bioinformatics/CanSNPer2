@@ -44,7 +44,7 @@ class CanSNPer2(object):
 		self.mauve_path = mauve_path
 		self.xmfa_files = []
 		self.export = kwargs["export"]
-		self.snpfile = kwargs["snpfile"]
+		self.snpfile = "_snpfile" ## end name for temp xmfa files
 		self.database = database
 		self.min_required_hits = kwargs["min_required_hits"]
 		self.rerun = kwargs["rerun"]
@@ -217,23 +217,23 @@ class CanSNPer2(object):
 		logger.info("Done!")
 		return
 
-	def parse_xmfa(XMFA_obj, xmfa_file, organism,results=[]):
+	def parse_xmfa(XMFA_obj, xmfa_file,results=[]):
 		'''Process xmfa file using ParseXMFA object'''
-		XMFA_obj.run(xmfa_file, organism)
+		XMFA_obj.run(xmfa_file)
 		results.put(XMFA_obj.get_snps())
 		export_results.put(XMFA_obj.get_snp_info())
 		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
-	def find_snps(self,XMFA_obj,xmfa_file,organism,results=[],export_results=[],called_snps=[]):
+	def find_snps(self,XMFA_obj,xmfa_file,results=[],export_results=[],called_snps=[]):
 		'''Align sequences to references and return SNPs'''
-		XMFA_obj.run(xmfa_file, organism)
+		XMFA_obj.run(xmfa_file)
 		results.put(XMFA_obj.get_snps())
 		export_results.put(XMFA_obj.get_snp_info())
 		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 
-	def find_snps_multiproc(self,xmfa_obj,xmfa_files,organism,export=False):
+	def find_snps_multiproc(self,xmfa_obj,xmfa_files,export=False):
 		'''function to run genomes in paralell'''
 		jobs = []
 		SNPS = {}
@@ -243,7 +243,7 @@ class CanSNPer2(object):
 		export_queue = Queue()
 		called_queue = Queue()
 		for xmfa_file in xmfa_files:
-			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file,organism ,result_queue,export_queue,called_queue))
+			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
 			p.start()
 			jobs.append(p)
 			sleep(0.05) ## A short sleep to make sure all threads do not initiate access to the database file simultanously
@@ -262,7 +262,7 @@ class CanSNPer2(object):
 		snplist = set()
 		for root, dirs, files in os.walk(self.outdir, topdown=False):
 			for f in files:
-				if f.endswith(".snps"):
+				if f.endswith("_snps.txt"):
 					with open(os.path.join(root,f)) as snpfile:
 						for row in snpfile:
 							if row.startswith("SNP path:"):
@@ -273,7 +273,7 @@ class CanSNPer2(object):
 
 	def print_summary(self):
 		'''Create summary file and tree'''
-		summarypath = "{outdir}/summary_final.snps".format(outdir=self.outdir)
+		summarypath = "{outdir}/summary_final_snps.txt".format(outdir=self.outdir)
 		SNPS = self.read_result_dir()
 		with open(summarypath,"w") as summaryout:
 			for snp in SNPS:
@@ -291,7 +291,7 @@ class CanSNPer2(object):
 		'''Print summary tree showing all unique SNPs in the final tree'''
 		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
 
-	def run(self,database,organism):
+	def run(self,database):
 		'''Run CanSNPer2'''
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
 		if len(self.query) > 0:
@@ -346,7 +346,7 @@ class CanSNPer2(object):
 					'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 					logger.info("Finding SNPs")
 					try:
-						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,organism=organism,export=True)
+						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,export=True)
 					except FileNotFoundError:
 						logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
 						self.xmfa_files = []

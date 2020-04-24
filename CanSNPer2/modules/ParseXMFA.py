@@ -160,7 +160,7 @@ class ParseXMFA(object):
 			return False
 		return self.SNPS
 
-	def run(self, xmfa, organism,reference=False,database=False):
+	def run(self, xmfa, reference=False,database=False):
 		'''Parse XMFA file and return SNPS matching the given database'''
 		self.SNPS = {}  ## For each run SNPs has to be emtpy
 		'''Create connection to SNP database if it is not connected'''
@@ -170,7 +170,7 @@ class ParseXMFA(object):
 		if not reference:
 			reference = os.path.basename(xmfa).split("_")[0]
 		self.reference=reference
-		self.snplist, self.snp_positions = self.database.get_snps(organism,reference)
+		self.snplist, self.snp_positions = self.database.get_snps(reference)
 		#if self.verbose: print(self.snplist)
 		'''save first snp to look for'''
 		self.current_snp = self.snp_positions.pop(0)
@@ -184,8 +184,7 @@ if __name__=="__main__":
 
 	parser.add_argument('xmfa', 		metavar='', help='fasta xmfa to be parsed')
 	parser.add_argument('database', 	metavar='', help='CanSNP database')
-	parser.add_argument('--organism', 	metavar='', default="Francisella", 	help="Specify organism")
-	parser.add_argument('--reference', 	metavar='', default="FSC200",		help="Specify reference", choices=reference_genomes)
+	parser.add_argument('--reference', 	metavar='', default="",		help="Specify reference", choices=reference_genomes)
 	parser.add_argument('--mask', 		metavar='', default=0, type=int, 	help="Mask regions near end of alignments (nbases)")
 	parser.add_argument('--verbose',	action='store_true',help="print process info, default no output")
 
@@ -193,5 +192,5 @@ if __name__=="__main__":
 
 	logger.debug(args)
 	xmfa = ParseXMFA(verbose=args.verbose,mask=args.mask)
-	SNPS = xmfa.run(database=args.database, xmfa=args.xmfa, organism=args.organism,reference=args.reference)
+	SNPS = xmfa.run(database=args.database, xmfa=args.xmfa, reference=args.reference)
 	logger.info(SNPS)

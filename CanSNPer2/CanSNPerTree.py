@@ -48,29 +48,27 @@ import os,sys
 import argparse
 parser = argparse.ArgumentParser(description='CanSNPer2 ')
 required_arguments = parser.add_argument_group("Required arguments")
-required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 						help="File(s) to align (fasta)")
-required_arguments.add_argument('-db',  '--database', 	metavar='', 						help='CanSNP database')
-#parser.add_argument('--initiate', 			action='store_true', 				help="Use to add a CanSNP info table to FlexTaxDatabase")
-#parser.add_argument('--load_snp_annotation',metavar='', default=False, 			help="On initiation supply annotation for the snps")
+required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 		help="File(s) to align (fasta)")
+required_arguments.add_argument('-db',  '--database', 	metavar='', 							help='CanSNP database')
 
 output_options = parser.add_argument_group("Output options")
-output_options.add_argument('-o', 	 '--outdir', 	metavar='DIR', default="results",		help="Output directory")
-output_options.add_argument('--snpfile', 			metavar='FILENAME', default="snps",	help="specify name of export and include called snp output")
-output_options.add_argument('--save_tree',			action='store_true',				help='Save tree as PDF using ETE3 (default False)')
-output_options.add_argument('--no_export', 			action='store_false',				help="Add argument to stop default snpfile and snpcalled file output.")
-output_options.add_argument('--summary',			action='store_true',				help="Output final SNP summary file and a tree with all called SNPs")
+output_options.add_argument('-o', '--outdir', 			metavar='DIR', default="results",		help="Output directory")
+output_options.add_argument('--save_tree',				action='store_true',					help='Save tree as PDF using ETE3 (default False)')
+output_options.add_argument('--no_snpfiles', 			action='store_false',					help="Don´t save output files.")
+output_options.add_argument('--summary',				action='store_true',					help="Output a summary file and tree with all called SNPs\nnot affected by no_snpfiles")
 
 run_options = parser.add_argument_group("Run options")
 run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
 run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
 run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
+run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
+run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
 
 '''Remove the two below when script is complete, possibly keep as hidden for debug'''
 run_options.add_argument('--skip_mauve' ,		action='store_true', 				help="If xmfa files already exists skip step")
-run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 run_options.add_argument('--keep_temp',			action='store_true', 				help="keep temporary files")
-run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
+
 
 debugopts = parser.add_argument_group("Logging and debug options")
 debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify reference directory")
@@ -78,8 +76,6 @@ debugopts.add_argument('--logdir', 			metavar='', default="logs/", 								help=
 debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,					help="Verbose output")
 debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")
 debugopts.add_argument('--supress',	action='store_const', const=logging.ERROR,	default=logging.WARNING,	help="Supress warnings")
-parser.add_argument('--organism', 			metavar='', default="Francisella", 	help="Specify organism")  ## Will probably be depricated and decided by database selection
-
 parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
 
 args = parser.parse_args()
@@ -152,8 +148,7 @@ def main():
 									save_tree=args.save_tree,
 									keep_temp= args.keep_temp,
 									workdir=args.workdir,
-									export=args.no_export,
-									snpfile=args.snpfile,
+									export=args.no_snpfiles,
 									database=args.database,
 									min_required_hits=args.min_required_hits,
 									keep_going=args.keep_going,
@@ -162,7 +157,7 @@ def main():
 	)
 
 	'''Run CanSNPer2'''
-	CanSNPer2_obj.run(database=args.database,organism=args.organism)
+	CanSNPer2_obj.run(database=args.database)
 
 if oname=="__main__":
 	main()

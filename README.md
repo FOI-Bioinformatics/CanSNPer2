@@ -41,7 +41,7 @@ Create database, download references and run CanSNPer2
 ```sh
 CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
 CanSNPer2-download --database francisella_tularensis.db -o references
-CanSNPer2 sample.fasta --database francisella_tularensis.db -o results --save_tree --refdir references --snpfile 200320
+CanSNPer2 sample.fasta --database francisella_tularensis.db -o results --save_tree --refdir references
 ```
 references.txt
 ```
@@ -77,7 +77,7 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--snpfile FILENAME] [--save_tree] [--no_export] [--refdir] [--workdir] [--read_input] [--skip_mauve]
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_export] [--refdir] [--workdir] [--read_input] [--skip_mauve]
                  [--keep_going] [--keep_temp] [--tmpdir] [--logdir] [--verbose] [--debug] [--supress] [--organism]
                  [query [query ...]]
 
@@ -93,10 +93,9 @@ Required arguments:
 
 Output options:
   -o DIR, --outdir DIR  Output directory
-  --snpfile FILENAME    specify name of export and include called snp output
   --save_tree           Save tree as PDF using ETE3 (default False)
-  --no_export           Add argument to stop default snpfile and snpcalled file output.
-  --summary             Output final SNP summary file and a tree with all called SNPs
+  --no_export           no file output (can be used if summary only is requested)
+  --summary             Output a summary file and tree with all called SNPs
 
 Run options:
   --refdir              Specify reference directory
