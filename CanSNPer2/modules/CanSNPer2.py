@@ -275,7 +275,7 @@ class CanSNPer2(object):
 		with open(summarypath,"w") as summaryout:
 			for snp in SNPS:
 				print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
-
+        
 		'''Print summary tree showing all unique SNPs in the final tree'''
 		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
 
