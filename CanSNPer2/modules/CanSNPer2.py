@@ -44,7 +44,6 @@ class CanSNPer2(object):
 		self.mauve_path = mauve_path
 		self.xmfa_files = []
 		self.export = kwargs["export"]
-		self.snpfile = "_snpfile" ## end name for temp xmfa files
 		self.database = database
 		self.min_required_hits = kwargs["min_required_hits"]
 		self.rerun = kwargs["rerun"]
@@ -270,12 +269,12 @@ class CanSNPer2(object):
 
 	def print_summary(self):
 		'''Create summary file and tree'''
-		summarypath = "{outdir}/summary_final_snps.txt".format(outdir=self.outdir)
+		summarypath = "{outdir}/snps_summary.txt".format(outdir=self.outdir)
 		SNPS = self.read_result_dir()
 		with open(summarypath,"w") as summaryout:
 			for snp in SNPS:
 				print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
-        
+
 		'''Print summary tree showing all unique SNPs in the final tree'''
 		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
 
@@ -300,7 +299,6 @@ class CanSNPer2(object):
 			parse_xmfa_obj = ParseXMFA(
 						database=database,
 						export=self.export,
-						snpfile=self.snpfile,
 						verbose=self.verbose)  ## Create XMFA object and connect to database
 			'''Walk through the list of queries supplied'''
 			if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
@@ -312,7 +310,7 @@ class CanSNPer2(object):
 					if not os.path.exists(q):
 						raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
 
-					outputfile = "{outdir}/{xmfa}.{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+					outputfile = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
 					if os.path.exists(outputfile) and not self.rerun:
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
 						continue
@@ -340,8 +338,8 @@ class CanSNPer2(object):
 						continue
 					'''If file export is requested print the result for each SNP location to file'''
 					if self.export:
-						outputfile = "{outdir}/{xmfa}_not_called.txt".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
-						outputfile2 = "{outdir}/{xmfa}.{snpfile}".format(outdir=self.outdir,xmfa=self.query_name,snpfile=self.snpfile)
+						outputfile = "{outdir}/{xmfa}_not_called.txt".format(outdir=self.outdir,xmfa=self.query_name)
+						outputfile2 = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
 
 						logger.info("Printing SNP info to {file}".format(file=outputfile))
 						self.csnpdict = {}

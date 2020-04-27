@@ -6,15 +6,15 @@ Module to read and write newick trees
 '''
 from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from ete3 import Tree, AttrFace, TreeStyle, NodeStyle
+from ete3 import Tree, faces, AttrFace, TreeStyle, NodeStyle
 '''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.
 	It fails due to faces not being available in that ete3 version on import, but it works when ete3 is
 	 being installed manually using conda.
 '''
-try:
-	from ete3 import faces
-except ImportError:
-	logger.warning("ImportError for the funtion faces of the ete3 package, install the latest version of ete3!")
+# try:
+# 	from ete3 import faces
+# except ImportError:
+# 	logger.warning("ImportError for the funtion faces of the ete3 package, install the latest version of ete3!")
 
 import sys
 import logging
