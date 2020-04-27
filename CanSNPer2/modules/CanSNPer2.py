@@ -49,9 +49,6 @@ class CanSNPer2(object):
 		self.min_required_hits = kwargs["min_required_hits"]
 		self.rerun = kwargs["rerun"]
 
-		#self.initiate = kwargs["initiate"]
-		#self.annotation = kwargs["annotation"]
-
 		'''Create log and tmpdir if they do not exist'''
 		self.workdir = kwargs["workdir"]
 		if not os.path.exists(self.workdir):
@@ -278,16 +275,7 @@ class CanSNPer2(object):
 		with open(summarypath,"w") as summaryout:
 			for snp in SNPS:
 				print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
-				# if len(set([snp]) & self.summary_set)>0:
-				# 	### called, change color to green
-				# 	SNPS[snp] = 1
-				# 	### print to summary file
-				# 	print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
-				# else:
-				# 	### not called change color to purple
-				# 	SNPS[snp] = 2
-
-
+        
 		'''Print summary tree showing all unique SNPs in the final tree'''
 		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
 
@@ -299,7 +287,6 @@ class CanSNPer2(object):
 			if self.query[0].endswith(".txt"):
 				logger.info("Textfile input was found, parsing filepaths in {q} file".format(q=self.query[0]))
 				self.query=self.read_query_textfile_input(self.query)
-
 
 			'''Main function of CanSNPer2
 					1. Align sequences with progressiveMauve
