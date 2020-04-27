@@ -4,15 +4,15 @@ Module to read and write newick trees
 '''
 from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from ete3 import Tree, faces, AttrFace, TreeStyle, NodeStyle
+from ete3 import Tree, AttrFace, TreeStyle, NodeStyle
 '''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.
 	It fails due to faces not being available in that ete3 version on import, but it works when ete3 is
 	 being installed manually using conda.
 '''
-# try:
-# 	from ete3 import faces
-# except ImportError:
-# 	logger.warning("ImportError for the funtion faces of the ete3 package, install the latest version of ete3!")
+try:
+	from ete3 import faces
+except ImportError:
+	logger.warning("ImportError for the funtion faces of the ete3 package, install the latest version of ete3!")
 
 import sys
 import logging
@@ -102,16 +102,16 @@ class NewickTree(object):
 
 	"""
 
-	def __init__(self, database,name="newick",outdir="./",min_required_hits=3):
+	def __init__(self, database,name="newick",outdir="./",min_required_hits=3,strictness=0.7):
 		super(NewickTree, self).__init__()
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
 		self.tree_file = "{outdir}/{name}_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
 		self.min_required_hits = min_required_hits
+		self.strictness = strictness
 		## Build the newick tree
 		self.newickTree = str(self.build_tree())
-
 		## Tree colors
 		self.snp_colors = {
 			"derived": "#63e563", 			## Green
@@ -191,7 +191,7 @@ class NewickTree(object):
 		'''
 		tree = self.get_tree()
 		nodes = self.get_nodes()
-		logger.info("Nodes: {n} Links: {l}".format(n=len(nodes),l=len(tree)))
+		logger.debug("Nodes: {n} Links: {l}".format(n=len(nodes),l=len(tree)))
 		logger.debug([nodes,tree])
 		for parent,child in tree:
 			if parent == child:  ## root
@@ -217,7 +217,7 @@ class NewickTree(object):
 		try:
 			logger.debug("Confirm path")
 			count = 0
-			logger.info(dist_list)
+			logger.debug(dist_list)
 			dist,node = dist_list
 			while node:
 				if node.name == "ROOT":
@@ -228,10 +228,12 @@ class NewickTree(object):
 				else: ## If ancestral node is found in the path it means it is confirmed ancestral, therefore the current path is not correct!
 					count = 0
 				node = node.up
-			logger.debug(count)
 			quota = float(count)/dist
-			logger.info("Confirm quota: {quota}".format(quota=quota))
-			if quota > 0.7 and count >=self.min_required_hits:
+			logger.debug("-- Confirm strictness: {quota}".format(quota=quota))
+			logger.debug("-- Min required hits: {minhit}, {count}".format(minhit= self.min_required_hits, count=count))
+			if quota >= self.strictness and count >=self.min_required_hits:
+				logger.info("Confirm strictness: {quota}, ({count}/{dist})".format(quota=quota,count=count,dist=dist))
+				logger.info("Min required hits: {minhit}, hits: {count}".format(minhit= self.min_required_hits, count=count))
 				return True,count
 			return False,count
 		except KeyError as e:
@@ -357,7 +359,6 @@ class NewickTree(object):
 		final = "NA"
 		logger.info("Called snps: {called}".format(called=called_snps))
 		if called_snps:
-			logger.info("Call SNPs!")
 			try:
 				troot = tree.get_tree_root()
 				'''Calculate the distance from all nodes to the root'''

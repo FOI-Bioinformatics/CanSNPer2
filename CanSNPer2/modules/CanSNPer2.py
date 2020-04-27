@@ -45,6 +45,7 @@ class CanSNPer2(object):
 		self.export = kwargs["export"]
 		self.database = database
 		self.min_required_hits = kwargs["min_required_hits"]
+		self.strictness = kwargs["strictness"]
 		self.rerun = kwargs["rerun"]
 
 		'''Create log and tmpdir if they do not exist'''
@@ -117,6 +118,7 @@ class CanSNPer2(object):
 			number of references supplied. A warning message will be given if the number of input references
 			exceeds the number of references in the database
 		'''
+		retvalue=0
 		processes = []  #process container
 		log_f = {}      #log container
 		error = 0   #Variable for errors
@@ -135,11 +137,14 @@ class CanSNPer2(object):
 					## When a process is finished open the log file and write stdout/stderr to log file
 					with open(log_f[p.stdout.fileno()], "w") as log:
 						print(p.stdout.read().decode('utf-8'),file=log)
-
 					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
 					if exitcode == 11:
 						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
-						logger.warning("This progressiveMauve error is showing up for bad genomes containing short repetative contigs ".format(exitcode=exitcode))
+						logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes".format(exitcode=exitcode))
+						retvalue=11
+					elif exitcode == -6:
+						logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!!")
+						retvalue=6
 					elif exitcode != 0:
 						if not self.keep_going:
 							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode))
@@ -147,16 +152,18 @@ class CanSNPer2(object):
 						logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=log_f[p.stdout.fileno()],exitcode=exitcode))
 					## Remove process from container
 					processes.remove(p)
-		if not self.keep_going:
+		if retvalue == 6 or retvalue == 11: ## This is done if sequence is not free of gaps
+			return retvalue
+		elif not self.keep_going:
 			if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
 				logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
 				raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
 		else:
-			return 1
-		return 0
+			retvalue=1
+		return retvalue
 
-	def align(self, query, references=[]):
-		'''Align sequences and run mauve as subprocess'''
+	def create_mauve_command(self,query,references=[]):
+		'''Mauve commands'''
 		commands =[]    # store execute command
 		logs = []       # store log filepath
 		if len(references) == 0:    ## If specific references are not given fetch references from the reference folder
@@ -178,8 +185,24 @@ class CanSNPer2(object):
 			commands.append(command)            ## Mauve command
 			logs.append(log_file)               ## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
+		return commands,logs
+
+	def align(self, query, references=[]):
+		'''Align sequences and run mauve as subprocess'''
+		commands,logs = self.create_mauve_command(query,references)
 		if not self.skip_mauve: ### If mauve command was already run before don´t run mauve return xmfa paths
 			ret = self.run_mauve(commands,logs)
+			if int(ret) == 11:
+				'''This error might be caused by mauve not handling dash(-) in the sequence, change the incoming sequence and replace - with N and retry once'''
+				logger.warning("Mauve ran into an error with sequence {seq} may contain a dash, replace with N characters and retry mauve".format(seq=query))
+				query_base = os.path.basename(query)
+				logger.debug("sed 's/-/N/g' {query} > {tmpdir}/{query_base}.tmp".format(query=query,query_base=query_base,tmpdir=self.tmpdir))
+				self.xmfa_files = []
+				os.system("sed 's/-/N/g' {query} > {tmpdir}/{query_base}.tmp".format(query=query,query_base=query_base,tmpdir=self.tmpdir))
+				new_query = "{tmpdir}/{query}.tmp".format(query=query_base,tmpdir=self.tmpdir)
+				logger.debug("New query: {nq}".format(nq=new_query))
+				commands,logs = self.create_mauve_command(new_query,references)
+				ret = self.run_mauve(commands,logs)
 			if ret != 0:
 				return []
 			logger.info("Alignments for {query} complete!".format(query=query))
@@ -187,11 +210,11 @@ class CanSNPer2(object):
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,summary=False):
+	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False):
 		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
 			and outputs a pdf file
 		'''
-		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits)
+		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
 		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree,summary=summary)
 		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
 		return final_snp
@@ -328,7 +351,7 @@ class CanSNPer2(object):
 						self.xmfa_files = []
 						continue
 					'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
-					logger.info("Finding SNPs")
+					logger.info("Find SNPs")
 					try:
 						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,export=True)
 					except FileNotFoundError:
@@ -340,7 +363,7 @@ class CanSNPer2(object):
 						outputfile = "{outdir}/{xmfa}_not_called.txt".format(outdir=self.outdir,xmfa=self.query_name)
 						outputfile2 = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
 
-						logger.info("Printing SNP info to {file}".format(file=outputfile))
+						logger.info("Printing SNP info of non called SNPs to {file}".format(file=outputfile))
 						self.csnpdict = {}
 						'''Print SNPs to tab separated file'''
 						with open(outputfile,"w") as snplist_out:
@@ -353,7 +376,7 @@ class CanSNPer2(object):
 
 					'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 					SNP = "NA" ## Default message if SNP cannot be confirmed
-					final_snp,message,called = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits)
+					final_snp,message,called = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA

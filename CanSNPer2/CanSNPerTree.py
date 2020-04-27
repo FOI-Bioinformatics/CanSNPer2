@@ -61,6 +61,7 @@ run_options.add_argument('--refdir', 			metavar='', default="references/",	help=
 run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
 run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
+run_options.add_argument('--strictness', 		type=float, default=0.7,			help="Percent of snps in path reqired for calling SNP (default 0.7)")
 run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
 
@@ -152,7 +153,8 @@ def main():
 									min_required_hits=args.min_required_hits,
 									keep_going=args.keep_going,
 									rerun=args.rerun,
-									summary=args.summary
+									summary=args.summary,
+									strictness=args.strictness
 	)
 
 	'''Run CanSNPer2'''
