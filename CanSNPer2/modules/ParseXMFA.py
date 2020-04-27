@@ -93,7 +93,7 @@ class ParseXMFA(object):
 				i+=1
 			if i == snppos:                	## if current possition contains a snp
 				SNP[snp_id] = 0
-				_snp = target[ii]        	## get base in target sequence
+				_snp = target[ii].upper()        	## get base in target sequence make sure it is upper case!
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
 					_snp = self.rcDict[_snp]
