@@ -358,10 +358,9 @@ class XMFAFunctions(DatabaseConnection):
 			SNPs[pos] = tuple([pos,rbase, tbase,SNP])
 		return SNPs
 
-	def get_snps(self, organism,reference="SCHUS4.2"):
+	def get_snps(self, reference="SCHUS4.2"):
 		'''Returns a list of all SNPs and their positions.
 		Keyword arguments:
-		organism -- the name of the organism
 		returns: results as a dictionary with tuple SNP for each position {pos: (pos, refBase, TargetBase, SNPid)}
 				 and a list of positions sorted ASC
 		'''

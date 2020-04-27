@@ -1,5 +1,16 @@
 # CanSNPer2
-The second release of CanSNPer (CanSNPer2) is exclusively written for python3. CanSNPer2 is simplified from CanSNPer1 stripped to only perform required tasks. It is also written in a modular form with separate classes for each task which allows future extentions such as a sequence read input option planned during 2020. 
+CanSNPer2: A toolkit for SNP-typing NGS data.
+
+Future planned implementations
+* Read input - Call SNPs directly from reads instead of an assembly
+
+Databases supplied can be found at https://github.com/FOI-Bioinformatics/CanSNPer2-data
+
+* SARS-CoV-2
+* Francisella tularensis
+* Brucella
+* Yersinia pestis
+* Bacillus anthracis
 
 ## Installation
 Installing using bioconda
@@ -13,20 +24,42 @@ Installing from the repository
 python setup.py install
 ```
 
-## Requirements
+## Requirements (for manual install conda will install all dependencies)
 
 * ETE3
-* FlexTaxD
+* FlexTaxD - https://github.com/FOI-Bioinformatics/flextaxd
 * progressiveMauve
 
-## Quick start
-Create database, download references and run CanSNPer2
+Read input (not yet implemeted)
+* BWA
+* Minimap2
+
+## User guide CanSNPer2 (for custom databases see below)
+1. Download pre-built databases from https://github.com/FOI-Bioinformatics/CanSNPer2-data
+
+2. Download references for database
+
+```sh
+CanSNPer2-download --database downloaded_database.db
+```
+
+3. Run genomes
+```sh
+CanSNPer2 --database downloaded_database.db fastadir/*.fasta --summary
+```
+
+The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree pdf with all SNPs from set colored.
+
+For more options CanSNPer2 --help
+
+## Quick start custom databases
+Create database, download references annotated in the database and run CanSNPer2
 ```sh
 CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
-CanSNPer2-download --database francisella_tularensis.db -o references
-CanSNPer2 sample.fasta --database francisella_tularensis.db -o results --save_tree --refdir references --snpfile 200320
+CanSNPer2-download --database francisella_tularensis.db
+CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --save_tree
 ```
-references.txt
+Example structure of references.txt
 ```
 genome strain  genbank_id      refseq_id       assembly_name
 OSU18   OSU18   GCA_000014605.1 GCF_000014605.1 ASM1460v1
@@ -36,7 +69,7 @@ LVS     LVS     GCA_000009245.1 GCF_000009245.1 ASM924v1
 SCHUS4.2        SCHUS4  GCA_000008985.1 GCF_000008985.1 ASM898v1
 
 ```
-snps.txt (NEW headerline)
+Example structure of snps.txt (NEW headerline)
 ```
 snp_id	strain	reference	genome	position	derived_base	ancestral_base
 T/N.1	francisella	Svensson2009	SCHUS4.2	83976	A	G
@@ -47,7 +80,7 @@ A.1	francisella	Vogler2009	SCHUS4.2	397639	T	C
 B.1	francisella	Birdsell2014	OSU18	1710718	T	C
 ...
 ```
-tree.txt
+Example structure of tree.txt
 ```
 T/N.1
 T/N.1	T.1		
@@ -57,18 +90,21 @@ T/N.1	T.1	A/M.1	A.1
 T/N.1	T.1	A/M.1	M.1
 ...
 
+
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--snpfile FILENAME] [--save_tree] [--no_export] [--refdir] [--workdir] [--read_input] [--skip_mauve]
-                 [--keep_going] [--keep_temp] [--tmpdir] [--logdir] [--verbose] [--debug] [--supress] [--organism]
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_export]
+                 [--refdir] [--workdir]
+                 [--read_input] [--skip_mauve]
+                 [--keep_going] [--keep_temp]
+                 [--tmpdir] [--logdir] [--verbose] [--debug] [--supress]
                  [query [query ...]]
 
 CanSNPer2
 
 optional arguments:
   -h, --help            show this help message and exit
-  --organism            Specify organism
 
 Required arguments:
   query                 File(s) to align (fasta)
@@ -76,17 +112,22 @@ Required arguments:
 
 Output options:
   -o DIR, --outdir DIR  Output directory
-  --snpfile FILENAME    specify name of export and include called snp output
   --save_tree           Save tree as PDF using ETE3 (default False)
-  --no_export           Add argument to stop default snpfile and snpcalled file output.
+  --no_export           no file output (can be used if summary only is requested)
+  --summary             Output a summary file and tree with all called SNPs
 
 Run options:
   --refdir              Specify reference directory
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
-  --skip_mauve          If xmfa files already exists skip step
+                        (not implemeted expected for version v2.1.0)
+  --min_required_hits   MIN_REQUIRED_HITS
+                        Minimum sequential hits to call a SNP!
   --keep_going          If Error occurs, continue with the rest of samples
+  --rerun               Rerun already processed files (else skip if result file exists)
+
   --keep_temp           keep temporary files
+  --skip_mauve          If xmfa files already exists skip step
 
 Logging and debug options:
   --tmpdir              Specify reference directory
@@ -97,7 +138,7 @@ Logging and debug options:
 ```
 
 
-Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki). 
+Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki).
 
 About this software
 ===================
@@ -109,8 +150,8 @@ under the [GPL-3.0 license](LICENSE).
 If you experience any difficulties with this software, or you have suggestions, or want
 to contribute directly, you have the following options:
 
-- submit a bug report or feature request to the 
+- submit a bug report or feature request to the
   [issue tracker](https://github.com/FOI-Bioinformatics/CanSNPer2/issues)
-- contribute directly to the source code through the 
+- contribute directly to the source code through the
   [github](https://github.com/FOI-Bioinformatics/CanSNPer2) repository. 'Pull requests' are
   especially welcome.
