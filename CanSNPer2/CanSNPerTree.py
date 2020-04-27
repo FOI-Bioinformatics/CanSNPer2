@@ -2,7 +2,7 @@
 CanSNPer2: A toolkit for SNP-typing NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
-VERSION 2.0.4 release of CanSNPer2
+VERSION 2.0.5 release of CanSNPer2
 
 The second release of CanSNPer (CanSNPer2) is exclusively written for python3
 CanSNPer2 is simplified from CanSNPer1 stripped to only perform
@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 oname = __name__
 __name__ 		= "CanSNPer2"
-__version__ 	= "2.0.4"
+__version__ 	= "2.0.5"
 __author__ 		= "David Sundell"
 __credits__ 	= ["David Sundell"]
 __license__ 	= "GPLv3"
