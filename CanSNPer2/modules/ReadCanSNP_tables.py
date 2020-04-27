@@ -1,5 +1,3 @@
-#!/usr/bin/env python3 -c
-
 '''
 Read CanSNPer1 tables takes CanSNPer version 1 input files and parses them to a database
 '''

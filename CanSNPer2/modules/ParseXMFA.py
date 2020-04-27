@@ -1,5 +1,3 @@
-#!/usr/bin/env python3 -c
-
 '''
 ParseXMFA is a script that parse xmfa files and extract all SNPs
 	The script allows an option using a flanking score that limits

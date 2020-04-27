@@ -1,4 +1,3 @@
-#!/usr/bin/env python3 -c
 '''
 CanSNPer2: A toolkit for SNP-typing NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group

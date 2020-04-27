@@ -1,5 +1,3 @@
-#!/usr/bin/env python3 -c
-
 '''
 Module to read and write newick trees
 

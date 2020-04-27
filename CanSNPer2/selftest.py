@@ -1,4 +1,3 @@
-#!/usr/bin/env python3 -c
 '''
 CanSNPer self test for conda
 Check so that all required packages are installed

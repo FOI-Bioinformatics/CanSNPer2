@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 '''
 	Modify and update the CanSNPer2 database
 '''

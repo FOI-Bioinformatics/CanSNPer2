@@ -1,5 +1,3 @@
-#!/usr/bin/env python3 -c
-
 '''
 Read NCBI taxonomy dmp files (nodes or names) and holds a dictionary
 '''
