@@ -206,7 +206,7 @@ class NewickTree(object):
 		'''Layout function for ETE3 trees.'''
 		# Adds the name face to the image at the top side of the branch
 		if not node.is_root():
-			ete3.faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
+			ete3.faces.add_face_to_node(ete3.AttrFace("name"), node, column=0, position="branch-top")
 
 	def _confirm_path(self,dist_list,called_snps,snplist):
 		'''Confirm path of snps'''
