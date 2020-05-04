@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 '''
 CreateDatabase is a simple script to simplify the creation of a new database
 '''

@@ -4,15 +4,11 @@ Module to read and write newick trees
 '''
 from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from ete3 import Tree, AttrFace, TreeStyle, NodeStyle
+import ete3
 '''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.
 	It fails due to faces not being available in that ete3 version on import, but it works when ete3 is
 	 being installed manually using conda.
 '''
-try:
-	from ete3 import faces
-except ImportError:
-	logger.warning("ImportError for the funtion faces of the ete3 package, install the latest version of ete3!")
 
 import sys
 import logging
@@ -210,7 +206,7 @@ class NewickTree(object):
 		'''Layout function for ETE3 trees.'''
 		# Adds the name face to the image at the top side of the branch
 		if not node.is_root():
-			faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
+			ete3.faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
 
 	def _confirm_path(self,dist_list,called_snps,snplist):
 		'''Confirm path of snps'''
@@ -283,13 +279,13 @@ class NewickTree(object):
 		'''
 		logger.debug("Draw tree from snplist")
 		try:
-			tree = Tree(self.newickTree, format=1)
+			tree = ete3.Tree(self.newickTree, format=1)
 		except:
 			logger.debug(self.newickTree)
 		farthest_leaf, tree_depth = tree.get_farthest_leaf()
 		for n in tree.traverse():
 			# The ancestral node is set to have a red colour
-			nstyle = NodeStyle()
+			nstyle = ete3.NodeStyle()
 			# If the SNP is missing due to a gap, make it grey
 			nstyle["fgcolor"] = self.snp_colors["non_aligned"]
 			nstyle["size"] = 10
@@ -342,7 +338,7 @@ class NewickTree(object):
 
 			if n.name != "ROOT": ## Root should be just a line not a false "ancenstral node"
 				n.set_style(nstyle)
-		ts = TreeStyle()
+		ts = ete3.TreeStyle()
 		ts.show_leaf_name = False  						# Do not print(leaf names, they are added in layout)
 		ts.show_scale = False  							# Do not show the scale
 		ts.layout_fn = self.CanSNPer_tree_layout  		# Use the custom layout

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys, os
 import textwrap
 from urllib.request import urlretrieve

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 '''
 CanSNPer self test for conda
 Check so that all required packages are installed
@@ -16,4 +17,3 @@ except ImportError:
 
 def main():
 	print("required python packages installed!")
-
