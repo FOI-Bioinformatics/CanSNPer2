@@ -8,6 +8,8 @@ Databases supplied can be found at https://github.com/FOI-Bioinformatics/CanSNPe
 
 * SARS-CoV-2
 * Francisella tularensis
+
+#### Upcoming databases
 * Brucella
 * Yersinia pestis
 * Bacillus anthracis
