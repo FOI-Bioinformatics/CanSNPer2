@@ -6,19 +6,20 @@ Future planned implementations
 
 Databases supplied can be found at https://github.com/FOI-Bioinformatics/CanSNPer2-data
 
-* SARS-CoV-2
 * Francisella tularensis
-
+* Bacillus anthracis
+* Yersinia pestis
+* 
 #### Upcoming databases
 * Brucella
-* Yersinia pestis
-* Bacillus anthracis
+
 
 ## Installation
-Installing using bioconda
+Installing using bioconda using mamba (recommended instead of conda)
 
 ```
-conda install cansnper2
+mamba create -n cansnper2 cansnper2
+mamba activate cansnper2
 ```
 
 Installing from the repository
