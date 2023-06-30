@@ -9,9 +9,10 @@ Databases supplied can be found at https://github.com/FOI-Bioinformatics/CanSNPe
 * Francisella tularensis
 * Bacillus anthracis
 * Yersinia pestis
-* 
+ 
 #### Upcoming databases
 * Brucella
+* Coxiella
 
 
 ## Installation
