@@ -354,6 +354,12 @@ class XMFAFunctions(DatabaseConnection):
 		SNPs = {}
 		res = self.query(snp_string, (reference,),getres=True)
 		for strain, pos,tbase,rbase,SNP in res.fetchall():
+			# check if this position was already added and if so throw an error (cansnper does not save SNPs by their ID but rather by their position in each reference)
+			if pos in SNPs:
+				logger.error("Error: there was a duplicate CanSNP in your CanSNPer database at position "+str(pos)+" in reference "+reference)
+				logger.error("Please check your database input files")
+				raise Exception("Multiple SNPs with same position")
+			#/
 			SNPs[pos] = tuple([pos,rbase, tbase,SNP])
 		return SNPs
 
