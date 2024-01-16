@@ -133,8 +133,12 @@ class ParseXMFA(object):
 			targetHead = self.parse_head(targetSeq.pop(0))	## parse target sequence header
 			'''Parse aligned sequence pair '''
 			while int(self.current_snp) < int(refHead["start"]): ## Current SNP not aligned
-				if not self._next_pos():
+				# Keep iterating new canSNP-positions until the end of current alignment or until there are no more canSNPs to check
+				self._next_pos() # iterate snp position
+				if self.current_snp > refHead["end"] or len(self.snp_positions) == 0: # if the new snp position is beyond alignment range, then break. Also break if we run out of snp positions to check
 					break
+				#/
+
 			if refHead["start"] < self.current_snp and refHead["end"] > self.current_snp:
 				'''Check if current snp is within this mapped region else skip'''
 				ref = "".join(refSeq)				 ## Make reference sequence one string
