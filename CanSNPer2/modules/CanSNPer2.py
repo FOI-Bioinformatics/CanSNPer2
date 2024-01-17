@@ -16,7 +16,7 @@ from CanSNPer2.CanSNPerTree import __version__
 ## import standard python libraries for subprocess and multiprocess
 from subprocess import Popen,PIPE,STDOUT
 from multiprocessing import Process, Queue
-from time import sleep
+from time import sleep,time
 
 class Error(Exception):
 	"""docstring for Error"""
@@ -120,14 +120,14 @@ class CanSNPer2(object):
 		'''
 		retvalue=0
 		processes = []  #process container
-		log_f = {}      #log container
+		log_f = {}	  #log container
 		error = 0   #Variable for errors
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
-			logger.debug(command)            ## In verbose mode print the actual mauve command
+			logger.debug(command)			## In verbose mode print the actual mauve command
 			p = Popen(command.split(" "),  stdout=PIPE, stderr=STDOUT)  ##Split command to avoid shell=True pipe stdout and stderr to stdout
-			log_f[p.stdout.fileno()] = logs[i]      ## Store the reference to the correct log file
+			log_f[p.stdout.fileno()] = logs[i]	  ## Store the reference to the correct log file
 			processes.append(p)
 		while processes:
 			for p in processes: ## Loop through processes
@@ -164,11 +164,11 @@ class CanSNPer2(object):
 
 	def create_mauve_command(self,query,references=[]):
 		'''Mauve commands'''
-		commands =[]    # store execute command
-		logs = []       # store log filepath
-		if len(references) == 0:    ## If specific references are not given fetch references from the reference folder
+		commands =[]	# store execute command
+		logs = []	   # store log filepath
+		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
-		for ref in references:      ## For each reference in the reference folder align to query
+		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			#self.query_name = os.path.basename(query).rsplit(".",1)[0] ## get name of file and remove ending
 			xmfa_output = "{tmpdir}/{ref}_{target}.xmfa".format(tmpdir=self.tmpdir.rstrip("/"),ref=ref_name,target=self.query_name)
@@ -177,13 +177,13 @@ class CanSNPer2(object):
 
 			'''Create run command for mauve'''
 			command = "{mauve_path}progressiveMauve --output {xmfa} {ref_fasta} {target_fasta}".format(
-							mauve_path      = self.mauve_path,
-							xmfa            = xmfa_output,
-							ref_fasta       = ref_file,
-							target_fasta    = query
+							mauve_path	  = self.mauve_path,
+							xmfa			= xmfa_output,
+							ref_fasta	   = ref_file,
+							target_fasta	= query
 			)
-			commands.append(command)            ## Mauve command
-			logs.append(log_file)               ## Store log files for each alignment
+			commands.append(command)			## Mauve command
+			logs.append(log_file)			   ## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
 		return commands,logs
 
@@ -242,14 +242,25 @@ class CanSNPer2(object):
 		export_results.put(XMFA_obj.get_snp_info())
 		called_snps.put(XMFA_obj.get_called_snps())
 		return results
-
+	
 	def find_snps(self,XMFA_obj,xmfa_file,results=[],export_results=[],called_snps=[]):
 		'''Align sequences to references and return SNPs'''
+		# execute snp calling
 		XMFA_obj.run(xmfa_file)
-		results.put(XMFA_obj.get_snps())
-		export_results.put(XMFA_obj.get_snp_info())
-		called_snps.put(XMFA_obj.get_called_snps())
-		return results
+		#/
+		# stream output into Queues (if the complete job output is put in then the queue gets filled when having "large" outputs. It has to be streamed to the queue so that the queue can simultanously be cleared)
+		for result in XMFA_obj.get_snps().items(): # returns dictionary
+			results.put(result)
+		for result in XMFA_obj.get_snp_info(): # returns array
+			export_results.put(result)
+		for result in XMFA_obj.get_called_snps(): # returns array
+			called_snps.put(result)
+		#/
+		# when finished, put a "stop-signal"
+		results.put('XMFA_obj_finish_worker_'+XMFA_obj.reference)
+		export_results.put('XMFA_obj_finish_worker_'+XMFA_obj.reference)
+		called_snps.put('XMFA_obj_finish_worker_'+XMFA_obj.reference)
+		#/
 
 	def find_snps_multiproc(self,xmfa_obj,xmfa_files,export=False):
 		'''function to run genomes in paralell'''
@@ -260,19 +271,65 @@ class CanSNPer2(object):
 		result_queue = Queue()
 		export_queue = Queue()
 		called_queue = Queue()
-		for xmfa_file in xmfa_files:
+		for enum,xmfa_file in enumerate(xmfa_files):
 			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
 			p.start()
 			jobs.append(p)
 			sleep(0.05) ## A short sleep to make sure all threads do not initiate access to the database file simultanously
+		
+		## Parse output queues from jobs continuously
+		finish_signals = {'SNPS':set(),'SNP_info':set(),'called_snps':set()} # will keep track when all workers are finished
+		tic = time() # "tic-toc" clock-sound
+		while True:
+			# check SNP queue
+			if not result_queue.empty():
+				tmp_data = result_queue.get()
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+					finish_signals['SNPS'].add(tmp_data.split('_')[-1])
+					logger.info("Output queue for 'SNPS' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
+				else:
+					SNPS[tmp_data[0]] = tmp_data[1]
+			#/
+			# check SNP info queue
+			if not export_queue.empty():
+				tmp_data = export_queue.get()
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+					finish_signals['SNP_info'].add(tmp_data.split('_')[-1])
+					logger.info("Output queue for 'SNP_info' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
+				else:
+					SNP_info.append(tmp_data)
+			#/
+			# check called snps queue
+			if not called_queue.empty():
+				tmp_data = called_queue.get()
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+					finish_signals['called_snps'].add(tmp_data.split('_')[-1])
+					logger.info("Output queue for 'called_snps' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
+				else:
+					called_snps.append(tmp_data)
+			#/
+			# check if finished (all xmfa files has returned the "finish worker" in all output queues)
+			finish_signals_called = []
+			for queue_name,signals in finish_signals.items():
+				if len(signals) == len(xmfa_files):
+					finish_signals_called.append(queue_name)
+			if len(finish_signals) == len(finish_signals_called):
+				logger.info("All output queues finished!")
+				break
+			#/
+			# check if we have computed for X amount of time, then break and assume something is wrong
+			max_time_seconds = 5*60 # 5*60 => 5 minutes
+			toc = time()
+			time_spent = toc - tic
+			if time_spent > max_time_seconds:
+				logger.warning("Maximum time spent reached to capture queue output. This is not expected to happen and might mean that your output data is corrupted.")
+				break
+			#/
+		##/
+		## Wait until processes terminated (their output should already have been processed in the queue's)
 		for job in jobs:
 			job.join()
-		for j in jobs:
-			## Merge SNP result dictionaries
-			SNPS = dict(**SNPS, **result_queue.get())
-			### join SNP info files
-			SNP_info+= export_queue.get()
-			called_snps+=called_queue.get()
+		##/
 		return SNPS,SNP_info,called_snps
 
 	def read_result_dir(self):
@@ -324,7 +381,7 @@ class CanSNPer2(object):
 						verbose=self.verbose)  ## Create XMFA object and connect to database
 			'''Walk through the list of queries supplied'''
 			if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
-			for q in self.query:            ## For each query file_path
+			for q in self.query:			## For each query file_path
 				try:
 					self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
 
