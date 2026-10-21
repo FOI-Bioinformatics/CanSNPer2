@@ -1,24 +1,7 @@
-Remove the flextaxd dependency: CanSNPer2 now carries its own taxonomy database code
+Fix SNP calling, query error handling, workdir handling and reference loading
 
-ISSUES #59-#62 (covers #1, #9-#12, #21-#24, #26), #44
-
-- modules/DatabaseConnection.py: ported CreateDatabase, a TaxonomyDBConnection
-  (creates a missing database through CreateDatabase instead of calling it as a
-  shell script), DatabaseFunctions and ModifyFunctions from flextaxd.
-- modules/ModifyTree.py (new): ported tree modification from flextaxd.
-- modules/ReadTaxonomyCanSNPer.py (new): the CanSNPer tree reader (semicolon/
-  tab lineage format) with its base class, connected to the local DatabaseFunctions.
-- modules/WriteTaxonomy.py (new): tab export of tree/annotation for --export.
-- InitiateDatabase, ModifyDatabase, NewickTree, SNPDatabase now import from
-  CanSNPer2.modules; get_read_modules scans CanSNPer2's own modules directory;
-  dynamic_import loads ReadTaxonomy{source_type} from CanSNPer2.modules.
-- ModifyDatabase super().__init__ passes separator/verbose/parent/replace as
-  keywords (they had landed in ModifyTree's clean_database/purge_database/
-  update_genomes positional slots), fixing #44's mod_genomes path.
-- setup.py install_requires drops flextaxd; selftest.py and README drop it too.
-
-Verified against the mapped flextaxd sources (read-only): creating the
-Francisella database from CanSNPer2-data/source with the ported code produces a
-database identical (all nodes/tree/rank rows) to the current flextaxd code, and
-a modify run (mod_file, parent B.1) matches flextaxd ModifyTree output; the
-tab export files are byte-identical.
+- ParseXMFA: SNP call condition 'or' -> 'and', gap/N no longer counted as other base (#43)
+- DatabaseConnection.query: UNIQUE-constraint error object is no longer returned on paths where callers chain fetch* calls (#55)
+- CanSNPer2.run: removed os.chdir, tmp/log/out/ref dirs resolved against workdir; print_summary now checks create_tree return before unpacking (#2, #7)
+- DownloadGenomes: symlink path built with os.path.join (no chdir), ValueError when no database, mkdir via os.makedirs (#8, #45, #46)
+- ModifyDatabase: load_genome_reference_file completed, opens the reference_file argument and adds each row to snp_references, keeping ids in self.genomes; add_genome inserts via self.taxonomydb (#25, #42)

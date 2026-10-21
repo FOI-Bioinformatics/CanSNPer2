@@ -54,25 +54,24 @@ class CanSNPer2(object):
 			logger.info("Creating working directory {workdir}".format(workdir=self.workdir))
 			os.makedirs(self.workdir)
 
-		try:
-			os.chdir(self.workdir)
-		except FileNotFoundError:
-			exit("The directory {workdir} could not be found!".format(workdir=self.workdir))
-
-		self.tmpdir = tmpdir
+		'''Resolve the working paths against workdir instead of changing the
+			process working directory, which is global state (issue #2)'''
+		self.tmpdir = os.path.join(self.workdir, tmpdir)
 		if not os.path.exists(self.tmpdir):
 			logger.info("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
 			os.makedirs(self.tmpdir)
 
-		self.logdir = kwargs["logdir"]
+		self.logdir = os.path.join(self.workdir, kwargs["logdir"])
 		if not os.path.exists(self.logdir):
 			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
 			os.makedirs(self.logdir)
 
-		self.outdir = kwargs["outdir"]
+		self.outdir = os.path.join(self.workdir, kwargs["outdir"])
 		if not os.path.exists(self.outdir):
 			logger.info("Creating output directory {outdir}".format(outdir=self.outdir))
 			os.makedirs(self.outdir)
+
+		self.refdir = os.path.join(self.workdir, self.refdir)
 
 		'''Fetch other key word arguments'''
 		self.skip_mauve = kwargs["skip_mauve"]
@@ -435,14 +434,17 @@ class CanSNPer2(object):
 
 					'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 					SNP = "NA" ## Default message if SNP cannot be confirmed
-					final_snp,message,called = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
+					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
+					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
+						tree_result = (False,"No SNP call was produced.",[])
+					final_snp,message,called = tree_result
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
 							SNP = "NA"
 						if self.export:
 							with open(outputfile2, "w") as called_out:
-								if True:
+								if called:
 									print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
 									for snp in called:
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)

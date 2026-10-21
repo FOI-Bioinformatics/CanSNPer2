@@ -107,7 +107,7 @@ class ParseXMFA(object):
 					self.called_snps.append(snp_id)
 				elif rbase == _snp:  		## SNP is confirmed to be ancestral
 					SNP[snp_id] = 2			## Ancestral SNP
-				elif _snp != "-" or _snp != "N":
+				elif _snp != "-" and _snp != "N":
 					SNP[snp_id] = 3			## Other base than ancestral or derived was found
 				self._next_pos()  ## SNP found get next
 				snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP

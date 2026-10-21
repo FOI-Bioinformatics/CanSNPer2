@@ -93,6 +93,10 @@ class DatabaseConnection(object):
 				logging.error("Insert val", insert_val)
 				logging.debug(str(e))
 				raise
+			if getres or error or not insert_val:
+				## UNIQUE is only swallowed for the plain inserts where callers test str(res) for it,
+				## when a cursor was requested the exception must propagate instead of breaking fetch* chains
+				raise
 			return(e)
 
 	def insert(self,data,table):

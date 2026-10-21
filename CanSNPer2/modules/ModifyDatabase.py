@@ -59,7 +59,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 				#"comment":             data["comment"]
 		}
 		logger.debug(info)
-		return self.insert(info, table="snp_references")
+		return self.taxonomydb.insert(info, table="snp_references")
 
 	def load_annotation_file(self,annotation_file):
 		'''Read the annotation source file'''
@@ -96,8 +96,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 
 	def load_genome_reference_file(self,reference_file):
 		'''Add new reference genomes from file!'''
-		logger.critical("The load reference modification function is not yet completed!")
-		with open(annotation_file) as af:
+		with open(reference_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			dataArr = []
@@ -108,7 +107,12 @@ class ModifyCanSNPer2Database(ModifyTree):
 					head,val = headers[i],data[i]
 					ddict[head] = val
 				dataArr.append(ddict)
-		return
+				genome_i = self.add_genome(ddict)
+				self.genomes[ddict["genome"]] = genome_i
+				self.genomes[ddict["genbank_id"]] = genome_i
+				self.genomes[ddict["refseq_id"]] = genome_i
+		self.taxonomydb.commit()
+		return dataArr
 
 
 	def update_database(self):

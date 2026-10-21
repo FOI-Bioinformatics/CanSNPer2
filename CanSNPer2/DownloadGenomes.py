@@ -25,6 +25,8 @@ class DownloadGenomes(object):
 		## This is a many to many relation, so all genomes has to be put in a set for each taxonomy id
 		genomeDict = {}
 		keys = []
+		if not database:
+			raise ValueError("get_genomes needs a database connection, none was provided")
 		QUERY = '''SELECT id,genome,strain,refseq_id,genbank_id,assembly_name FROM {table}'''.format(table="snp_references")
 		logger.debug(QUERY)
 		logger.debug("Selected source: {source}".format(source=source))
@@ -65,10 +67,10 @@ class DownloadGenomes(object):
 			urlretrieve(link, retrieved_file)
 			### unzip file (mauve cant handle zipped sources)
 			p = Popen(["gunzip", "-f", retrieved_file])
-			os.chdir(directory)
 			bname = os.path.basename(retrieved_file.rstrip(".gz"))
 			try:
-				os.symlink("source/{bname}".format(bname=bname), "{refid}.fna".format(refid=refid))
+				### symlink target is relative to the link location, so no chdir needed (issue #8)
+				os.symlink("source/{bname}".format(bname=bname), os.path.join(directory, "{refid}.fna".format(refid=refid)))
 			except FileExistsError:
 				logger.debug("symlink already exists, skip!")
 				return
@@ -120,7 +122,7 @@ def main():
 	args.logs = args.logs.rstrip("/")+"/"
 	logpath = args.logs+"CanSNPer2-database"+today.strftime("%b-%d-%Y")+"{}.log"
 	if not os.path.exists(args.logs):
-		os.system("mkdir -p {path}".format(path=args.logs))
+		os.makedirs(args.logs, exist_ok=True)
 	if os.path.exists(logpath):
 		logpath=logpath.format("-{:%H:%M}".format(t))
 	else: logpath = logpath.format("")
