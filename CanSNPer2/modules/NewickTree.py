@@ -143,15 +143,15 @@ class NewickTree(object):
 	def get_parent(self,name):
 		'''return parent'''
 		#QUERY = '''SELECT parent,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
-		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE child = "{node}"'''.format(node=name)
-		res = self.database.query(QUERY).fetchone()
+		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE child = ?'''
+		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
 		return res
 
 	def get_child(self,name):
 		'''return child'''
 		#QUERY = '''SELECT child,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
-		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE parent = "{node}"'''.format(node=name)
-		res = self.database.query(QUERY).fetchone()
+		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE parent = ?'''
+		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
 		return res
 
 	def new_node(self,child,nodes,parent):

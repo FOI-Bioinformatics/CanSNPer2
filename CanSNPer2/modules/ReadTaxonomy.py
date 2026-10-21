@@ -69,7 +69,9 @@ class ReadTaxonomy(object):
 		if self.verbose: print("Read nodes in taxonomy file {}".format(treefile))
 		swap = False
 		if not treefile:
-			treefile = self.taxonomy_file
+			treefile = getattr(self, "taxonomy_file", False)
+		if not treefile:
+			raise InputError("No tree file given to read_nodes: pass treefile or set self.taxonomy_file")
 		with open(treefile, "r") as _treefile:
 			headers = _treefile.readline().strip().split(self.sep)
 			if "parent" not in headers or "child" not in headers:
