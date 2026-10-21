@@ -47,6 +47,8 @@ class ReadCanSNPer(ReadTaxonomy):
 		'''Add full annotation of a CanSNP'''
 		#print(self.taxid_base, data)
 		info = {}
+		if len(data) < len(headers): ## a row must carry a value for every header column (issue #100)
+			raise InputError("Row {row} in the CanSNP table has fewer columns than the headers {headers}".format(row=data,headers=headers))
 		for i in range(len(headers)):
 			info[headers[i]] = data[i]  ## the
 		try:
@@ -99,6 +101,10 @@ class ReadCanSNPer(ReadTaxonomy):
 				del headers[1]
 			for row in f:
 				data = row.strip().split(self.sep)  ## split up all the information in a node
+				if row.strip() == "":
+					continue
+				if len(data) < len(headers) + (1 if self.version == 1 else 0): ## short row, columns are addressed by index below (issue #101)
+					raise InputError("Row '{row}' in SNP table {file} has fewer columns than the header line".format(row=row.strip(),file=annotation_file))
 				if self.version == 1:
 					'''Remove "organism" column as databases will be separated on organim'''
 					del data[1]

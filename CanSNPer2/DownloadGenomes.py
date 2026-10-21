@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import sys, os
 import textwrap
+import gzip
+import shutil
 from urllib.request import urlretrieve
 
 import argparse,os
-from subprocess import Popen
 from multiprocessing import Process
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 import logging
@@ -53,7 +54,7 @@ class DownloadGenomes(object):
 		except ValueError:
 			logger.warning("Could not download {refid}".format(refid=refid))
 			return
-		link = "ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GC{source}/{n1}/{n2}/{n3}/{genome_id}_{assembly}/{genome_id}_{assembly}_genomic.fna.gz".format(
+		link = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GC{source}/{n1}/{n2}/{n3}/{genome_id}_{assembly}/{genome_id}_{assembly}_genomic.fna.gz".format(
 						source=sourceD[source],
 						n1=n1,
 						n2=n2,
@@ -62,12 +63,15 @@ class DownloadGenomes(object):
 						assembly=assembly
 						)
 		retrieved_file = "{directory}/source/{genome_id}_{assembly}_genomic.fna.gz".format(genome_id=genome_id,assembly=assembly,directory=directory)
-		if not os.path.exists(retrieved_file.strip(".gz")) or os.path.exists(retrieved_file):
+		ungzipped = retrieved_file[:-3] if retrieved_file.endswith(".gz") else retrieved_file ## strip(".gz") also eats letters of the name, cut the suffix instead (issue #73)
+		if not os.path.exists(ungzipped) or os.path.exists(retrieved_file):
 			logging.debug("Downloading: "+ link +" <-> "+ retrieved_file)
 			urlretrieve(link, retrieved_file)
-			### unzip file (mauve cant handle zipped sources)
-			p = Popen(["gunzip", "-f", retrieved_file])
-			bname = os.path.basename(retrieved_file.rstrip(".gz"))
+			### unzip file (mauve cant handle zipped sources) with the gzip module, no external gunzip needed (issue #74)
+			with gzip.open(retrieved_file, "rb") as f_in, open(ungzipped, "wb") as f_out:
+				shutil.copyfileobj(f_in, f_out)
+			os.remove(retrieved_file)
+			bname = os.path.basename(ungzipped)
 			try:
 				### symlink target is relative to the link location, so no chdir needed (issue #8)
 				os.symlink("source/{bname}".format(bname=bname), os.path.join(directory, "{refid}.fna".format(refid=refid)))

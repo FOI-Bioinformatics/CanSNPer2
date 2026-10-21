@@ -22,6 +22,8 @@ class WriteTaxonomy(object):
 		self.separator = separator
 		logging.debug("Output separator: '{separator}'".format(separator=self.separator))
 		self.prefix = prefix.split(",")
+		if len(self.prefix) != 2: ## prefix must carry both the names and the nodes prefix (issue #111)
+			raise ValueError("prefix must be two prefixes separated by a comma (names,nodes), got '{prefix}'".format(prefix=prefix))
 		logging.debug("Prefix: nodes:{nodes} names:{names} ".format(nodes=self.prefix[1],names=self.prefix[0]))
 		self.dump_descriptions = desc
 		logging.debug("Add descriptions: {desc}".format(desc=self.dump_descriptions))
@@ -114,7 +116,8 @@ class WriteTaxonomy(object):
 		lmax = 10000000
 		if len(child_w_dpi) > 0:
 			self.nodeDict = self.database.get_nodes(col=1)
-			lmax = max(self.nodeDict)
+			if self.nodeDict: ## max of an empty dict crashes, an empty database simply needs no re-indexing (issue #112)
+				lmax = max(self.nodeDict)
 		return lmax,child_w_dpi
 
 	def nodes(self):
@@ -147,7 +150,11 @@ class WriteTaxonomy(object):
 				if self.link_order:
 					link[0],link[1] = link[1],link[0]
 				if self.dump_descriptions:
-					link[0],link[1] = self.nodeDict[link[0]],self.nodeDict[link[1]]
+					try:
+						link[0],link[1] = self.nodeDict[link[0]],self.nodeDict[link[1]]
+					except KeyError: ## a link pointing at node ids missing from the nodes table cannot be named, skip it instead of crashing (issue #113/#114)
+						logging.warning("Skipping link {l}, one of its nodes is missing from the nodes table".format(l=link))
+						continue
 				if self.dbprogram in ["bracken"]:
 					link = list(link)+["-"]
 				if self.dbprogram == "kraken2":

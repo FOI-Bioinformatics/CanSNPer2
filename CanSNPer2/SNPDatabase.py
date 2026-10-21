@@ -14,6 +14,7 @@ from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.WriteTaxonomy import WriteTaxonomy
 from CanSNPer2.modules.NewickTree import NewickTree
+from CanSNPer2 import __version__  ## used by the --version flag (issue #119)
 import CanSNPer2.modules
 
 def get_read_modules():
@@ -95,7 +96,7 @@ today = date.today()
 args.logs = args.logs.rstrip("/")+"/"
 logpath = args.logs+"CanSNPer2-database"+today.strftime("%b-%d-%Y")+"{}.log"
 if not os.path.exists(args.logs):
-	os.system("mkdir -p {path}".format(path=args.logs))
+	os.makedirs(args.logs, exist_ok=True)
 if os.path.exists(logpath):
 	logpath=logpath.format("-{:%H:%M}".format(t))
 else: logpath = logpath.format("")

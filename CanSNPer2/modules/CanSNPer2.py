@@ -119,23 +119,26 @@ class CanSNPer2(object):
 		'''
 		retvalue=0
 		processes = []  #process container
-		log_f = {}	  #log container
+		logfiles = []   #open log file container, parallel to processes
 		error = 0   #Variable for errors
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
 			logger.debug(command)			## In verbose mode print the actual mauve command
-			p = Popen(command,  stdout=PIPE, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
-			log_f[p.stdout.fileno()] = logs[i]	  ## Store the reference to the correct log file
+			## stdout/stderr go straight to the log file: a pipe buffer would fill up and
+			## block mauve while this loop only polls for exitcodes, hanging the run (issue #68)
+			log = open(logs[i], "w")
+			p = Popen(command,  stdout=log, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
+			logfiles.append(log)
 			processes.append(p)
 		while processes:
-			for p in processes: ## Loop through processes
+			for idx in range(len(processes)-1, -1, -1): ## Loop through processes, walking backwards so removals are safe
+				p = processes[idx]
 				exitcode = p.poll()  #get exitcode for each process
 				if exitcode is not None: ## if there is no exitcode the program is still running
 
-					## When a process is finished open the log file and write stdout/stderr to log file
-					with open(log_f[p.stdout.fileno()], "w") as log:
-						print(p.stdout.read().decode('utf-8'),file=log)
+					## When a process is finished close its log file
+					logfiles[idx].close()
 					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
 					if exitcode == 11:
 						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
@@ -148,9 +151,10 @@ class CanSNPer2(object):
 						if not self.keep_going:
 							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode))
 						error += 1
-						logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=log_f[p.stdout.fileno()],exitcode=exitcode))
+						logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logs[idx],exitcode=exitcode))
 					## Remove process from container
-					processes.remove(p)
+					processes.pop(idx)
+					logfiles.pop(idx)
 		if retvalue == 6 or retvalue == 11: ## This is done if sequence is not free of gaps
 			return retvalue
 		elif not self.keep_going:
@@ -476,4 +480,4 @@ class CanSNPer2(object):
 		if not self.keep_temp and len(self.query) > 0: ## if keep temp is turned on do not remove away alignments also if no input files were given
 			self.cleanup()
 
-		logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir+"/"))
+		logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir.rstrip("/")+"/")) ## a trailing slash was already there would print dir// (issue #76)

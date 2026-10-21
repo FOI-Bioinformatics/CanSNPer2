@@ -1,5 +1,6 @@
 import sys, os
 import sqlite3
+import shutil
 
 '''
 DatabaseConnections and DatabaseFunctions are classes written to simplify database work using sqlite3
@@ -43,20 +44,20 @@ class RunMauve(object):
 			if self.verbose: print("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
 			os.makedirs(self.tmpdir)
 
-		self.logdir = kwargs["logdir"]
+		self.logdir = kwargs.get("logdir","logs/") ## missing kwargs get defaults instead of a bare KeyError (issue #115)
 		if not os.path.exists(self.logdir):
 			if self.verbose: print("Creating logs directory {logdir}".format(logdir=self.logdir))
 			os.makedirs(self.logdir)
 
-		self.outdir = kwargs["outdir"]
+		self.outdir = kwargs.get("outdir","results")
 		if not os.path.exists(self.outdir):
 			if self.verbose: print("Creating output directory {outdir}".format(outdir=self.outdir))
 			os.makedirs(self.outdir)
 
 		'''Fetch other key word arguments'''
-		self.skip_mauve = kwargs["skip_mauve"]
-		self.save_tree = kwargs["save_tree"]
-		self.keep_temp = kwargs["keep_temp"]
+		self.skip_mauve = kwargs.get("skip_mauve",False)
+		self.save_tree = kwargs.get("save_tree",False)
+		self.keep_temp = kwargs.get("keep_temp",False)
 
 	def get_xmfa(self):
 		'''Return references to aligned files'''
@@ -73,29 +74,33 @@ class RunMauve(object):
 	def run_mauve(self, commands,logs):
 		'''Execute mauve commands'''
 		processes = [] 	#process container
-		log_f = {}		#log container
+		logfiles = []	#open log file container, parallel to processes
 		error = False	#Variable for errors
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
 			if self.verbose: print(command)			## In verbose mode print the actual mauve command
-			p = Popen(command.split(" "),  stdout=PIPE, stderr=STDOUT)  ##Split command to avoid shell=True pipe stdout and stderr to stdout
-			log_f[p.stdout.fileno()] = logs[i]      ## Store the reference to the correct log file
+			## stdout/stderr go straight to the log file: a PIPE fills up and blocks the
+			## process while this loop only polls exitcodes, which hangs the run (issue #85)
+			log = open(logs[i], "w")
+			p = Popen(command,  stdout=log, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #85)
+			logfiles.append(log)
 			processes.append(p)
 		while processes:
-			for p in processes: ## Loop through processes
+			for idx in range(len(processes)-1, -1, -1): ## Loop through processes, walking backwards so removals are safe
+				p = processes[idx]
 				exitcode = p.poll()  #get exitcode for each process
 				if exitcode is not None: ## if there is no exitcode the program is still running
 
-					## When a process is finished open the log file and write stdout/stderr to log file
-					with open(log_f[p.stdout.fileno()], "w") as log:
-						print(p.stdout.read().decode('utf-8'),file=log)
+					## When a process is finished close its log file
+					logfiles[idx].close()
 
 					### IF the exitcode is not 0 print a warning and ask user to read
 					if exitcode != 0:
 						error = True
-						print("WARNING progressiveMauve finished with a non zero exitcode script will terminate when all processes are finished read {log} for more info".format(log=log_f[p.stdout.fileno()]))
+						print("WARNING progressiveMauve finished with a non zero exitcode script will terminate when all processes are finished read {log} for more info".format(log=logs[idx]))
 					## Remove process from container
-					processes.remove(p)
+					processes.pop(idx)
+					logfiles.pop(idx)
 		if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
 			raise MauveError("At least of the progressiveMauve processes did not run correclty check the log files for more information")
 		return
@@ -113,13 +118,11 @@ class RunMauve(object):
 			ref_file = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
-			'''Create run command for mauve'''
-			command = "{mauve_path}progressiveMauve --output {xmfa} {ref_fasta} {target_fasta}".format(
-							mauve_path 		= self.mauve_path,
-							xmfa 			= xmfa_output,
-							ref_fasta 		= ref_file,
-							target_fasta 	= query
-			)
+			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #85)'''
+			command = ["{mauve_path}progressiveMauve".format(mauve_path=self.mauve_path),
+							"--output", xmfa_output,
+							ref_file,
+							query]
 			commands.append(command)			## Mauve command
 			logs.append(log_file)				## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output)	## Store the path to xmfa files as they will be used later
@@ -139,8 +142,12 @@ class RunMauve(object):
 		if self.verbose: print("Clean up temporary files... ")
 		files = self.get_tempfiles()
 		for f in files:
-			os.remove(os.path.join(self.tmpdir,f))
-		os.rmdir(self.tmpdir)
+			path = os.path.join(self.tmpdir,f)
+			if os.path.isdir(path): ## sub directories would break os.remove and leave tmpdir non-empty for os.rmdir (issue #86/#87)
+				shutil.rmtree(path)
+			else:
+				os.remove(path)
+		shutil.rmtree(self.tmpdir, ignore_errors=True)
 		if self.verbose: print("Done!")
 		return
 

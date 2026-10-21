@@ -1,4 +1,28 @@
-Fix shared queue defaults and optional export flag in CanSNPer2
+Fix sweep-found crashes, pipe deadlocks, injection risks and silent data loss
 
-- CanSNPer2.find_snps: results/export_results/called_snps defaults changed from mutable lists to None, with a fresh multiprocessing Queue per call when not supplied; the real call path (find_snps_multiproc) always passes its own queues, so behaviour there is unchanged (#6)
-- CanSNPer2.__init__: self.export now read with kwargs.get("export", False), so constructing the object without the optional flag no longer raises KeyError; same pattern already used for ParseXMFA (#51)
+Second sweep pass (issues #64-#120) over the whole package, each fix verified
+with a script against the real francisella_tularensis.db and synthetic xmfa
+data; pre-change copies kept in .fix-backups/.
+
+Core fixes:
+- DatabaseConnection: multi_update silently failed on every shipped database
+  (no UNIQUE constraint on genome) while reporting success; rewritten as
+  parameter-bound update-then-insert, ModifyTree now passes value pairs
+- update(): SET values parameterized, WHERE bound to a dedicated where value
+- get_node(): name bound as a parameter (SQL injection, #67)
+- SNPDatabase: shell-free makedirs (#69), missing __version__ import (#119)
+- CanSNPer2/runMauve: mauve stdout/stderr redirected straight to the per-run
+  log file; the PIPE filled up and hung the poll loop (#68, #85); process
+  loop no longer mutates while iterating; cleanup is dir-aware (#86/#87)
+- DownloadGenomes: NCBI ftp:// retired in 2021, downloads now use https (#120);
+  unzipping done with the gzip module instead of external gunzip (#73/#74)
+- NewickTree: invalid newick raises instead of UnboundLocalError (#77),
+  missing start node returns a clean rejection (#78), zero-distance guard (#95)
+- ModifyTree: malformed modification/name files raise InputError or are
+  skipped with warnings instead of IndexError/ValueError (#79-#84, #91-#94)
+- P3 hardening across ReadTaxonomy*, ReadCanSNP_tables, ModifyDatabase,
+  ParseXMFA, WriteTaxonomy, runMauve, CanSNPerTree: short rows, malformed
+  xmfa blocks, empty SNP tables and missing kwargs now fail clearly or skip
+  with a warning instead of crashing mid-run (#71-#75, #88-#115)
+- Removed leftover one-shot scripts append_issues.py/clean_issues.py that
+  could re-corrupt the tracker file (#116/#117)

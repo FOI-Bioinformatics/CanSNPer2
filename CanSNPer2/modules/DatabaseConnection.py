@@ -121,10 +121,12 @@ class DatabaseConnection(object):
 	def update(self,data,table):
 		'''Update function requires table column which column to identify row with and value to replace'''
 		columns = []
+		setvals = []
 		colkeys = list(data["set_column"].keys())
 		for col in colkeys:
 			if col != "snp_id":
-				columns.append("{set_column}='{val}'".format(set_column=col, val=data["set_column"][col]))
+				columns.append("{set_column}=?".format(set_column=col))
+				setvals.append(data["set_column"][col])
 		set_query = ", ".join(columns)
 		UPDATE_QUERY = '''
 			UPDATE {table}
@@ -133,7 +135,9 @@ class DatabaseConnection(object):
 		'''.format(table=table,columns=set_query,where_column=data["where_column"])
 		###  UPDATE genomes SET id = newnode WHERE genome = oldname
 		logging.debug("{query} {data}".format(query=UPDATE_QUERY,data=data))
-		datasend = tuple([data["set_value"]])
+		### the WHERE value is data["where"] when supplied, data["set_value"] only as legacy fallback (issue #65)
+		where_val = data["where"] if "where" in data else data["set_value"]
+		datasend = tuple(setvals + [where_val])
 		return self.query(UPDATE_QUERY,datasend,getres=True)
 
 class LoadCanSNPAnnotation(DatabaseConnection):
@@ -151,6 +155,8 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 		QUERY = '''SELECT {columns} FROM {table}'''.format(table=table,columns=columns)
 		logging.info(QUERY)
 		data = self.query(QUERY).fetchall()
+		if data and len(data[0]) != 2: ## the result is unpacked as (id,name), more or fewer columns cannot be turned into a dict (issue #75)
+			raise ValueError("getSNPdict expects exactly two columns (id, name) from table {table}, got {n}".format(table=table,n=len(data[0])))
 		dic = {}
 		for id,name in data:
 			dic[name] = id
@@ -538,16 +544,27 @@ class TaxonomyDBConnection(CreateDatabase):
 		return True
 
 	def multi_update(self,data,table):
-		'''Update function from a list of updates (insert on conflict do update)'''
+		'''Update function from a list of (set_value, where_value) pairs.
+			Updates existing rows and inserts the missing ones, values are bound
+			as parameters so no UNIQUE constraint on the where_column is required (issue #66)'''
+		set_column = data["set_column"]
+		where_column = data["where_column"]
 		UPDATE_QUERY = '''
-			INSERT INTO {table} ({set_column},{where_column})
-			VALUES {data}
-			ON CONFLICT({where_column}) DO UPDATE SET
-			{where_column} = {where_column},
-			{set_column}   = {set_column};
-		'''.format(table=table,set_column=data["set_column"],where_column=data["where_column"],data=",".join(data["data"]))
+			UPDATE {table}
+			SET {set_column} = ?
+			WHERE {where_column} = ?
+		'''.format(table=table,set_column=set_column,where_column=where_column)
 		logger.debug("{q}".format(q=UPDATE_QUERY))
-		res = self.query(UPDATE_QUERY,error=True)
+		updated = 0
+		added = 0
+		for set_val,where_val in data["data"]:
+			self.query(UPDATE_QUERY,insert_val=(set_val,where_val))
+			if self.rowcount() == 0:
+				self.insert({set_column:set_val,where_column:where_val}, table)
+				added += 1
+			else:
+				updated += 1
+		logger.info("{updated} updated and {added} added in {table}".format(updated=updated,added=added,table=table))
 		return True
 
 	def delete(self,nodes,table):
@@ -735,10 +752,10 @@ class DatabaseFunctions(TaxonomyDBConnection):
 
 	def get_node(self, name, database=False):
 		'''Retrieve one node by name'''
-		QUERY = '''SELECT id FROM nodes where name = "{name}"'''.format(name=name)
+		QUERY = '''SELECT id FROM nodes where name = ?'''
 		if not database:
 			database = self.database
-		return [n[0] for n in self.query(QUERY).fetchall()]
+		return [n[0] for n in self.query(QUERY,insert_val=(name,),error=True).fetchall()]
 
 	def get_nodes(self, database=False,col=5):
 		'''Retrieve the whole node info table of the database to decrease the number of database calls!'''

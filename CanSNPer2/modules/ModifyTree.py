@@ -27,6 +27,8 @@ def progressBar(iterable, prefix = '', suffix = '', decimals = 1, length = 100, 
 		printEnd    - Optional  : end character (e.g. "\r", "\r\n")
 	"""
 	total = len(iterable)
+	if total == 0: ## nothing to iterate over, avoid division by zero in the bar (issue #79)
+		return
 	# Progress Bar Printing Function
 	def printProgressBar (iteration):
 		percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
@@ -265,6 +267,10 @@ class ModifyTree(object):
 			headers = f.readline().strip().split(self.sep)
 			if replace_parent:
 				new_root = f.readline().strip().split(self.sep)
+				if len(new_root) == 2:
+					new_root.append("no rank")
+				if len(new_root) != 3 or not new_root[0].strip(): ## branch root row must name parent, child and level (issue #81)
+					raise InputError("The branch root row of the modification file must contain parent and child (and optional level) columns: '{row}'".format(row=", ".join(new_root)))
 				change_root = new_root[0]
 				new_root[0] = self.parent
 				parent,child,rank = new_root
@@ -284,6 +290,8 @@ class ModifyTree(object):
 				line = row.strip().split(self.sep)
 				if len(line) == 2:
 					line +=["no rank"] ## Add no specified rank to line
+				if len(line) != 3: ## malformed row, too few or too many columns (issue #82)
+					raise InputError("Malformed row in the modification file, expected parent and child (and optional level) columns: '{row}'".format(row=row.strip()))
 				parent,child,rank = line
 				if replace_parent:
 					if parent == change_root:
@@ -368,6 +376,8 @@ class ModifyTree(object):
 				with open(self.modfile, "r") as f:
 					headers = f.readline().strip().split(self.sep)
 					branchroot = f.readline().strip().split(self.sep)
+					if not branchroot[0].strip(): ## replace_parent needs the branch root name in the first data row (issue #83/#84)
+						raise InputError("The replace_parent option needs the first data row of the modification file to contain the branch root name, none was found")
 					new_name = branchroot[0]
 					#logger.info("New root name: {nn}".format(nn=new_name))
 				logger.info("New name of parent, changing from {oldp}, to {newp}".format(oldp=self.parent, newp=new_name))
@@ -403,7 +413,11 @@ class ModifyTree(object):
 					else:
 						genome,name = row.strip().split(self.sep)
 				except ValueError:
-					genome,name = row.strip().split("    ")
+					try:
+						genome,name = row.strip().split("    ")
+					except ValueError: ## the row cannot be parsed at all, record it as skipped instead of crashing (issue #91)
+						skipped.append((row.strip(),"malformed row"))
+						continue
 				logger.debug("genome: {genome}, name: {name}".format(genome=genome,name=name))
 				try:
 					if not self._is_int(name.strip()):
@@ -455,7 +469,12 @@ class ModifyTree(object):
 		self.nodeDict = self.taxonomydb.get_nodes()
 		for genome in self.mod_genomes:
 			'''Translate incoming database node id to taxonomydb node id'''
-			inc_taxid = self.dbmod_annotation[self.mod_genomes[genome]].strip()
+			try:
+				inc_taxid = self.dbmod_annotation[self.mod_genomes[genome]].strip()
+			except KeyError:  ## the incoming genome has no taxid annotation in the source database, skip it (issue #92)
+				logger.warning("Genome {genome} has no taxid annotation in the incoming database, skipped".format(genome=genome))
+				notadded +=1
+				continue
 			try:
 				id,genomeid = self.nodeDict[inc_taxid],genome.strip()
 			except KeyError:  ## taxid does not exist in receiving database, skip genome
@@ -472,10 +491,8 @@ class ModifyTree(object):
 					else:
 						added += 1
 			else:
-				allupdates.append("({id},'{genomeid}')".format(id=id,genomeid=genomeid))
+				allupdates.append((id,genomeid))
 		if len(self.mod_genomes) >= 100:
-			update["set_value"] = "id"
-			update["where_value"] = "genome"
 			update["data"] = allupdates
 			self.taxonomydb.multi_update(update,"genomes")
 			logger.info("Genomes transfered to increase speed no statistics were calculated")
@@ -513,7 +530,11 @@ class ModifyTree(object):
 				try:
 					old_name,name = row.strip().split(self.sep)
 				except ValueError:
-					old_name,name = row.strip().split("    ")
+					try:
+						old_name,name = row.strip().split("    ")
+					except ValueError: ## the row cannot be parsed at all, skip it instead of crashing (issue #94)
+						logger.warning("Skipped malformed row in node name update file: '{row}'".format(row=row.strip()))
+						continue
 				logger.debug("old_name: {old_name}, name: {name}".format(old_name=old_name,name=name))
 
 				updated = self._name_update(old_name,name,updated)

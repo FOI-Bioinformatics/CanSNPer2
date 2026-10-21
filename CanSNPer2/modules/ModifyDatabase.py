@@ -72,11 +72,14 @@ class ModifyCanSNPer2Database(ModifyTree):
 			dataArr = []
 			for row in af:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #88)
+					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
+					continue
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
 					ddict[head] = val
-					dataArr.append(ddict)
+				dataArr.append(ddict)
 				try:
 					_id = nodes[ddict["snp_id"]]
 				except KeyError:
@@ -102,6 +105,9 @@ class ModifyCanSNPer2Database(ModifyTree):
 			dataArr = []
 			for row in af:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #89)
+					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
+					continue
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]

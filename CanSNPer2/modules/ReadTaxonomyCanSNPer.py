@@ -133,6 +133,13 @@ class ReadTaxonomyBase(object):
 			for tree_row in _treefile:
 				data = tree_row.strip().split(self.sep)
 				logger.debug(data)
+				if data[0] == "":
+					'''Check for empty rows'''
+					continue
+				if len(data) < 2: ## a row must name both a child and a parent (issue #105/#106)
+					logger.warning("Skipped row without child and parent columns in the tree file: '{row}'".format(row=tree_row.strip()))
+					continue
+				rank = "no rank"
 				if len(data) > 2:
 					rank = data.pop().strip()
 					if rank.strip() != "":
@@ -140,9 +147,6 @@ class ReadTaxonomyBase(object):
 				if swap:
 					data[0],data[1] = data[1],data[0]
 				'''Add nodes into database'''
-				if data[0] == "":
-					'''Check for empty rows'''
-					continue
 				for node in data:
 					logger.debug(node)
 					node = node.strip()
@@ -209,13 +213,13 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 		logger.debug("Parent did not exit Add parent: {name}".format(name=name))
 
 		#i-=1 ## Check next parent
-		try:
-			parent_i = self.taxonomy[nodes[i-1]]  ## check if current nodes parent exists
-		except KeyError:                          ## Parent did not exist, keep walking up the tree and add all parents until root!
-			if i < -len(nodes):
-				return self.root                ## The root has been reached return index of root
-			else:                                ## Parent didn't exist again, add parent to this node and then add the link to that parent
-				parent_i = self.add_SNP(nodes,i-1)## Add node of parent
+		if i - 1 < -len(nodes): ## the parent chain is exhausted, the topmost listed node links to the root (issue #108)
+			parent_i = self.root
+		else:
+			try:
+				parent_i = self.taxonomy[nodes[i-1]]  ## check if current nodes parent exists
+			except KeyError:                          ## Parent did not exist, keep walking up the tree and add all parents until root!
+				parent_i = self.add_SNP(nodes,i-1)    ## Add node of parent
 		node_i = self.add_node(name)  ## Add node
 		if node_i:
 			self.taxid_num += 1

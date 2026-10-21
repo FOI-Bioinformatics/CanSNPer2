@@ -108,6 +108,7 @@ def main():
 	if not os.path.exists(args.logdir):
 		logdircreated = True
 		os.makedirs(args.logdir)
+	args.logdir = args.logdir.rstrip("/")+"/" ## a logdir without a trailing slash would glue straight onto the log file name (issue #71)
 
 
 	from datetime import date,time
@@ -133,7 +134,7 @@ def main():
 	'''Fix temp path''' ## If tmp is in standard root folder create sub folder for CanSNPer2
 	if args.tmpdir.rstrip("/") == "/tmp": ## Only root tmp name was chosen
 		logger.debug("Tmp directory was selected as root tmp, add subfolder for CanSNPer2 to path!")
-		args.tmpdir = args.tmpdir.rstrip()+"CanSNPer2"
+		args.tmpdir = args.tmpdir.rstrip("/")+"/CanSNPer2"
 	if not os.path.exists(args.tmpdir):
 		logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
 		os.makedirs(args.tmpdir,exist_ok=True)

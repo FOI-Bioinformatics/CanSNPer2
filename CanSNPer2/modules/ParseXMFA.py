@@ -65,7 +65,7 @@ class ParseXMFA(object):
 
 	def reverse_complement(self,dna):
 		'''Complement and reverse DNA string'''
-		dna_rev = [ self.rcDict[x] for x in dna[::-1] ]
+		dna_rev = [ self.rcDict.get(x,"N") for x in dna[::-1] ] ## unknown characters become N instead of crashing (issue #96)
 		return "".join(dna_rev)
 
 	def _next_pos(self):
@@ -95,6 +95,8 @@ class ParseXMFA(object):
 			base_positions = reversed(base_positions)
 		'''Walk through the positions and check whenever the position matches a SNP'''
 		for ii in base_positions:
+			if ii >= len(target): ## target sequence shorter than the reference block, the rest is unaligned (issue #97)
+				break
 			if ref[ii] != "-":          	## if the reference contains a gap "-" do not count
 				i+=1
 			if i == snppos:                	## if current possition contains a snp
@@ -102,7 +104,7 @@ class ParseXMFA(object):
 				_snp = target[ii].upper()        	## get base in target sequence make sure it is upper case!
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
-					_snp = self.rcDict[_snp]
+					_snp = self.rcDict.get(_snp,"N") ## unknown base characters become N (issue #96)
 				'''Fetch information about snp to allow print to file'''
 				orig_snp_pos = str(self.snplist[self.current_snp][0])
 				snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
@@ -136,9 +138,13 @@ class ParseXMFA(object):
 		headinfo = seqLines[0]					### Get header info of xmfa file (All comments)
 		if len(seqLines) > 2:  					### Both target and reference have sequence
 			refSeq = seqLines[1].split("\n")				## reference sequence
-			refHead = self.parse_head(refSeq.pop(0))		## parse reference header info
 			targetSeq = seqLines[2].split("\n")				## target sequence
-			targetHead = self.parse_head(targetSeq.pop(0))	## parse target sequence header
+			try:
+				refHead = self.parse_head(refSeq.pop(0))		## parse reference header info
+				targetHead = self.parse_head(targetSeq.pop(0))	## parse target sequence header
+			except (ValueError, IndexError): ## malformed sequence block header, skip this alignment pair (issue #98)
+				logger.warning("Malformed xmfa sequence block header, skipping block: {head}".format(head=(refSeq[:1] or [""])[0]))
+				return res
 			'''Parse aligned sequence pair '''
 			while int(self.current_snp) < int(refHead["start"]): ## Current SNP not aligned
 				# Keep iterating new canSNP-positions until the end of current alignment or until there are no more canSNPs to check
@@ -185,6 +191,9 @@ class ParseXMFA(object):
 		self.snplist, self.snp_positions = self.database.get_snps(reference)
 		#if self.verbose: print(self.snplist)
 		'''save first snp to look for'''
+		if not self.snp_positions: ## the reference has no registered SNPs in this database, nothing to look for (issue #99)
+			logger.warning("No SNPs are registered in the database for reference {reference}, no SNP calls possible".format(reference=reference))
+			return self.SNPS
 		self.current_snp = self.snp_positions.pop(0)
 		snps = self.read_xmfa(xmfa)
 		return snps
