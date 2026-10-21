@@ -2,8 +2,7 @@
 	Modify and update the CanSNPer2 database
 '''
 
-from flextaxd.modules.ModifyTree import ModifyTree
-from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
+from CanSNPer2.modules.ModifyTree import ModifyTree
 from datetime import date
 import logging
 logger = logging.getLogger(__name__)
@@ -12,7 +11,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 	"""ModifyCanSNPer2Database adds a few important functions only nessesary when modifying a database"""
 	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,snp_annotation=False,**kwargs):
 		logger.info("Load ModifyFunctions")
-		super().__init__(database, mod_database, mod_file, separator,verbose,parent,replace)
+		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace)
 		self.genomes = {}
 		self.today = date.today()
 

@@ -9,11 +9,6 @@ try:
 except ImportError:
 	raise ImportError("ete3 could not be found!")
 
-try:
-	import flextaxd
-except ImportError:
-	raise ImportError("flextaxd could not be found!")
-
 
 def main():
 	print("required python packages installed!")

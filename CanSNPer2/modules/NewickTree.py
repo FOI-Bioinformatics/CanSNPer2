@@ -2,7 +2,6 @@
 Module to read and write newick trees
 
 '''
-from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 import ete3
 '''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.

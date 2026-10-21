@@ -1,6 +1,24 @@
-Fix database-init crash, missing-database crash and tree/mauve robustness
+Remove the flextaxd dependency: CanSNPer2 now carries its own taxonomy database code
 
-- fix #39: load_annotation_file reads snp_references via self.conn instead of calling flextaxd get_genomes with an unsupported 'table' keyword
-- fix #40: ParseXMFA.run raises a clear ValueError when no database is given, instead of crashing in sqlite3.connect(False)
-- NewickTree.new_node: skip a node whose missing parent has no link in the tree table, instead of unpacking None from get_parent
-- runMauve: add the missing cleanup() method and use run()'s 'database' argument instead of undefined 'args'
+ISSUES #59-#62 (covers #1, #9-#12, #21-#24, #26), #44
+
+- modules/DatabaseConnection.py: ported CreateDatabase, a TaxonomyDBConnection
+  (creates a missing database through CreateDatabase instead of calling it as a
+  shell script), DatabaseFunctions and ModifyFunctions from flextaxd.
+- modules/ModifyTree.py (new): ported tree modification from flextaxd.
+- modules/ReadTaxonomyCanSNPer.py (new): the CanSNPer tree reader (semicolon/
+  tab lineage format) with its base class, connected to the local DatabaseFunctions.
+- modules/WriteTaxonomy.py (new): tab export of tree/annotation for --export.
+- InitiateDatabase, ModifyDatabase, NewickTree, SNPDatabase now import from
+  CanSNPer2.modules; get_read_modules scans CanSNPer2's own modules directory;
+  dynamic_import loads ReadTaxonomy{source_type} from CanSNPer2.modules.
+- ModifyDatabase super().__init__ passes separator/verbose/parent/replace as
+  keywords (they had landed in ModifyTree's clean_database/purge_database/
+  update_genomes positional slots), fixing #44's mod_genomes path.
+- setup.py install_requires drops flextaxd; selftest.py and README drop it too.
+
+Verified against the mapped flextaxd sources (read-only): creating the
+Francisella database from CanSNPer2-data/source with the ported code produces a
+database identical (all nodes/tree/rank rows) to the current flextaxd code, and
+a modify run (mod_file, parent B.1) matches flextaxd ModifyTree output; the
+tab export files are byte-identical.

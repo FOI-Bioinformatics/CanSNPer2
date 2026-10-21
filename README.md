@@ -31,7 +31,6 @@ python setup.py install
 ## Requirements (for manual install conda will install all dependencies)
 
 * ETE3
-* FlexTaxD - https://github.com/FOI-Bioinformatics/flextaxd
 * progressiveMauve
 
 Read input (not yet implemeted)

@@ -6,8 +6,7 @@ import sqlite3
 
 import logging
 logger = logging.getLogger(__name__)
-from flextaxd.modules.database.CreateDatabase import CreateDatabase
-from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions
 from importlib import import_module
 from datetime import date
 #script_path = os.path.dirname(os.path.abspath(__file__))  ## Retrieve the abspath of the location of this script
@@ -62,7 +61,7 @@ class CreateSNPDatabase(CreateDatabase):
 		return
 
 class CanSNPDatabase(DatabaseFunctions):
-	"""Class containing functions for Loading data into the database, inherits functions from flextaxd database"""
+	"""Class containing functions for Loading data into the database, inherits functions from the CanSNPer2 taxonomy database classes"""
 	def __init__(self,*args,**kwargs):
 		super().__init__(kwargs["database"],verbose=kwargs["verbose"])
 		logger.debug(kwargs)
@@ -77,7 +76,7 @@ class CanSNPDatabase(DatabaseFunctions):
 		self.today = date.today()
 		if kwargs["tree"]:
 			logger.debug("Loading module ReadTaxonomy{type}".format(type=source_type))
-			read_module = dynamic_import("flextaxd.modules", "ReadTaxonomy{type}".format(type=source_type))
+			read_module = dynamic_import("CanSNPer2.modules", "ReadTaxonomy{type}".format(type=source_type))
 			read_obj = read_module(kwargs["tree"], database=kwargs["database"],root_name=False,rank="family",verbose=kwargs["verbose"])
 			read_obj.verbose = kwargs["verbose"]                                                          ## Set verbose mode
 			logger.info("Parse taxonomy")
@@ -184,13 +183,11 @@ class CanSNPDatabase(DatabaseFunctions):
 
 	def load_cansnp_annotation(self,annotation_file):
 		'''Function that loads data into the cansnp annotation table'''
-		dbConn = dynamic_import("flextaxd.modules.database", "DatabaseConnection")
 		data = self.load_annotation_file(annotation_file)
 		logging.info("CanSNPer annotation loaded!")
 
 	def load_genome_annotation(self,annotation_file):
 		'''Function that loads genome data into the cansnp genome annotation table'''
-		dbConn = dynamic_import("flextaxd.modules.database", "DatabaseConnection")
 		data = self.load_genome_annotation_file(annotation_file)
 		logging.debug(data)
 		logging.info("Genome annotation loaded!")

@@ -9,3 +9,4 @@ test*
 dist*
 results*
 logs
+.commit-msg

@@ -22,7 +22,7 @@ setup(
 
     keywords="Bioinformatics SNP-typing sequence-data",
 
-    install_requires=['ete3','flextaxd'],
+    install_requires=['ete3'],
     packages=find_packages(exclude=['contrib', 'docs', 'test*']),
     #py_modules=['CanSNPer2.modules.ParseXMFA',"CanSNPer2.modules.DatabaseConnection","CanSNPer2.modules.CanSNPer2","CanSNPer2.modules.NewickTree"],
     entry_points={'console_scripts': [

@@ -12,16 +12,17 @@ import logging
 
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
-from flextaxd.modules.WriteTaxonomy import WriteTaxonomy
+from CanSNPer2.modules.WriteTaxonomy import WriteTaxonomy
 from CanSNPer2.modules.NewickTree import NewickTree
-import flextaxd
+import CanSNPer2.modules
 
 def get_read_modules():
 	'''Find (ReadTaxonomy) modules and return options'''
 	read_modules = []
-	for script in os.listdir(os.path.dirname(os.path.abspath(flextaxd.__file__))+"/modules"):
-		if script.startswith("ReadTaxonomy"):
-			modname = script.lstrip("ReadTaxonomy").rstrip(".py")
+	modulepath = os.path.dirname(os.path.abspath(CanSNPer2.modules.__file__))
+	for script in os.listdir(modulepath):
+		if script.startswith("ReadTaxonomy") and script.endswith(".py"):
+			modname = script[len("ReadTaxonomy"):-len(".py")]
 			if modname != "":
 				read_modules.append(modname)
 	return read_modules
