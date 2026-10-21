@@ -1,4 +1,0 @@
-Bump version to 2.1.0 and tidy the fix branch
-
-- version: CanSNPerTree __version__ 2.0.6 -> 2.1.0 and release-note header (setup.py reads this string), reflecting the major bug-fix round
-- cleanup: untrack .commit-msg, which was accidentally committed in 92841b8
