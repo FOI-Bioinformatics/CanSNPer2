@@ -149,7 +149,9 @@ class CanSNPDatabase(DatabaseFunctions):
 		logger.info(nodes)
 		logger.debug("nodes: {nnodes}".format(nnodes=len(nodes)/2))
 		if len(self.genomes) == 0:
-			self.genomes = self.get_genomes(table="snp_references")
+			self.genomes = {}
+			for genome_i, genome in self.conn.execute("SELECT id,genome FROM snp_references"):
+				self.genomes[genome] = genome_i
 		logger.debug(self.genomes)
 		with open(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")

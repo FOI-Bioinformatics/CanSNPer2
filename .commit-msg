@@ -1,4 +1,6 @@
-Parameterize tree lookups and fix missing tree-file errors
+Fix database-init crash, missing-database crash and tree/mauve robustness
 
-- fix #27, #28: NewickTree get_parent/get_child bind the node name as ? parameters instead of string formatting (SQL injection)
-- fix #33: ReadTaxonomy.read_nodes raises the module InputError when no tree file is given, instead of crashing on the never-defined self.taxonomy_file attribute
+- fix #39: load_annotation_file reads snp_references via self.conn instead of calling flextaxd get_genomes with an unsupported 'table' keyword
+- fix #40: ParseXMFA.run raises a clear ValueError when no database is given, instead of crashing in sqlite3.connect(False)
+- NewickTree.new_node: skip a node whose missing parent has no link in the tree table, instead of unpacking None from get_parent
+- runMauve: add the missing cleanup() method and use run()'s 'database' argument instead of undefined 'args'

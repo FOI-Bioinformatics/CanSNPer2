@@ -167,6 +167,8 @@ class ParseXMFA(object):
 		self.SNPS = {}  ## For each run SNPs has to be emtpy
 		'''Create connection to SNP database if it is not connected'''
 		if not self.database:
+			if not database:
+				raise ValueError("No database was provided to ParseXMFA, cannot retrieve snps from the database!")
 			self.database = XMFAFunctions(database)
 		''' retrieve registered SNPs'''
 		if not reference:

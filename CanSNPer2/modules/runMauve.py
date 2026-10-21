@@ -134,6 +134,16 @@ class RunMauve(object):
 			query = [query.strip() for query in f]
 		return query
 
+	def cleanup(self):
+		'''Remove files in temporary folder'''
+		if self.verbose: print("Clean up temporary files... ")
+		files = self.get_tempfiles()
+		for f in files:
+			os.remove(os.path.join(self.tmpdir,f))
+		os.rmdir(self.tmpdir)
+		if self.verbose: print("Done!")
+		return
+
 	def run(self,database,organism):
 		'''Run RunMauve'''
 		print("Run alignments to references using progressiveMauve")
@@ -149,7 +159,7 @@ class RunMauve(object):
 				3b. If requested create a list with SNPs
 				4. Clean up tmp directory
 				'''
-		xmfa = ParseXMFA(database=args.database,verbose=self.verbose)  ## Create XMFA object and connect to database
+		xmfa = ParseXMFA(database=database,verbose=self.verbose)  ## Create XMFA object and connect to database
 		for q in self.query:  ## For each target file
 			if self.verbose: print("Running alignments on query: {query}".format(query=q))
 			'''For each query fasta align to all CanSNPer reference for selected organism'''

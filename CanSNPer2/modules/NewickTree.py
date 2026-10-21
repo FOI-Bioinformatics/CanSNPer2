@@ -170,7 +170,11 @@ class NewickTree(object):
 			pnode.add_child(node)
 		except KeyError:
 			logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add parent".format(parent=parent))
-			t_parent,t_child,rank = self.get_parent(parent)
+			parent_link = self.get_parent(parent)
+			if parent_link is None:	## parent has no link in the tree table, node can not be attached
+				logger.warning("Not adding node {child}: parent {parent} does not exist and has no parent link in the tree table".format(child=child,parent=parent))
+				return
+			t_parent,t_child,rank = parent_link
 			logger.debug("Adding parent: {parent} of parent: {child}".format(parent=t_parent,child=t_child))
 			self.new_node(t_child,nodes,t_parent)
 			self.new_node(child,nodes,parent)
