@@ -28,8 +28,14 @@ class ParseXMFA(object):
 
 		'''Define all base variables'''
 		self.verbose = verbose
-		self.export = kwargs["export"]
+		self.export = kwargs.get("export",False)
 		self.called_snps = []
+
+		'''SNP state is initialized here so _next_pos/_snpinfo never hit an
+			unbound attribute before run() fills them (issues #48, #49)'''
+		self.snplist = {}
+		self.snp_positions = []
+		self.current_snp = False
 
 		## as the snps are ordered according to the reference mauve positions they can be used sequentialy without search
 		'''SNPs will be stored as a sorted set containing (position, refBase, targetBase,SNPname)'''
@@ -122,8 +128,10 @@ class ParseXMFA(object):
 		start,end = list(map(int,cols[0].split(":")[-1].split("-")))
 		return {"sign":sign,"start":start,"end":end}
 
-	def read_sequence(self,seqP,res={}):
+	def read_sequence(self,seqP,res=None):
 		'''Read information in sequence pair'''
+		if res is None:
+			res = {}
 		seqLines = seqP.strip().split("> ") 	### Split pair into two sequences
 		headinfo = seqLines[0]					### Get header info of xmfa file (All comments)
 		if len(seqLines) > 2:  					### Both target and reference have sequence

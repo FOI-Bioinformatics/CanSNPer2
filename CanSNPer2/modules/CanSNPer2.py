@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 ## import CanSNPer2 specific modules
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 from CanSNPer2.modules.NewickTree import NewickTree
-from CanSNPer2.CanSNPerTree import __version__
+from CanSNPer2 import __version__
 
 
 ## import standard python libraries for subprocess and multiprocess
@@ -42,7 +42,7 @@ class CanSNPer2(object):
 		self.refdir = refdir
 		self.mauve_path = mauve_path
 		self.xmfa_files = []
-		self.export = kwargs["export"]
+		self.export = kwargs.get("export", False)  ## export is optional, defaults to False (issue #51)
 		self.database = database
 		self.min_required_hits = kwargs["min_required_hits"]
 		self.strictness = kwargs["strictness"]
@@ -125,7 +125,7 @@ class CanSNPer2(object):
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
 			logger.debug(command)			## In verbose mode print the actual mauve command
-			p = Popen(command.split(" "),  stdout=PIPE, stderr=STDOUT)  ##Split command to avoid shell=True pipe stdout and stderr to stdout
+			p = Popen(command,  stdout=PIPE, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
 			log_f[p.stdout.fileno()] = logs[i]	  ## Store the reference to the correct log file
 			processes.append(p)
 		while processes:
@@ -174,13 +174,11 @@ class CanSNPer2(object):
 			ref_file = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
-			'''Create run command for mauve'''
-			command = "{mauve_path}progressiveMauve --output {xmfa} {ref_fasta} {target_fasta}".format(
-							mauve_path	  = self.mauve_path,
-							xmfa			= xmfa_output,
-							ref_fasta	   = ref_file,
-							target_fasta	= query
-			)
+			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #3)'''
+			command = ["{mauve_path}progressiveMauve".format(mauve_path=self.mauve_path),
+							"--output", xmfa_output,
+							ref_file,
+							query]
 			commands.append(command)			## Mauve command
 			logs.append(log_file)			   ## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
@@ -236,7 +234,7 @@ class CanSNPer2(object):
 		logger.info("Done!")
 		return
 
-	def parse_xmfa(XMFA_obj, xmfa_file,results=[]):
+	def parse_xmfa(XMFA_obj, xmfa_file,results=None):
 		'''Process xmfa file using ParseXMFA object'''
 		XMFA_obj.run(xmfa_file)
 		results.put(XMFA_obj.get_snps())
@@ -244,8 +242,12 @@ class CanSNPer2(object):
 		called_snps.put(XMFA_obj.get_called_snps())
 		return results
 	
-	def find_snps(self,XMFA_obj,xmfa_file,results=[],export_results=[],called_snps=[]):
+	def find_snps(self,XMFA_obj,xmfa_file,results=None,export_results=None,called_snps=None):
 		'''Align sequences to references and return SNPs'''
+		# default to None instead of mutable list defaults (issue #6); fresh queues when not supplied
+		if results is None: results = Queue()
+		if export_results is None: export_results = Queue()
+		if called_snps is None: called_snps = Queue()
 		# execute snp calling
 		XMFA_obj.run(xmfa_file)
 		#/

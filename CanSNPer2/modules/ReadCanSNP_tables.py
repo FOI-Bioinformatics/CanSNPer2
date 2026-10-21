@@ -10,7 +10,7 @@ __email__ = "bioinformatics@foi.se"
 __date__ = "2019-07-08"
 __status__ = "Production"
 
-from CanSNPer2.modules.ReadTaxonomy import ReadTaxonomy
+from CanSNPer2.modules.ReadTaxonomy import ReadTaxonomy, InputError
 
 class ReadCanSNPer(ReadTaxonomy):
 	"""docstring for ReadCanSNPer."""
@@ -32,15 +32,13 @@ class ReadCanSNPer(ReadTaxonomy):
 	def add_SNP(self,nodes,i):
 		'''Add name of node to database'''
 		name = nodes[i].strip()
-		#i-=1 ## Check next parent
-		try:
-			parent_i = self.annotation[nodes[i-1]]  ## check if current nodes parent exists
-		except KeyError:  						## Parent did not exist, keep walking up the tree and add all parents until root!
-			if i < -len(nodes):
-				return self.root				## The root has been reached return index of root
-			else:								## Parent didn't exist again, add parent to this node and then add the link to that parent
-				parent_i = self.add_SNP(nodes,i-1)## Add node of parent
-				#self.annotation[] = parent_i
+		if i <= -len(nodes):					## Current node is the topmost node of the path, its parent is the root
+			parent_i = self.root
+		else:
+			try:
+				parent_i = self.annotation[nodes[i-1].strip()]  ## check if current nodes parent exists
+			except KeyError:  					## Parent did not exist, keep walking up the tree and add all parents until root!
+				parent_i = self.add_SNP(nodes,i-1)	## Add node of parent
 		node_i = self.add_node_annotation([name],["snp_id"],table="nodes")  ## Add node
 		self.add_link(node_i, parent_i)			## Add link to next parent
 		return node_i 	##  index of child
@@ -105,7 +103,10 @@ class ReadCanSNPer(ReadTaxonomy):
 					'''Remove "organism" column as databases will be separated on organim'''
 					del data[1]
 				headers[2] = "genome_i"
-				data[2] = self.genomeDict[data[2]]  ## Get genome index third column must be genome
+				try:
+					data[2] = self.genomeDict[data[2]]  ## Get genome index third column must be genome
+				except KeyError:
+					raise InputError("Genome id '{}' from row in SNP table {} was not found in the parsed genomes file, check the genome column of the SNP table against the genomes file".format(data[2],annotation_file))
 				self.add_node_annotation(data,headers)
 		self.database.commit()  ## Commit changes to database
 		return

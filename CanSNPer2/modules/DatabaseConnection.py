@@ -90,7 +90,7 @@ class DatabaseConnection(object):
 				## UNIQUE constraint is an accepted error as it keeps multiple edges from being added
 				logging.error("Error in DatabaseConnection query")
 				logging.error(query)
-				logging.error("Insert val", insert_val)
+				logging.error("Insert val: {vals}".format(vals=insert_val))
 				logging.debug(str(e))
 				raise
 			if getres or error or not insert_val:
@@ -132,19 +132,21 @@ class DatabaseConnection(object):
 			WHERE {where_column} = ?
 		'''.format(table=table,columns=set_query,where_column=data["where_column"])
 		###  UPDATE genomes SET id = newnode WHERE genome = oldname
-		logging.debug(UPDATE_QUERY,data)
+		logging.debug("{query} {data}".format(query=UPDATE_QUERY,data=data))
 		datasend = tuple([data["set_value"]])
 		return self.query(UPDATE_QUERY,datasend,getres=True)
 
 class LoadCanSNPAnnotation(DatabaseConnection):
 	def __init__(self, database, verbose=False):
 		super().__init__(database,verbose)
-		logger.info.debug(self.database)
+		logger.debug("LoadCanSNPAnnotation connected to {database}".format(database=self.database))
 		if not os.path.exists(self.database):
-			logging.error(ConnectionError("The database {database} does not exist, please create a FlexTaxDatabase or check your database path!".format(self.database)))
+			logging.error(ConnectionError("The database {database} does not exist, please create a FlexTaxDatabase or check your database path!".format(database=self.database)))
 
 	def getSNPdict(self, table=False,columns="*"):
 		'''Get full table from table'''
+		if not table:
+			raise Exception("Table was not supplied to LoadCanSNPAnnotation getSNPdict()")
 		logging.debug(self.database)
 		QUERY = '''SELECT {columns} FROM {table}'''.format(table=table,columns=columns)
 		logging.info(QUERY)
@@ -209,7 +211,10 @@ class CanSNPdbFunctions(DatabaseConnection):
 	def get_taxid_base(self):
 		'''Fetch the next incremental node from the current database'''
 		QUERY = "SELECT MAX(id) AS max_id FROM nodes"
-		return self.query(QUERY).fetchone()[0]+1
+		res = self.query(QUERY).fetchone()
+		if res is None or res[0] is None:
+			return 1
+		return res[0]+1
 
 	def get_genomes(self, database=False,limit=0):
 		'''Get the list of genomes in the database'''

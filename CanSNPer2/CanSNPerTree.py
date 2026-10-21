@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 oname = __name__
 __name__ 		= "CanSNPer2"
-__version__ 	= "2.1.0"
+from CanSNPer2 import __version__
 __author__ 		= "David Sundell"
 __credits__ 	= ["David Sundell"]
 __license__ 	= "GPLv3"

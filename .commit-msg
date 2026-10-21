@@ -1,7 +1,4 @@
-Fix SNP calling, query error handling, workdir handling and reference loading
+Fix shared queue defaults and optional export flag in CanSNPer2
 
-- ParseXMFA: SNP call condition 'or' -> 'and', gap/N no longer counted as other base (#43)
-- DatabaseConnection.query: UNIQUE-constraint error object is no longer returned on paths where callers chain fetch* calls (#55)
-- CanSNPer2.run: removed os.chdir, tmp/log/out/ref dirs resolved against workdir; print_summary now checks create_tree return before unpacking (#2, #7)
-- DownloadGenomes: symlink path built with os.path.join (no chdir), ValueError when no database, mkdir via os.makedirs (#8, #45, #46)
-- ModifyDatabase: load_genome_reference_file completed, opens the reference_file argument and adds each row to snp_references, keeping ids in self.genomes; add_genome inserts via self.taxonomydb (#25, #42)
+- CanSNPer2.find_snps: results/export_results/called_snps defaults changed from mutable lists to None, with a fresh multiprocessing Queue per call when not supplied; the real call path (find_snps_multiproc) always passes its own queues, so behaviour there is unchanged (#6)
+- CanSNPer2.__init__: self.export now read with kwargs.get("export", False), so constructing the object without the optional flag no longer raises KeyError; same pattern already used for ParseXMFA (#51)

@@ -17,7 +17,7 @@ __status__ = "Production"
 __partof__ = "CanSNPer2"
 
 from subprocess import Popen,PIPE,STDOUT
-from ParseXMFA import ParseXMFA
+from CanSNPer2.modules.ParseXMFA import ParseXMFA
 
 class MauveError(Exception):
 	"""docstring for MauveE"""
@@ -44,9 +44,9 @@ class RunMauve(object):
 			os.makedirs(self.tmpdir)
 
 		self.logdir = kwargs["logdir"]
-		if not os.path.exists(self.tmpdir):
-			if self.verbose: print("Creating logs directory {tmpdir}".format(tmpdir=self.tmpdir))
-			os.makedirs(self.tmpdir)
+		if not os.path.exists(self.logdir):
+			if self.verbose: print("Creating logs directory {logdir}".format(logdir=self.logdir))
+			os.makedirs(self.logdir)
 
 		self.outdir = kwargs["outdir"]
 		if not os.path.exists(self.outdir):
@@ -149,6 +149,8 @@ class RunMauve(object):
 		print("Run alignments to references using progressiveMauve")
 
 		'''Read query input file if a txt file is supplied insead of fasta files'''
+		if not self.query:
+			raise MauveError("No query input was given, nothing to align")
 		if self.query[0].endswith(".txt"):
 			self.query=self.read_query_input(self.query)
 

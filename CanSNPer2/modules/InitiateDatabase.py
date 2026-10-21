@@ -68,7 +68,7 @@ class CanSNPDatabase(DatabaseFunctions):
 		'''Connect to database'''
 		if kwargs["create"]:
 			logger.debug("Create: {create}".format(create=kwargs["create"]))
-			CanSNPdatabase_obj = CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
+			self.CanSNPdatabase_obj = CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
 		else:
 			logger.debug("Connect to database {db}".format(db=kwargs["database"]))
 		#CanSNPdatabase_obj.create_cansnptable(kwargs["create"])
