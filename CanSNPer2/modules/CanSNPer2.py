@@ -196,10 +196,12 @@ class CanSNPer2(object):
 				'''This error might be caused by mauve not handling dash(-) in the sequence, change the incoming sequence and replace - with N and retry once'''
 				logger.warning("Mauve ran into an error with sequence {seq} may contain a dash, replace with N characters and retry mauve".format(seq=query))
 				query_base = os.path.basename(query)
-				logger.debug("sed 's/-/N/g' {query} > {tmpdir}/{query_base}.tmp".format(query=query,query_base=query_base,tmpdir=self.tmpdir))
+				new_query = os.path.join(self.tmpdir, query_base + ".tmp")
+				logger.debug("Replacing all '-' with 'N' in {query}, writing copy to {tmp}".format(query=query,tmp=new_query))
 				self.xmfa_files = []
-				os.system("sed 's/-/N/g' {query} > {tmpdir}/{query_base}.tmp".format(query=query,query_base=query_base,tmpdir=self.tmpdir))
-				new_query = "{tmpdir}/{query}.tmp".format(query=query_base,tmpdir=self.tmpdir)
+				with open(query, "r") as seq_in, open(new_query, "w") as seq_out:
+					for line in seq_in:
+						seq_out.write(line.replace("-", "N"))
 				logger.debug("New query: {nq}".format(nq=new_query))
 				commands,logs = self.create_mauve_command(new_query,references)
 				ret = self.run_mauve(commands,logs)

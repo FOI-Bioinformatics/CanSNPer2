@@ -144,7 +144,7 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 		logging.debug(self.database)
 		QUERY = '''SELECT {columns} FROM {table}'''.format(table=table,columns=columns)
 		logging.info(QUERY)
-		data = self.database.query(QUERY).fetchall()
+		data = self.query(QUERY).fetchall()
 		dic = {}
 		for id,name in data:
 			dic[name] = id
@@ -170,7 +170,7 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 		'''Add node to tree'''
 		'''Must get node ID from FlexTaxDatabase!!'''
 
-		info = { "node_id", self.snpDict[data.pop(0)]}
+		info = { "node_id": self.snpDict[data.pop(0)]}
 		### If ID is supplied skip autoincrement and add specific ID
 		for head in headers:
 			info[head] = data.pop(0)
@@ -256,7 +256,7 @@ class CanSNPdbFunctions(DatabaseConnection):
 		info = { "name": description }
 		### If ID is supplied skip autoincrement and add specific ID
 		if id:
-			info["node_i"] = id
+			info["id"] = id
 		taxid_base = self.insert(info, table=table)
 		return taxid_base
 
@@ -268,10 +268,10 @@ class CanSNPdbFunctions(DatabaseConnection):
 		}
 		return self.insert(info, table=table)
 
-	def add_genome(self, id, table="genomes"):
+	def add_genome(self, id, genome, table="genomes"):
 		'''Add genome annotation to nodes'''
 		info = {
-			"node_i": id,
+			"id": id,
 			"genome": genome
 		}
 		return self.insert(info, table=table)
@@ -317,18 +317,18 @@ class CanSNPdbFunctions(DatabaseConnection):
 	'''
 	def delete_links(self,links, table="Tree",hold=False):
 		'''This function deletes all links given in links'''
-		QUERY = "DELETE FROM {table} WHERE parent = {parent} AND child = {child}"
+		QUERY = "DELETE FROM {table} WHERE parent = ? AND child = ?"
 		for parent,child in links:
-			res = self.query(QUERY.format(table=table, parent=parent, child=child))
+			res = self.query(QUERY.format(table=table),insert_val=(parent,child),getres=True)
 		## Commit changes
 		if not hold:
 			self.commit()
 
 	def delete_nodes(self, nodes, table="nodes",hold=False):
 		'''This function deletes all nodes given in nodes'''
-		QUERY = "DELETE FROM {table} WHERE node_i = {node}"
+		QUERY = "DELETE FROM {table} WHERE id = ?"
 		for node in nodes:
-			res = self.query(QUERY.format(table=table, node=node))
+			res = self.query(QUERY.format(table=table),insert_val=(node,),getres=True)
 		## Commit changes
 		if not hold:
 			self.commit()

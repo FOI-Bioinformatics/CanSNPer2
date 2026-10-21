@@ -1,0 +1,9 @@
+Fix shell injection and broken database functions in module code
+
+- fix #4, #52: CanSNPer2.py align() — replace os.system sed retry with pure-Python path rewrite, removing shell involvement
+- fix #14: DatabaseConnection.py getSNPdict() — query via self.query instead of calling .query on the database path string
+- fix #15: DatabaseConnection.py LoadCanSNPAnnotation.add_node() — init info as a dict, not a set
+- fix #16: DatabaseConnection.py add_node() — write explicit id to the real nodes.id column
+- fix #17: DatabaseConnection.py add_genome() — take genome as an argument and use the real genomes.id column
+- fix #19: DatabaseConnection.py delete_links() — bind parent/child as ? parameters
+- fix #20: DatabaseConnection.py delete_nodes() — bind id as a ? parameter (column node_i corrected to id)
