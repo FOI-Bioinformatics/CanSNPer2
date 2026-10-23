@@ -39,6 +39,7 @@ __date__ 		= "2020-04-23"
 __status__ 		= "Production"
 
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2
+from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 import logging
 import logging.config
 import os,sys
@@ -93,6 +94,18 @@ def main():
 	if args.version:
 		print("CanSNPer2 - version {version}".format(version=__version__))
 		exit()
+	if args.read_input:
+		print("Read input is not implemented in this version, fasta input is required.")
+		exit()
+	if not args.database:
+		print("A database is required: CanSNPer2 --database database.db query.fasta")
+		exit(1)
+	'''fail with a clear message on a bad database path instead of creating an empty database'''
+	try:
+		check_database(args.database)
+	except ConnectionError as e:
+		print(e)
+		exit(1)
 
 	logval = args.supress
 	if args.debug:
@@ -162,7 +175,13 @@ def main():
 	)
 
 	'''Run CanSNPer2'''
-	CanSNPer2_obj.run(database=args.database)
+	try:
+		CanSNPer2_obj.run(database=args.database)
+	except KeyboardInterrupt:
+		'''Ctrl-C or SIGTERM: the alignment processes are already stopped in run_mauve, report it
+			plainly instead of dumping a traceback (issue #151)'''
+		logger.warning("CanSNPer2 was interrupted, the progressiveMauve processes were stopped")
+		exit(130)
 
 if oname=="__main__":
 	main()

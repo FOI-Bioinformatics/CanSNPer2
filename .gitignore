@@ -9,4 +9,6 @@ test*
 dist*
 results*
 logs
+references
 .commit-msg
+.fix-backups

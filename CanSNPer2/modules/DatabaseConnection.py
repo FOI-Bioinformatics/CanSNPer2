@@ -6,7 +6,6 @@ DatabaseConnections and CanSNPdbFunctions are classes written to simplify databa
 This particular script is specially adapted to suit the use for CanSNPer web database!
 '''
 
-#__name__="DatabaseConnection"
 __version__ = "0.1.5"
 __author__ = "David Sundell"
 __credits__ = ["David Sundell"]
@@ -25,6 +24,40 @@ class ConnectionError(Exception):
 		self.value = value
 	def __str__(self):
 		return repr(self.value)
+
+CANSNP_TABLES = ("nodes","tree","snp_annotation","snp_references")
+
+GENOME_SOURCE_COLUMNS = ("genome","strain","genbank_id","refseq_id","assembly_name")
+ANNOTATION_SOURCE_COLUMNS = ("snp_id","reference","genome","position","derived_base","ancestral_base")
+
+class SourceFileError(ValueError):
+	'''a source file could not be used at all, reported instead of crashing inside a loader'''
+	pass
+
+def check_source_headers(headers,required,filename):
+	'''source files are read by column name, a file without the header row, or with renamed columns,
+		crashed with a bare KeyError deep inside the loaders (issue #154)'''
+	missing = [column for column in required if column not in headers]
+	if missing:
+		raise SourceFileError("The source file {file} has no column(s) {missing}, a header row with {required} is required".format(file=filename,missing=", ".join(missing),required=", ".join(required)))
+	return True
+
+def check_database(path):
+	'''Check that a path is an existing CanSNP database before anything is run against it,
+		sqlite3.connect() would otherwise happily create an empty file and the run would only
+		fail later with "no such table" errors (issue #125)
+	'''
+	if not os.path.exists(path):
+		raise ConnectionError("The database {path} does not exist, download it or create it with CanSNPer2-database --create".format(path=path))
+	conn = sqlite3.connect(path)
+	try:
+		tables = set([row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()])
+	finally:
+		conn.close()
+	missing = [table for table in CANSNP_TABLES if table not in tables]
+	if missing:
+		raise ConnectionError("{path} is not a CanSNP database, the table(s) {missing} are missing".format(path=path,missing=", ".join(missing)))
+	return True
 
 class DatabaseConnection(object):
 	"""docstring for DatabaseConnection"""
@@ -1143,9 +1176,6 @@ class XMFAFunctions(DatabaseConnection):
 										LEFT JOIN snp_references on (snp_references.id = snp_annotation.genome_i)
 										WHERE genome = ?
 									"""
-		# res = self.query(snp_string, (reference,),getres=True)
-		# for strain, pos,tbase,rbase,SNP in res.fetchall():
-		# 	SNPs[pos] = tuple([pos,rbase, tbase,SNP])
 		SNPs = self.get_results(snp_string,reference)
 		if len(SNPs) == 0:
 			logger.error("No SNPs could be found in database check your database connection!")
@@ -1154,8 +1184,3 @@ class XMFAFunctions(DatabaseConnection):
 		snp_positions = list(SNPs.keys())
 		snp_positions.sort()
 		return SNPs,snp_positions
-
-	# def get_references(self):
-	# 	'''Finds all references in the database and returns a list'''
-	# 	query = """SELECT DISTINCT(Strain) FROM Sequences"""
-	# 	return [x[0] for x in self.query(query).fetchall()]

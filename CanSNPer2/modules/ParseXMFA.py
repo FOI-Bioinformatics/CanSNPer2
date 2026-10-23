@@ -28,7 +28,6 @@ class ParseXMFA(object):
 
 		'''Define all base variables'''
 		self.verbose = verbose
-		self.export = kwargs.get("export",False)
 		self.called_snps = []
 
 		'''SNP state is initialized here so _next_pos/_snpinfo never hit an
@@ -62,11 +61,6 @@ class ParseXMFA(object):
 	def get_called_snps(self):
 		'''Return true snps'''
 		return self.called_snps
-
-	def reverse_complement(self,dna):
-		'''Complement and reverse DNA string'''
-		dna_rev = [ self.rcDict.get(x,"N") for x in dna[::-1] ] ## unknown characters become N instead of crashing (issue #96)
-		return "".join(dna_rev)
 
 	def _next_pos(self):
 		'''return the next SNP position if list is not empty'''

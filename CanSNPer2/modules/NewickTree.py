@@ -3,13 +3,19 @@ Module to read and write newick trees
 
 '''
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-import ete3
-'''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.
-	It fails due to faces not being available in that ete3 version on import, but it works when ete3 is
-	 being installed manually using conda.
-'''
-
+import os
 import sys
+'''ete3 renders trees through Qt, which aborts the whole process when it cannot open a display
+	(headless servers, containers), so select the offscreen platform unless the user chose one'''
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and not os.environ.get("QT_QPA_PLATFORM"):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import ete3
+'''ete3 only exposes the drawing classes (NodeStyle, TreeStyle, AttrFace, faces) through its treeview
+	subpackage, which fails to import when no Qt binding is installed, and ete3 swallows that error.
+	Warn here and raise a readable error when a tree is actually drawn (issue #122).
+'''
+ETENEWICK_OK = all(hasattr(ete3, name) for name in ("NodeStyle","TreeStyle","AttrFace","faces"))
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -281,6 +287,8 @@ class NewickTree(object):
 		snplist -- a list of the SNP names, positions and state
 		'''
 		logger.debug("Draw tree from snplist")
+		if not ETENEWICK_OK:
+			raise ImportError("ete3 is missing its drawing classes (NodeStyle, TreeStyle, AttrFace), install PyQt5 to enable tree output: pip install PyQt5")
 		try:
 			tree = ete3.Tree(self.newickTree, format=1)
 		except Exception as e:

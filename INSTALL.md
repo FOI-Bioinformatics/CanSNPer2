@@ -66,7 +66,9 @@ Most Linux distributions come with Python installed. However we recommend using
 ETE3 has a number of additional dependencies, listed in their install 
 notes. Most notably, there are several dependencies that are not needed 
 for CanSNPer2, but they may raise warnings as ETE3 is loaded. Note that
-Qt < 5 is needed to run ETE3.
+ETE3 needs a Qt binding (PyQt5 for ete3 3.1.x) to draw trees, without it
+the drawing classes are silently left out of the ete3 namespace and no
+tree or summary output can be produced. Install it with `pip install PyQt5`.
 
 [NumPy](http://www.numpy.org/)  
 Simple install instructions are available for this package.

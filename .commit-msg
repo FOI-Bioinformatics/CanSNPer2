@@ -1,28 +1,44 @@
-Fix sweep-found crashes, pipe deadlocks, injection risks and silent data loss
+Remove dead code found by the last sweeps (#158-#171)
 
-Second sweep pass (issues #64-#120) over the whole package, each fix verified
-with a script against the real francisella_tularensis.db and synthetic xmfa
-data; pre-change copies kept in .fix-backups/.
+Only unused imports, attributes, methods, arguments and commented-out
+leftovers were deleted; no behaviour changed. Verified by rebuilding all
+three shipped databases from the CanSNPer2-data source files: the sqlite
+dumps and the tab exports are byte identical to the pre-change code, and
+the Francisella end-to-end run (query Ames, five references,
+progressiveMauve) gives the same SNP calls and the same not-called rows.
 
-Core fixes:
-- DatabaseConnection: multi_update silently failed on every shipped database
-  (no UNIQUE constraint on genome) while reporting success; rewritten as
-  parameter-bound update-then-insert, ModifyTree now passes value pairs
-- update(): SET values parameterized, WHERE bound to a dedicated where value
-- get_node(): name bound as a parameter (SQL injection, #67)
-- SNPDatabase: shell-free makedirs (#69), missing __version__ import (#119)
-- CanSNPer2/runMauve: mauve stdout/stderr redirected straight to the per-run
-  log file; the PIPE filled up and hung the poll loop (#68, #85); process
-  loop no longer mutates while iterating; cleanup is dir-aware (#86/#87)
-- DownloadGenomes: NCBI ftp:// retired in 2021, downloads now use https (#120);
-  unzipping done with the gzip module instead of external gunzip (#73/#74)
-- NewickTree: invalid newick raises instead of UnboundLocalError (#77),
-  missing start node returns a clean rejection (#78), zero-distance guard (#95)
-- ModifyTree: malformed modification/name files raise InputError or are
-  skipped with warnings instead of IndexError/ValueError (#79-#84, #91-#94)
-- P3 hardening across ReadTaxonomy*, ReadCanSNP_tables, ModifyDatabase,
-  ParseXMFA, WriteTaxonomy, runMauve, CanSNPerTree: short rows, malformed
-  xmfa blocks, empty SNP tables and missing kwargs now fail clearly or skip
-  with a warning instead of crashing mid-run (#71-#75, #88-#115)
-- Removed leftover one-shot scripts append_issues.py/clean_issues.py that
-  could re-corrupt the tracker file (#116/#117)
+P4
+- #158 SNPDatabase: the commented-out --add_node/--add_snp arguments were
+  dropped; those flags were never implemented and --mod_file covers the job.
+- #159 CanSNPer2: self.no_export was written and never read; the
+  --no_snpfiles flag already reaches self.export.
+- #160 CanSNPer2: create_mauve_command read self.query_name, which only
+  run() happened to set, so calling align() directly died with
+  AttributeError. The name is now taken from the query being aligned in
+  align() itself, which also keeps the gap-N retry using the original
+  sample name for its xmfa files.
+- #161-#164 DatabaseConnection: removed the commented __name__ line, the
+  superseded query loop in get_snps and the commented get_references stub
+  (the SNPDatabase logger comment the sweep listed as #162 was removed too).
+- #165 InitiateDatabase: unused sys/os/inspect/sqlite3 imports and two
+  commented lines dropped; the CreateSNPDatabase call stays, its unused
+  attribute does not.
+- #166 ModifyDatabase: unused snp_annotation argument dropped and the
+  commented-out AddReference class deleted, live add_genome and
+  load_genome_reference_file already do that work.
+- #167 ParseXMFA: self.export was never read (export is passed to the parse
+  functions) and reverse_complement was never called; rcDict stays because
+  find_snps uses it.
+- #168 ReadCanSNP_tables: self.names and self.ids come from
+  ReadTaxonomy.__init__ and are used by the inherited add_link/read_nodes,
+  self.genomes was never used here.
+- #169 ReadTaxonomyCanSNPer: removed self.qiime, the set_qiime() setter that
+  only wrote it, and self.skipped; add_rank uses its own qiime parameter.
+- #170 WriteTaxonomy: removed the unused dump_genomes() method and the
+  matching unread dump_genomes= argument.
+- #171 runMauve: RunMauve.run() never used its organism argument; the
+  --organism flag is still accepted and now documented as ignored, since
+  SNP finding is not implemented in that module.
+
+Backups of the ten touched files are in
+CanSNPer2/.fix-backups/2026-10-22-158-171-deadcode/.

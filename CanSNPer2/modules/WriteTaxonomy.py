@@ -8,16 +8,20 @@ Ported from flextaxd.modules.WriteTaxonomy to remove the flextaxd dependency
 '''
 
 from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions
+import os
 import logging
 logger = logging.getLogger(__name__)
 
 class WriteTaxonomy(object):
 	"""docstring for WriteTaxonomy."""
-	def __init__(self, path, database=".taxonomydb",separator="\t|\t",minimal=False,prefix="names,nodes",desc=False,dbprogram=None,dump_genomes=False,**kwargs):
+	def __init__(self, path, database=".taxonomydb",separator="\t|\t",minimal=False,prefix="names,nodes",desc=False,dbprogram=None,**kwargs):
 		super(WriteTaxonomy, self).__init__()
 		self.database = DatabaseFunctions(database)
 		logging.debug("Write settings: ")
 		self.path = path.rstrip("/")+"/"
+		'''the export folder is created on demand, an exporter should not die on a missing outdir (issue #130)'''
+		if not os.path.exists(self.path):
+			os.makedirs(self.path, exist_ok=True)
 		logging.debug("Output path: {outdir}".format(outdir=self.path))
 		self.separator = separator
 		logging.debug("Output separator: '{separator}'".format(separator=self.separator))
@@ -52,14 +56,6 @@ class WriteTaxonomy(object):
 				print(*genome, sep="\t", end="\n", file=outputfile)
 				genome=tuple(["TAXID"]) + genome
 				print(*genome, sep="\t", end="\n", file=prelim)
-		return
-
-	def dump_genomes(self):
-		'''Write the list of annotated genomes to a file'''
-		with open('{}{}.dmp'.format(self.path,"genomes"),"w") as outputfile:
-			genomes = self.get_all('genomes', 'genome,reference', sort="reference")
-			for genome in genomes:
-				print(*genome, sep="\t", end="\n", file=outputfile)
 		return
 
 	def dump_genome_annotations(self, sort="reference"):

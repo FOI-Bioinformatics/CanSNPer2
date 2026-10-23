@@ -1,15 +1,8 @@
-import sys, os, inspect
-import sqlite3
-
-#from CanSNPer2.modules.DatabaseConnection import DatabaseConnection
-
-
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS
 from importlib import import_module
 from datetime import date
-#script_path = os.path.dirname(os.path.abspath(__file__))  ## Retrieve the abspath of the location of this script
 
 def dynamic_import(abs_module_path, class_name):
 	module = import_module(".".join([abs_module_path,class_name]))
@@ -68,12 +61,16 @@ class CanSNPDatabase(DatabaseFunctions):
 		'''Connect to database'''
 		if kwargs["create"]:
 			logger.debug("Create: {create}".format(create=kwargs["create"]))
-			self.CanSNPdatabase_obj = CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
+			'''the object is only created to run its side effect of making the database and its tables,
+				it is never used again and was kept in an attribute no other code read (issue #165)'''
+			CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
 		else:
 			logger.debug("Connect to database {db}".format(db=kwargs["database"]))
-		#CanSNPdatabase_obj.create_cansnptable(kwargs["create"])
 		source_type = kwargs["source_type"]
 		self.today = date.today()
+		'''load_annotation_file checks self.genomes before any reference file has been loaded, without
+			this it died with an AttributeError when only an annotation file was given'''
+		self.genomes = {}
 		if kwargs["tree"]:
 			logger.debug("Loading module ReadTaxonomy{type}".format(type=source_type))
 			read_module = dynamic_import("CanSNPer2.modules", "ReadTaxonomy{type}".format(type=source_type))
@@ -129,8 +126,12 @@ class CanSNPDatabase(DatabaseFunctions):
 			headers = f.readline().lstrip("#").strip().split("\t")
 			#dataArr = []
 			logging.debug(headers)
+			check_source_headers(headers,GENOME_SOURCE_COLUMNS,annotation_file)
 			for row in f:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
+					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
+					continue
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
@@ -155,9 +156,13 @@ class CanSNPDatabase(DatabaseFunctions):
 		with open(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
+			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
 			dataArr = []
 			for row in af:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #88)
+					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
+					continue
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]

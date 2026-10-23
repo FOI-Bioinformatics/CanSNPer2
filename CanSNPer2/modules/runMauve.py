@@ -151,8 +151,11 @@ class RunMauve(object):
 		if self.verbose: print("Done!")
 		return
 
-	def run(self,database,organism):
-		'''Run RunMauve'''
+	def run(self,database):
+		'''Run RunMauve
+
+			organism was dropped from this signature: the parameter was never used in the body,
+			the --organism command line flag stays accepted but is currently ignored (issue #171)'''
 		print("Run alignments to references using progressiveMauve")
 
 		'''Read query input file if a txt file is supplied insead of fasta files'''
@@ -211,4 +214,4 @@ if __name__=="__main__":  #main should be moved to the file __main__ for setup.p
 								save_tree=args.save_tree,
 								keep_temp= args.keep_temp,
 								)
-	CanSNPer.run(args.database,args.organism)
+	CanSNPer.run(args.database)

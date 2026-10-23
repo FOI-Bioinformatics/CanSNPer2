@@ -51,17 +51,12 @@ class ReadTaxonomyBase(object):
 		self.sep = "\t"
 		self.length = 0
 		self.ids = 0
-		self.qiime = 0
-		self.skipped = []
 
 		## Add base node
 		self.root = self.add_node("root")
 		self.add_rank("no rank")
 		## Add basic link
 		self.add_link(child=1, parent=1,rank="no rank")
-
-	def set_qiime(self,opt):
-		self.qiime = opt
 
 	def zopen(self, path,*args, **kwargs):
 		'''Redefine open to handle zipped files automatically'''
@@ -163,7 +158,11 @@ class ReadTaxonomyBase(object):
 
 class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 	"""docstring for ReadTaxonomyCanSNPer."""
-	def __init__(self, taxonomy_file=False, database=".canSNPdb",  taxid_base=1,root_name=False,rank="family", cnp=False, verbose=False,**kwargs):
+	def __init__(self, taxonomy_file=False, database=".canSNPdb",  taxid_base=1,root_name=False,rank="family", cnp=True, verbose=False,**kwargs):
+		'''cnp defaults to True: the CanSNPer source files already carry their own tree root, adding a
+			"cellular organisms" node on top of it gave created databases one node more than the shipped
+			databases (issue #149); pass cnp=False to keep the old behaviour
+		'''
 		super(ReadTaxonomyCanSNPer, self).__init__(taxonomy_file=taxonomy_file, database=database,verbose=verbose,**kwargs)
 		self.input = taxonomy_file
 		self.taxonomy = {}
@@ -189,6 +188,11 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 		if root_name != "root" and not cnp:
 			self.add_link(root_i,c_i,rank=rank) ## root is always added as top parent if not one force 1
 			self.taxonomy[root_i] = 1  ## Add local link to root
+		if cnp:
+			'''the CanSNPer source files already carry their own tree root and the shipped databases mark
+				that root with a link from the node to itself, adding the same link keeps created databases
+				structurally identical to the shipped ones (issue #149)'''
+			self.add_link(root_i,root_i,rank=rank)
 		self.names = {}
 		self.root = root_i
 		self.length = 0

@@ -7,7 +7,7 @@ Ported from flextaxd.modules.ModifyTree to remove the flextaxd dependency (ISSUE
 using CanSNPer2's own database functions.
 '''
 
-from CanSNPer2.modules.DatabaseConnection import ModifyFunctions
+from CanSNPer2.modules.DatabaseConnection import ModifyFunctions, NameNotFoundError
 import logging,os
 logger = logging.getLogger(__name__)
 import math,time
@@ -60,7 +60,7 @@ class TreeError(Exception):
 
 class ModifyTree(object):
 	"""docstring for ModifyTree."""
-	def __init__(self, database=".taxonomydb", mod_database=False, mod_file=False, clean_database=False, purge_database=False,update_genomes=False, update_node_names=False,rename_node=False,separator="\t",verbose=False,parent=False,replace=False,**kwargs):
+	def __init__(self, database=".taxonomydb", mod_database=False, mod_file=False, clean_database=False, purge_database=False,update_genomes=False, update_node_names=False,rename_node=False,separator="\t",verbose=False,parent=False,replace=False,remove=False,**kwargs):
 		super(ModifyTree, self).__init__()
 		self.verbose = verbose
 		logger.info("Modify Tree")
@@ -71,6 +71,7 @@ class ModifyTree(object):
 
 		self.parent=parent
 		self.replace = replace
+		self.remove = remove
 		self.ncbi_order = True
 		self.mod_genomes =False
 
@@ -79,7 +80,7 @@ class ModifyTree(object):
 		## Hidden option specific request, replace name of root node, with root of file.
 		try:
 			self.replace_parent = kwargs["replace_parent"]
-		except:
+		except KeyError:
 			logger.debug("kwarg replace_parent not present")
 			self.replace_parent = False
 		### Connect to or create database
@@ -94,7 +95,7 @@ class ModifyTree(object):
 		try:
 			if kwargs["taxonomy_type"] != "NCBI":  ## If taxonomy type in merge database is set to NCBI, keep ranks also above 9, default no.
 				self.taxonomy_type = True
-		except:
+		except KeyError:
 			pass
 		if not self.clean:
 			self.taxid_base = self.taxonomydb.get_taxid_base()
@@ -114,7 +115,7 @@ class ModifyTree(object):
 			self.modsource = self.parse_modification(self.moddb,"database")
 		elif mod_file:
 			self.modsource = self.parse_modification(mod_file,"file")
-		elif update_genomes or clean_database or update_node_names or rename_node or purge_database:
+		elif update_genomes or clean_database or update_node_names or rename_node or purge_database or remove:
 			pass
 		else:
 			raise InputError("No modification source could be found both mod_database and mod_file file are empty!")
@@ -218,7 +219,7 @@ class ModifyTree(object):
 				level = False
 			else:
 				logger.info("Rank kept for {node}, {rank}".format(node=child, rank=level))
-		except:
+		except (KeyError, TypeError, AttributeError):
 			level = False
 		if not level:
 			rank_i = self.add_rank(rank)
@@ -298,7 +299,7 @@ class ModifyTree(object):
 						parent = self.parent
 				try:
 					rank_i = self.rank[rank]
-				except:
+				except KeyError:
 					rank_i = self.add_rank(rank)
 				if swap:
 					## Make sure that the order between parent and child nodes are correct and consistent with the database
@@ -327,18 +328,26 @@ class ModifyTree(object):
 		self.existing_links = set()
 
 		# ### Get the connecting link between the two databases
-		self.parent_link = self.taxonomydb.get_parent(self.taxonomydb.get_id(self.parent))
+		if not self.parent:
+			'''--mod_file without --parent died with a NameNotFoundError traceback from get_id(None)'''
+			raise InputError("A modification needs the branch it applies to, give the branch root with --parent!")
+		try:
+			self.parent_id = self.taxonomydb.get_id(self.parent)
+		except NameNotFoundError:
+			'''an unknown --parent node raised a NameNotFoundError traceback out of get_id instead'''
+			raise InputError("The selected parent node ({parent}) could not be found in the source database!".format(parent=self.parent))
+		self.parent_link = self.taxonomydb.get_parent(self.parent_id)
 		logger.info(self.parent_link)
 		if not self.parent_link:
 			raise InputError("The selected parent node ({parent}) could not be found in the source database!".format(parent=self.parent))
 
-		self.existing_nodes = self.taxonomydb.get_children(set([self.taxonomydb.get_id(self.parent)])) ## - set([self.taxonomydb.get_id(self.parent)] )
+		self.existing_nodes = self.taxonomydb.get_children(set([self.parent_id])) ## - set([self.taxonomydb.get_id(self.parent)] )
 		if modtype == "file":
-			self.existing_nodes	-= set([self.taxonomydb.get_id(self.parent)])
+			self.existing_nodes	-= set([self.parent_id])
 		logger.info("{n} children to {parent}".format(n=len(self.existing_nodes),parent=self.parent))
 		if len(self.existing_nodes) > 0:
 			self.existing_links = set(self.taxonomydb.get_links(self.existing_nodes))
-		parentlinks = set(self.taxonomydb.get_links([self.taxonomydb.get_id(self.parent)]))
+		parentlinks = set(self.taxonomydb.get_links([self.parent_id]))
 		if modtype == "database":
 			modparent = self.moddb.get_parent(self.moddb.get_id(self.parent))
 			logger.info("{n} existing links to {parent} ({parentlinks}) ({modparent})".format(n=len(self.existing_links),parent=self.parent,parentlinks=parentlinks,modparent=modparent))

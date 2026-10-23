@@ -19,13 +19,11 @@ class ReadCanSNPer(ReadTaxonomy):
 		self.annotation = {}
 		self.taxid_base = taxid_base
 
-		'''Annotations'''
-		self.genomes = {}		## path to genomes
-
-		self.names = {}
+		'''Annotations: self.names and self.ids are already created by ReadTaxonomy.__init__
+			and used by the inherited add_link/read_nodes, the duplicates set here were never
+			read (issue #168)'''
 		self.root = 1
 		self.length = 0
-		self.ids = 0
 
 		self.version = version
 

@@ -2,16 +2,17 @@
 	Modify and update the CanSNPer2 database
 '''
 
-from CanSNPer2.modules.ModifyTree import ModifyTree
+from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
+from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS
 from datetime import date
 import logging
 logger = logging.getLogger(__name__)
 
 class ModifyCanSNPer2Database(ModifyTree):
 	"""ModifyCanSNPer2Database adds a few important functions only nessesary when modifying a database"""
-	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,snp_annotation=False,**kwargs):
+	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,remove=False,**kwargs):
 		logger.info("Load ModifyFunctions")
-		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace)
+		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace,remove=remove)
 		self.genomes = {}
 		self.today = date.today()
 
@@ -69,6 +70,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 		with open(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
+			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
 			dataArr = []
 			for row in af:
 				data = row.strip().split("\t")
@@ -102,6 +104,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 		with open(reference_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
+			check_source_headers(headers,GENOME_SOURCE_COLUMNS,reference_file)
 			dataArr = []
 			for row in af:
 				data = row.strip().split("\t")
@@ -123,17 +126,26 @@ class ModifyCanSNPer2Database(ModifyTree):
 
 	def update_database(self):
 		'''Update the database file'''
+		'''This override carried the old flextaxd attribute names (modified_links), which
+			ModifyTree never sets, so every --mod_file run died with an AttributeError (issue #133),
+			the names below follow ModifyTree.parse_modification
+		'''
+		removed_links = (self.old_links | self.non_overlapping_old_links) - set(self.parent_link)
 		if self.replace:
-			self.taxonomydb.delete_links(self.modified_links)
-			self.taxonomydb.delete_links(self.existing_links-set(self.parent_link))  ## delete existing links from old nodes, except parent
+			self.taxonomydb.delete_links(removed_links)
 			self.taxonomydb.delete_nodes(self.old_nodes)
+			'''the snp annotations of removed nodes have to go with them, leftovers would still be
+				picked up by the annotation lookups (issue #134)'''
+			for node_id in self.old_nodes:
+				self.taxonomydb.query("DELETE FROM snp_annotation WHERE node_id = ?",insert_val=(node_id,),error=True)
+			self.taxonomydb.commit()
 			logger.info("Deleted nodes {nodes}".format(nodes=self.old_nodes))
 		links,nodes = self.taxonomydb.add_links(self.new_links)
 		logger.debug("Added nodes {nodes}, added links {links}".format(nodes=nodes,links=links))
 
-		if len(links) + len(nodes) + len(self.modified_links) > 0:
+		if len(links) + len(nodes) + len(removed_links) > 0:
 			if self.replace:
-				logger.info("Deleting {n} links and {n2} nodes that are no longer valid".format(n=len(self.modified_links | self.existing_links),n2=len(self.old_nodes)))
+				logger.info("Deleting {n} links and {n2} nodes that are no longer valid".format(n=len(removed_links),n2=len(self.old_nodes)))
 			logger.info("Adding {n} new nodes".format(n=len(nodes)))
 			logger.info("Adding {n} updated and/or new links".format(n=len(links)))
 
@@ -148,41 +160,28 @@ class ModifyCanSNPer2Database(ModifyTree):
 		return
 
 
-#
-# class AddReference(object):
-#     """docstring for AddReference."""
-#
-#     def __init__(self, database, reference):
-#         super(AddReference, self).__init__()
-#
-#     def add_genome(self,data):
-#         '''Add genome annotation'''
-#         logger.debug("Add genome")
-#         logger.debug(data)
-#         info = {
-#                 "genome":            data["genome"],
-#                 "strain":         data["strain"],
-#                 "genbank_id":     data["genbank_id"],
-#                 "refseq_id":        data["refseq_id"],
-#                 "assembly_name":         data["assembly_name"],
-#                 #"comment":             data["comment"]
-#         }
-#         return self.insert(info, table="snp_references")
-#
-#     def load_genome_annotation_file(self,annotation_file):
-#         self.genomes = {}
-#         with open(annotation_file) as f:
-#             headers = f.readline().lstrip("#").strip().split("\t")
-#             #dataArr = []
-#             logging.debug(headers)
-#             for row in f:
-#                 data = row.strip().split("\t")
-#                 ddict = {}
-#                 for i in range(len(headers)):
-#                     head,val = headers[i],data[i]
-#                     ddict[head] = val
-#                 genome_i = self.add_genome(ddict)
-#                 self.genomes[ddict["genome"]] = genome_i
-#                 self.genomes[ddict["genbank_id"]] = genome_i
-#                 self.genomes[ddict["refseq_id"]] = genome_i
-#         self.conn.commit()
+	def remove_branch(self,node):
+		'''--remove was documented but no code ever read the flag, so CanSNPer2-database silently did
+			nothing (issue #147). Remove the branch starting at the given node: the node itself, all of
+			its descendants, every link to or from them and their SNP annotations.
+		'''
+		try:
+			node_id = self.taxonomydb.get_id(node)
+		except NameNotFoundError:
+			raise InputError("The node {node} could not be found in the database {database}!".format(node=node,database=self.taxonomydb.database))
+		branch = self.taxonomydb.get_children(set([node_id])) | set([node_id])
+		links = self.taxonomydb.get_links(branch)
+		'''CanSNPer marks the root of a tree with a link from the node to itself, deleting that node
+			would wipe the whole database'''
+		if (node_id,node_id,node_id) in links or (node_id,node_id) in [(link[0],link[1]) for link in links]:
+			raise InputError("{node} is a root of the tree, removing it would delete the whole database, remove a branch below it instead!".format(node=node))
+		logger.info("Removing the branch from {node}: {n} nodes and {m} links".format(node=node,n=len(branch),m=len(links)))
+		self.taxonomydb.delete_links(links,hold=True)
+		'''the annotations of the removed nodes have to go with them, leftover rows would still be
+			picked up by the annotation lookups (issue #134)'''
+		for removed_id in branch:
+			self.taxonomydb.query("DELETE FROM snp_annotation WHERE node_id = ?",insert_val=(removed_id,),error=True)
+		self.taxonomydb.delete_nodes(branch,hold=True)
+		self.taxonomydb.commit()
+		logger.info("Branch from {node} removed!".format(node=node))
+		return branch

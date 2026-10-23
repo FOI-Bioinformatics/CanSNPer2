@@ -46,7 +46,8 @@ class DownloadGenomes(object):
 
 	def download(self,genome_id, assembly, refid ,source="genbank", directory="references"):
 		'''Download genomes from refseq or genbank on request
-			ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/00x/xxx/GCF_00000xxxx.x_ASMxxxv1/GCF_00000xxxx.x_ASMxxxv1_genomic.fna.gz
+			https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/00x/xxx/GCF_00000xxxx.x_ASMxxxv1/GCF_00000xxxx.x_ASMxxxv1_genomic.fna.gz
+			(the ftp:// protocol was retired by NCBI in 2021, the same tree is served over https (issue #120))
 		'''
 		sourceD = {"refseq":"F", "genbank": "A"}
 		try:
@@ -115,6 +116,14 @@ def main():
 	debugopts.add_argument('--verbose',	action='store_const', const=logging.DEBUG, help='Verbose logging')
 
 	args = parser.parse_args()
+
+	'''fail with a clear message on a bad database path instead of creating an empty database (issue #125)'''
+	from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
+	try:
+		check_database(args.database)
+	except ConnectionError as e:
+		print(e)
+		exit(1)
 
 	logval = logging.WARNING
 	if args.verbose:

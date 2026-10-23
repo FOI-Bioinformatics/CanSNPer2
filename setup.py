@@ -1,9 +1,22 @@
 from setuptools import setup, find_packages
-from CanSNPer2.CanSNPerTree import __version__
+import os, re
+
+def get_version():
+    '''setup.py must never import the package it builds: pip runs the build in an isolated
+        environment that does not contain the dependencies, so importing CanSNPerTree died with
+        "ModuleNotFoundError: No module named ete3" and neither pip install . nor pip install -e .
+        could get past reading the metadata
+    '''
+    init = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CanSNPer2", "__init__.py")
+    with open(init) as version_file:
+        found = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", version_file.read())
+    if not found:
+        raise RuntimeError("No __version__ was found in CanSNPer2/__init__.py")
+    return found.group(1)
 
 setup(
     name="CanSNPer2",
-    version=__version__,
+    version=get_version(),
     url="https://git-int.foi.se/bioinfo/cansnper2",
     description="CanSNPer2: A toolkit for SNP-typing bacterial genomes.",
 
@@ -22,7 +35,7 @@ setup(
 
     keywords="Bioinformatics SNP-typing sequence-data",
 
-    install_requires=['ete3'],
+    install_requires=['ete3','PyQt5'],
     packages=find_packages(exclude=['contrib', 'docs', 'test*']),
     #py_modules=['CanSNPer2.modules.ParseXMFA',"CanSNPer2.modules.DatabaseConnection","CanSNPer2.modules.CanSNPer2","CanSNPer2.modules.NewickTree"],
     entry_points={'console_scripts': [
