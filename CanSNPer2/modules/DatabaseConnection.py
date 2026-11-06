@@ -198,8 +198,8 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 	def load_annotations(self,annotation):
 		'''Function to load data into CanSNPer2 database table'''
 		self.snpDict = self.getSNPdict(table="nodes",columns="id,name")
-		if not annotation:
-			logging.error(ConnectionError("The annotation file does not exist!".format(self.database)))
+		if not annotation or not os.path.exists(annotation):
+			raise SourceFileError("The annotation file {file} does not exist, no annotations could be loaded!".format(file=annotation))
 
 		with open(annotation) as f:
 			headers = f.readline().strip().lstrip("#").split("\t")
@@ -207,19 +207,28 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 			headers = ["node_id", "snp_id", "position", "ancestral_base","derived_base","reference","date","genome_i"]
 			for row in f:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## short row would die with a bare IndexError in add_node, same guard as ModifyDatabase.load_annotation_file (issue #88, #215)
+					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
+					continue
 				self.add_node(data, headers)
-				print(headers, data)
-				exit()
 
 	def add_node(self, data, headers, table="snp_annotation"):
 		'''Add node to tree'''
 		'''Must get node ID from FlexTaxDatabase!!'''
 
-		info = { "node_id": self.snpDict[data.pop(0)]}
-		### If ID is supplied skip autoincrement and add specific ID
+		### the first column is the node name, node_id is looked up from the nodes table,
+		### it is not a file column and must not be overwritten by the loop below (issue #213)
+		name = data.pop(0)
+		if name not in self.snpDict:
+			## same convention as ModifyDatabase.load_annotation_file: report and skip the row
+			logging.warning("WARNING: {name} was not found in the tree, check your source files!".format(name=name))
+			return False
+		info = { "node_id": self.snpDict[name]}
 		for head in headers:
+			if head == "node_id":
+				continue
 			info[head] = data.pop(0)
-		logger.debug(info, table)
+		logger.debug("add_node info: {info}, table: {table}".format(info=info,table=table))
 		taxid_base = self.insert(info, table=table)
 		return taxid_base
 
@@ -303,7 +312,7 @@ class CanSNPdbFunctions(DatabaseConnection):
 		'''Add node to tree'''
 		info = { "name": description }
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
+		if id is not False: ## an id of 0 is a real id, only the "not supplied" marker False means autoincrement (issue #222)
 			info["id"] = id
 		taxid_base = self.insert(info, table=table)
 		return taxid_base
@@ -328,8 +337,8 @@ class CanSNPdbFunctions(DatabaseConnection):
 		'''Add node to tree'''
 		info = { "rank": rank }
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
-			info["id"] = id
+		if id is not False: ## an id of 0 is a real id (issue #222)
+			info["rank_i"] = id ## the rank table keys on rank_i, "id" only worked because the old truthiness test hid this branch
 		rank_id = self.insert(info, table="rank")
 		if self.verbose: print("rank added: ",info)
 		return rank_id
@@ -834,7 +843,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
 			return False
 		info = { "name": description }
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
+		if id is not False: ## an id of 0 is a real id (issue #222)
 			info["id"] = id
 		taxid_base = self.insert(info, table=table)
 		logger.debug("node added [description {}, taxid base {}]: ".format(info, taxid_base))
@@ -846,8 +855,8 @@ class DatabaseFunctions(TaxonomyDBConnection):
 			raise AttributeError("Rank cannot be None")
 		info = { "rank": rank }
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
-			info["id"] = id
+		if id is not False: ## an id of 0 is a real id (issue #222)
+			info["rank_i"] = id ## the rank table keys on rank_i, "id" only worked because the old truthiness test hid this branch
 		rank_id = self.insert(info, table="rank")
 		return rank_id
 
@@ -867,7 +876,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
 			"genome": genome
 		}
 
-		if _id:
+		if _id is not False: ## an id of 0 is a real id (issue #222)
 			info["id"] = _id
 		if reference:
 			info["reference"] = reference

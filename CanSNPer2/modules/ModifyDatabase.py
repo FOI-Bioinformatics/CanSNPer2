@@ -41,7 +41,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 				"genome_i":         genome_i
 		}
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
+		if id is not False: ## an id of 0 is a real id, only the "not supplied" marker False means skip (issue #203)
 			info["node_id"] = id
 		logger.debug(info)
 		taxid_base = self.taxonomydb.insert(info, table="snp_annotation")
@@ -94,7 +94,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 
 					_id = False
 				logger.debug(ddict)
-				if _id:
+				if _id is not False: ## a node id of 0 is valid, only False means "not found" (issue #204)
 					self.add_annotation(ddict, id=_id, genome_i=genome_i)
 		self.taxonomydb.commit()
 		return dataArr

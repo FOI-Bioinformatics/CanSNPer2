@@ -101,7 +101,7 @@ class CanSNPDatabase(DatabaseFunctions):
 				"genome_i":         genome_i
 		}
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
+		if id is not False: ## the twin of issue #203 in the create path: an id of 0 is a real id
 			info["node_id"] = id
 		taxid_base = self.insert(info, table="snp_annotation")
 		return taxid_base
@@ -179,7 +179,7 @@ class CanSNPDatabase(DatabaseFunctions):
 					logger.warning("No genome annotation could be found add a genome annotation file to command!")
 					logger.debug(ddict)
 					_id = False
-				if _id:
+				if _id is not False: ## a looked up node id is checked against False, not for truth: an id of 0 is a real id (issue #202)
 					logger.debug("Add annotation: {dic}, {_id}, {gid}".format(dic=ddict,_id=_id,gid=genome_i))
 					self.add_annotation(ddict, id=_id, genome_i=genome_i)
 		### commit changes to database

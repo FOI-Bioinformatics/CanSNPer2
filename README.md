@@ -62,6 +62,73 @@ CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --
 CanSNPer2-download --database francisella_tularensis.db
 CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --save_tree
 ```
+
+### CanSNPer2-database
+
+```
+usage: CanSNPer2-database [-h] [-db] [--tree] [--annotation] [--references]
+                      [--source_type] [--create] [--mod_file] [--parent]
+                      [--remove] [--replace] [--export] [--export_format] [-o]
+                      [--tmpdir] [--logs] [--verbose] [--debug] [--supress]
+
+CanSNPer2-database
+
+optional arguments:
+  -h, --help         show this help message and exit
+
+Required:
+  -db , --database   CanSNPer2 database name
+
+Load database:
+  --tree             CanSNPer tree source file
+  --annotation       CanSNPer snp source file
+  --references       File containing all reference genomes listed
+  --source_type      Select source file type
+  --create           Create new database!
+
+Database modifications:
+  --mod_file         File with modifications/update to the tree
+  --parent           Node (or nodes matching tree file) from which to
+                     update/replace/remove
+  --remove           Remove the whole branch rooted at the --parent node, with
+                     its nodes, links and SNP annotations
+  --replace          replace node
+
+Export database:
+  --export           Export database to text format (exports tree and
+                     annotation file)
+  --export_format    Select output format [newick, tab]
+  -o , --outdir      outdir for database export!
+
+Logging and debug options:
+  --tmpdir           Specify tmp directory default (/tmp)
+  --logs             Specify log directory
+  --verbose          print process info, default no output
+  --debug            print debug info
+  --supress          supress warnings
+```
+
+### CanSNPer2-download
+
+```
+usage: CanSNPer2-download [-h] -db  [-s] [-o] [--logs] [--verbose]
+
+CanSNPer2-download
+
+optional arguments:
+  -h, --help         show this help message and exit
+
+Required:
+  -db , --database   CanSNP database
+
+Download options:
+  -s , --source      Source for download (genbank/refseq)
+  -o , --outdir      reference genomes folder
+
+Logging and debug options:
+  --logs             Specify log directory
+  --verbose          Verbose logging
+```
 Example structure of references.txt
 ```
 genome strain  genbank_id      refseq_id       assembly_name
@@ -97,12 +164,13 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_export]
-                 [--refdir] [--workdir]
-                 [--read_input] [--skip_mauve]
-                 [--keep_going] [--keep_temp]
-                 [--tmpdir] [--logdir] [--verbose] [--debug] [--supress]
-                 [query [query ...]]
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
+               [--summary] [--refdir] [--workdir] [--read_input]
+               [--min_required_hits MIN_REQUIRED_HITS]
+               [--strictness STRICTNESS] [--mask MASK] [--keep_going]
+               [--rerun] [--skip_mauve] [--keep_temp] [--tmpdir]
+               [--logdir] [--verbose] [--debug] [--supress]
+               [query [query ...]]
 
 CanSNPer2
 
@@ -116,21 +184,26 @@ Required arguments:
 Output options:
   -o DIR, --outdir DIR  Output directory
   --save_tree           Save tree as PDF using ETE3 (default False)
-  --no_export           no file output (can be used if summary only is requested)
+  --no_snpfiles         Don´t save output files.
   --summary             Output a summary file and tree with all called SNPs
+                        not affected by no_snpfiles
 
 Run options:
   --refdir              Specify reference directory
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
-                        (not implemeted expected for version v2.1.0)
-  --min_required_hits   MIN_REQUIRED_HITS
+  --min_required_hits MIN_REQUIRED_HITS
                         Minimum sequential hits to call a SNP!
+  --strictness STRICTNESS
+                        Percent of snps in path reqired for calling SNP
+                        (default 0.7)
+  --mask MASK           Ignore SNPs closer than this many bases to the edge of
+                        an alignment (default 0, off)
   --keep_going          If Error occurs, continue with the rest of samples
-  --rerun               Rerun already processed files (else skip if result file exists)
-
-  --keep_temp           keep temporary files
+  --rerun               Rerun already processed files (else skip if result
+                        file exists)
   --skip_mauve          If xmfa files already exists skip step
+  --keep_temp           keep temporary files
 
 Logging and debug options:
   --tmpdir              Specify reference directory

@@ -49,19 +49,22 @@ class WriteTaxonomy(object):
 		logging.debug("NCBI structure (child first): {parent}".format(parent=self.link_order))
 
 	def dump_taxid_map(self):
+		'''Dump the reference genomes of the database as a seqid to id map.
+			The genomes live in snp_references, the "genomes" table comes from the ported
+			flextaxd schema and is created but never filled (issue #173)'''
 		logging.info("Dump taxid maps")
 		with open('{}{}.map'.format(self.path,"seqid2taxid"),"w") as outputfile,open('{}{}.txt'.format(self.path,"prelim_map"),"w") as prelim:
-			genomes = self.get_all('genomes', 'genome,id')
+			genomes = self.get_all('snp_references', 'genome,id', sort="genome")
 			for genome in genomes:
 				print(*genome, sep="\t", end="\n", file=outputfile)
 				genome=tuple(["TAXID"]) + genome
 				print(*genome, sep="\t", end="\n", file=prelim)
 		return
 
-	def dump_genome_annotations(self, sort="reference"):
-		'''Dump all genomes, including their taxonomy reference (will work as input file for genomeid2taxid)'''
-		select = "genome,name,reference"
-		QUERY = "SELECT {select} FROM genomes JOIN nodes ON nodes.id=genomes.id".format(select=select)
+	def dump_genome_annotations(self, sort="genome"):
+		'''Dump all reference genomes with their accessions (will work as input file for genomeid2taxid)'''
+		select = "genome,strain,genbank_id,refseq_id,assembly_name"
+		QUERY = "SELECT {select} FROM snp_references".format(select=select)
 		if sort:
 			QUERY += " ORDER BY {col} DESC".format(col=sort)
 		logging.debug(QUERY)

@@ -15,6 +15,7 @@ from CanSNPer2.modules.ModifyTree import InputError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError
 from CanSNPer2.modules.WriteTaxonomy import WriteTaxonomy
 from CanSNPer2.modules.NewickTree import NewickTree
+from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__  ## used by the --version flag (issue #119)
 import CanSNPer2.modules
 
@@ -34,84 +35,78 @@ supported_output = set(["tab", "newick"])# set(["cansnper","ncbi","tab","newick"
 
 
 import argparse
-parser = argparse.ArgumentParser(description='CanSNPer2-database ')
-
-required_args = parser.add_argument_group('Required')
-required_args.add_argument('-db',  '--database',     metavar='',                            help='CanSNPer2 database name')
 
 
-create_database = parser.add_argument_group("Load database")
-create_database.add_argument('--tree',         metavar='', default=False,                	help="CanSNPer tree source file")
-create_database.add_argument('--annotation',   metavar='', default=False,                	help="CanSNPer snp source file")
-create_database.add_argument('--references',   metavar='', default=False,                 	help="File containing all reference genomes listed")
-create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
-													choices=supported_input, 				help="Select source file type")
-create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
+def get_arguments():
+	'''The command used to parse its arguments and open its log file at import time, so
+		importing CanSNPer2.SNPDatabase consumed sys.argv and wrote a log file as a side
+		effect (issue #174)'''
+	parser = argparse.ArgumentParser(description='CanSNPer2-database ')
+
+	required_args = parser.add_argument_group('Required')
+	required_args.add_argument('-db',  '--database',     metavar='',                            help='CanSNPer2 database name')
 
 
-modify_database = parser.add_argument_group("Database modifications")
-modify_database.add_argument('--mod_file',     metavar='',                                 	help="File with modifications/update to the tree")
-modify_database.add_argument('--parent',         metavar='',                                 	help="Node (or nodes matching tree file) from which to update/replace/remove")
-modify_database.add_argument('--remove',     action='store_true',                         	help="Remove the whole branch rooted at the --parent node, with its nodes, links and SNP annotations")
-modify_database.add_argument('--replace',     action='store_true',                          help="replace node")
+	create_database = parser.add_argument_group("Load database")
+	create_database.add_argument('--tree',         metavar='', default=False,                	help="CanSNPer tree source file")
+	create_database.add_argument('--annotation',   metavar='', default=False,                	help="CanSNPer snp source file")
+	create_database.add_argument('--references',   metavar='', default=False,                 	help="File containing all reference genomes listed")
+	create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
+														choices=supported_input, 				help="Select source file type")
+	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
 
 
-export_database = parser.add_argument_group("Export database")
-export_database.add_argument('--export',  action='store_true',					help="Export database to text format (exports tree and annotation file)")
-export_database.add_argument('--export_format', metavar='', default='tab',  				choices=supported_output, help="Select output format [{format}]".format(format=", ".join(supported_output)))
-export_database.add_argument('-o', '--outdir', metavar='',									help="outdir for database export!")
+	modify_database = parser.add_argument_group("Database modifications")
+	modify_database.add_argument('--mod_file',     metavar='',                                 	help="File with modifications/update to the tree")
+	modify_database.add_argument('--parent',         metavar='',                                 	help="Node (or nodes matching tree file) from which to update/replace/remove")
+	modify_database.add_argument('--remove',     action='store_true',                         	help="Remove the whole branch rooted at the --parent node, with its nodes, links and SNP annotations")
+	modify_database.add_argument('--replace',     action='store_true',                          help="replace node")
 
 
-debugopts = parser.add_argument_group("Logging and debug options")
-debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp",						help="Specify tmp directory default (/tmp)")
-debugopts.add_argument('--logs', 				metavar='', default="logs", 				help="Specify log directory")
-debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,		help="print process info, default no output")
-debugopts.add_argument('--debug',				action='store_const', const=logging.DEBUG,	help="print debug info")
-debugopts.add_argument('--supress',				action='store_const', const=logging.ERROR,
-																default=logging.WARNING,	help="supress warnings")
-
-parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
-
-args = parser.parse_args()
-if len(sys.argv)==1:
-	parser.print_help()
-	parser.exit()
+	export_database = parser.add_argument_group("Export database")
+	export_database.add_argument('--export',  action='store_true',					help="Export database to text format (exports tree and annotation file)")
+	export_database.add_argument('--export_format', metavar='', default='tab',  				choices=supported_output, help="Select output format [{format}]".format(format=", ".join(supported_output)))
+	export_database.add_argument('-o', '--outdir', metavar='',									help="outdir for database export!")
 
 
-if args.version:
-	print("CanSNPer2 - version {version}".format(version=__version__))
-	exit()
+	debugopts = parser.add_argument_group("Logging and debug options")
+	debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp",						help="Specify tmp directory default (/tmp)")
+	debugopts.add_argument('--logs', 				metavar='', default="logs", 				help="Specify log directory")
+	debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,		help="print process info, default no output")
+	debugopts.add_argument('--debug',				action='store_const', const=logging.DEBUG,	help="print debug info")
+	debugopts.add_argument('--supress',				action='store_const', const=logging.ERROR,
+																	default=logging.WARNING,	help="supress warnings")
+
+	parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
+
+	args = parser.parse_args()
+	if len(sys.argv)==1:
+		parser.print_help()
+		parser.exit()
+
+	if args.version:
+		print("CanSNPer2 - version {version}".format(version=__version__))
+		exit()
+	return args
 
 
-logval = args.supress
-if args.debug:
-	logval = args.debug
-elif args.verbose:
-	logval = args.verbose
+def get_logger(args):
+	'''Set the log level and open the log file of this command'''
+	logval = args.supress
+	if args.debug:
+		logval = args.debug
+	elif args.verbose:
+		logval = args.verbose
 
-from datetime import date,time
-t = time()
-today = date.today()
-args.logs = args.logs.rstrip("/")+"/"
-logpath = args.logs+"CanSNPer2-database"+today.strftime("%b-%d-%Y")+"{}.log"
-if not os.path.exists(args.logs):
-	os.makedirs(args.logs, exist_ok=True)
-if os.path.exists(logpath):
-	logpath=logpath.format("-{:%H:%M}".format(t))
-else: logpath = logpath.format("")
+	args.logs = args.logs.rstrip("/")+"/"
+	logpath = setup_logging(args.logs, "CanSNPer2-database", level=logval) ## shared log naming for all commands (issue #217)
+	return logging.getLogger(__name__)
 
-logging.basicConfig(
-		#filename=logpath,
-		level=logval,
-		format="%(asctime)s %(module)s [%(levelname)-5.5s]  %(message)s",
-	    handlers=[
-	        logging.FileHandler(logpath),
-	        logging.StreamHandler()
-	    ])
-logger = logging.getLogger(__name__)
 
 def main():
 	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
+	args = get_arguments()
+	logger = get_logger(args)
 	logger.debug(args)
 	if not args.create:
 		'''a wrong path let sqlite create an empty database and the modification or export only failed

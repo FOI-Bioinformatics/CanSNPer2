@@ -40,6 +40,7 @@ __status__ 		= "Production"
 
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
+from CanSNPer2.modules.LogSetup import setup_logging
 import logging
 import logging.config
 import os,sys
@@ -68,6 +69,7 @@ def main():
 	run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
 	run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
 	run_options.add_argument('--strictness', 		type=float, default=0.7,			help="Percent of snps in path reqired for calling SNP (default 0.7)")
+	run_options.add_argument('--mask',				type=int, default=0,					help="Ignore SNPs closer than this many bases to the edge of an alignment (default 0, off)")
 	run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 	run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
 
@@ -95,8 +97,10 @@ def main():
 		print("CanSNPer2 - version {version}".format(version=__version__))
 		exit()
 	if args.read_input:
+		'''a flag that is not implemented must not leave with status 0: a script that passed
+		--read_input looked like it had typed something (issue #227)'''
 		print("Read input is not implemented in this version, fasta input is required.")
-		exit()
+		exit(1)
 	if not args.database:
 		print("A database is required: CanSNPer2 --database database.db query.fasta")
 		exit(1)
@@ -124,23 +128,7 @@ def main():
 	args.logdir = args.logdir.rstrip("/")+"/" ## a logdir without a trailing slash would glue straight onto the log file name (issue #71)
 
 
-	from datetime import date,time
-	t = time()
-	today = date.today()
-	logpath = args.logdir+"CanSNPer2-"+today.strftime("%b-%d-%Y")+"{}.log"
-	if os.path.exists(logpath):
-		logpath=logpath.format("-{:%H:%M}".format(t))
-	else: logpath = logpath.format("")
-
-
-	logging.basicConfig(
-			#filename=logpath,
-			level=logval,
-			format="%(asctime)s %(module)s [%(levelname)-5.5s]  %(message)s",
-		    handlers=[
-		        logging.FileHandler(logpath),
-		        logging.StreamHandler()
-		    ])
+	logpath = setup_logging(args.logdir, "CanSNPer2", level=logval) ## shared log naming for all commands (issue #217)
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
 
@@ -178,6 +166,7 @@ def main():
 									database=args.database,
 									min_required_hits=args.min_required_hits,
 									keep_going=args.keep_going,
+									mask=args.mask,
 									rerun=args.rerun,
 									summary=args.summary,
 									strictness=args.strictness
@@ -191,6 +180,10 @@ def main():
 			plainly instead of dumping a traceback (issue #151)'''
 		logger.warning("CanSNPer2 was interrupted, the progressiveMauve processes were stopped")
 		exit(130)
+	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
+		the reason was already logged by run() (issue #191)'''
+	if not CanSNPer2_obj.typed and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
+		exit(1)
 
 if oname=="__main__":
 	main()
