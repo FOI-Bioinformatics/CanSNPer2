@@ -38,8 +38,16 @@ class RunMauve(object):
 		self.mauve_path = mauve_path
 		self.xmfa_files = []
 
-		'''Create log and tmpdir if they do not exist'''
+		'''Create log and tmpdir if they do not exist
+
+			the working folder is always a CanSNPer2 subfolder of --tmpdir, which is what
+			CanSNPer2 --skip_mauve reads (issue #177) and it keeps cleanup from removing a
+			folder that holds the user data'''
+		tmpdir = tmpdir.rstrip("/")
+		if os.path.basename(tmpdir) != "CanSNPer2":
+			tmpdir = tmpdir + "/CanSNPer2"
 		self.tmpdir = tmpdir
+		print("Alignments and temporary files are kept in {tmpdir}".format(tmpdir=self.tmpdir))
 		if not os.path.exists(self.tmpdir):
 			if self.verbose: print("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
 			os.makedirs(self.tmpdir)
@@ -156,9 +164,18 @@ class RunMauve(object):
 		return
 
 	def read_query_input(self,query_file):
-		'''If query input is a text file, parse file'''
+		'''If query input is a text file, parse file
+
+			query_file is the query list from the command line, so the text file is its
+			first entry; passing the list itself to open() raised TypeError and the
+			documented "one fasta per line" input never worked (issue #181). Blank lines
+			are skipped, they would otherwise fail the file existence check.'''
+		if isinstance(query_file,list):
+			query_file = query_file[0]
 		with open(query_file, "r") as f:
-			query = [query.strip() for query in f]
+			query = [query.strip() for query in f if query.strip()]
+		if not query:
+			raise MauveError("The query input file {query_file} contained no filepaths".format(query_file=query_file))
 		return query
 
 	def cleanup(self):

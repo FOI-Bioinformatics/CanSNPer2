@@ -167,7 +167,11 @@ class ParseXMFA(object):
 					### Join together all SNPs found in data
 					self.SNPS = dict(**self.SNPS, **self.read_sequence(seqP))
 		except FileNotFoundError:
-			return False
+			'''this used to return False, which every caller read as "no SNPs in this
+				alignment", so a missing alignment typed the sample NA and exited 0
+				(issue #176, #179)'''
+			logger.error("The alignment file {f} was not found".format(f=f))
+			raise
 		return self.SNPS
 
 	def run(self, xmfa, reference=False,database=False):

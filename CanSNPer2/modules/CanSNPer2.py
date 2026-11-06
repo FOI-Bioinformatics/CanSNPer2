@@ -17,9 +17,17 @@ from CanSNPer2 import __version__
 
 ## import standard python libraries for subprocess and multiprocess
 from subprocess import Popen,PIPE,STDOUT
-from multiprocessing import Process, Queue
+import multiprocessing
 from time import sleep,time
 import signal
+
+# the workers inherit the parent's memory and share the sqlite connection on self, which
+# is what the fork start method gives. Python 3.14 made forkserver the default on linux,
+# where the worker target has to be pickled and "cannot pickle sqlite3.Connection" killed
+# every run, so the context is requested explicitly (issue #186). Queues must come from
+# the same context as the processes. The cleaner long term fix is to hand the workers the
+# database path and let each of them open its own connection.
+_MP_CTX = multiprocessing.get_context("fork")
 
 class Error(Exception):
 	"""docstring for Error"""
@@ -304,9 +312,18 @@ class CanSNPer2(object):
 		return final_snp
 
 	def read_query_textfile_input(self,query_file):
-		'''If query input is a text file, parse file'''
+		'''If query input is a text file, parse file
+
+			query_file is the query list from the command line, so the text file is its
+			first entry; passing the list itself to open() raised TypeError and the
+			documented "one fasta per line" input never worked (issue #181). Blank lines
+			are skipped, they would otherwise fail the file existence check.'''
+		if isinstance(query_file,list):
+			query_file = query_file[0]
 		with open(query_file, "r") as f:
-			query = [query.strip() for query in f]
+			query = [query.strip() for query in f if query.strip()]
+		if not query:
+			raise CanSNPer2Error("The query input file {query_file} contained no filepaths".format(query_file=query_file))
 		return query
 
 	def cleanup(self):
@@ -319,22 +336,20 @@ class CanSNPer2(object):
 		logger.info("Done!")
 		return
 
-	def parse_xmfa(self, XMFA_obj, xmfa_file, results, export_results, called_snps):
-		'''Process xmfa file using ParseXMFA object, streaming the three result types into their queues'''
-		XMFA_obj.run(xmfa_file)
-		results.put(XMFA_obj.get_snps())
-		export_results.put(XMFA_obj.get_snp_info())
-		called_snps.put(XMFA_obj.get_called_snps())
-		return results
-	
 	def find_snps(self,XMFA_obj,xmfa_file,results=None,export_results=None,called_snps=None):
 		'''Align sequences to references and return SNPs'''
 		# default to None instead of mutable list defaults (issue #6); fresh queues when not supplied
-		if results is None: results = Queue()
-		if export_results is None: export_results = Queue()
-		if called_snps is None: called_snps = Queue()
+		if results is None: results = _MP_CTX.Queue()
+		if export_results is None: export_results = _MP_CTX.Queue()
+		if called_snps is None: called_snps = _MP_CTX.Queue()
 		# execute snp calling
-		XMFA_obj.run(xmfa_file)
+		'''a worker that dies here never sends its finish signal, so the queue loop waited
+			for the five minute time out and the sample was typed from whatever had
+			arrived; the failure is reported and the finish signals are still sent (issue #179)'''
+		try:
+			XMFA_obj.run(xmfa_file)
+		except Exception as e:
+			logger.error("SNP calling failed for {alignment}: {error}".format(alignment=xmfa_file,error=e))
 		#/
 		# stream output into Queues (if the complete job output is put in then the queue gets filled when having "large" outputs. It has to be streamed to the queue so that the queue can simultanously be cleared)
 		for result in XMFA_obj.get_snps().items(): # returns dictionary
@@ -352,15 +367,21 @@ class CanSNPer2(object):
 
 	def find_snps_multiproc(self,xmfa_obj,xmfa_files,export=False):
 		'''function to run genomes in paralell'''
+		'''the alignments are checked before the workers start: ParseXMFA.read_xmfa swallows a
+			FileNotFoundError and simply returns no SNPs, so --skip_mauve against a wrong tmpdir
+			(or alignments that were moved away) typed every sample NA and exited 0 (issue #176)'''
+		missing = [xmfa for xmfa in xmfa_files if not os.path.isfile(xmfa)]
+		if missing:
+			raise FileNotFoundError("{n} of {m} alignment files were not found in {tmpdir}, for example {first}".format(n=len(missing),m=len(xmfa_files),tmpdir=self.tmpdir,first=missing[0]))
 		jobs = []
 		SNPS = {}
 		SNP_info = []
 		called_snps = []
-		result_queue = Queue()
-		export_queue = Queue()
-		called_queue = Queue()
+		result_queue = _MP_CTX.Queue()
+		export_queue = _MP_CTX.Queue()
+		called_queue = _MP_CTX.Queue()
 		for enum,xmfa_file in enumerate(xmfa_files):
-			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
+			p = _MP_CTX.Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
 			p.start()
 			jobs.append(p)
 			sleep(0.05) ## A short sleep to make sure all threads do not initiate access to the database file simultanously
@@ -469,7 +490,7 @@ class CanSNPer2(object):
 						export=self.export,
 						verbose=self.verbose)  ## Create XMFA object and connect to database
 			'''Walk through the list of queries supplied'''
-			if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
+			if not self.skip_mauve: print("Run alignments for {queries} queries against the references in {refdir} using progressiveMauve".format(queries=len(self.query),refdir=self.refdir))
 			for q in self.query:			## For each query file_path
 				try:
 					self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
@@ -500,8 +521,10 @@ class CanSNPer2(object):
 					logger.info("Find SNPs")
 					try:
 						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,export=True)
-					except FileNotFoundError:
-						logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+					except FileNotFoundError as e:
+						'''the message has to carry the reason: the default log level only shows
+							warnings, and the folder that was searched is what the user needs (issue #176, #177)'''
+						logger.warning("One or several xmfa files were not found for {qfile}, continue with next file: {error}".format(qfile=qfile,error=e))
 						self.xmfa_files = []
 						continue
 					'''If file export is requested print the result for each SNP location to file'''

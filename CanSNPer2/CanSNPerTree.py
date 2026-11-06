@@ -144,10 +144,19 @@ def main():
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
 
-	'''Fix temp path''' ## If tmp is in standard root folder create sub folder for CanSNPer2
-	if args.tmpdir.rstrip("/") == "/tmp": ## Only root tmp name was chosen
-		logger.debug("Tmp directory was selected as root tmp, add subfolder for CanSNPer2 to path!")
-		args.tmpdir = args.tmpdir.rstrip("/")+"/CanSNPer2"
+	'''Fix temp path: the working folder is always a CanSNPer2 subfolder of --tmpdir.
+		It used to be added only when --tmpdir was exactly /tmp, so --skip_mauve looked in
+		<tmpdir> for a custom tmpdir but in <tmpdir>/CanSNPer2 for the default, and the
+		cleanup at the end of a run removed everything in the folder the user had pointed
+		--tmpdir at (issue #177)'''
+	tmpdir = args.tmpdir.rstrip("/")
+	if not tmpdir:
+		parser.error("--tmpdir cannot be empty")
+	if os.path.basename(tmpdir) != "CanSNPer2":
+		args.tmpdir = tmpdir + "/CanSNPer2"
+	else:
+		args.tmpdir = tmpdir
+	print("Alignments and temporary files are kept in {path}".format(path=args.tmpdir))
 	if not os.path.exists(args.tmpdir):
 		logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
 		os.makedirs(args.tmpdir,exist_ok=True)

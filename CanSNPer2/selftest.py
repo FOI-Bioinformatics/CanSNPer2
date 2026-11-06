@@ -9,10 +9,18 @@ import sys
 
 def main():
 	failed = []
+	'''ete3 imports six and numpy at import time, so a missing one of those surfaced as a
+		raw ModuleNotFoundError from inside ete3 and looked like a broken CanSNPer2 install
+		instead of a missing dependency (issue #183)'''
 	try:
 		import ete3
-	except ImportError:
-		raise ImportError("ete3 could not be found!")
+	except ImportError as e:
+		missing = getattr(e, "name", None) or "ete3"
+		if missing == "ete3":
+			print("ERROR: ete3 could not be found! install the requirements: pip install -r requirements.txt")
+		else:
+			print("ERROR: {missing} could not be found, ete3 imports it at import time; install the requirements: pip install -r requirements.txt".format(missing=missing))
+		sys.exit(1)
 
 	'''ete3 imports its drawing classes from the treeview subpackage, which silently fails
 		when no Qt binding is installed, and CanSNPer2 cannot draw any tree without them'''
