@@ -1,10 +1,11 @@
-import sys, os
-import sqlite3
+import os
 import shutil
 
 '''
-DatabaseConnections and DatabaseFunctions are classes written to simplify database work using sqlite3
-This particular script is specially adapted to suit the use for CanSNPer web database!
+RunMauve aligns query genomes against every reference in a reference directory with
+progressiveMauve and writes the xmfa alignments to the output directory. It is the
+alignment step of CanSNPer2 on its own: no database is read and no SNPs are called
+(issue #172).
 '''
 
 __version__ = "0.0.1"
@@ -17,8 +18,7 @@ __date__ = "2019-04-19"
 __status__ = "Production"
 __partof__ = "CanSNPer2"
 
-from subprocess import Popen,PIPE,STDOUT
-from CanSNPer2.modules.ParseXMFA import ParseXMFA
+from subprocess import Popen,STDOUT
 
 class MauveError(Exception):
 	"""docstring for MauveE"""
@@ -54,9 +54,9 @@ class RunMauve(object):
 			if self.verbose: print("Creating output directory {outdir}".format(outdir=self.outdir))
 			os.makedirs(self.outdir)
 
-		'''Fetch other key word arguments'''
+		'''Fetch other key word arguments (save_tree is accepted for compatibility with the
+			CanSNPer2 call pattern but this module only aligns, it never draws trees)'''
 		self.skip_mauve = kwargs.get("skip_mauve",False)
-		self.save_tree = kwargs.get("save_tree",False)
 		self.keep_temp = kwargs.get("keep_temp",False)
 
 	def get_xmfa(self):
@@ -64,8 +64,16 @@ class RunMauve(object):
 		return self.xmfa_files
 
 	def get_references(self,selected=False):
-		'''references must be available in the refdir'''
-		return [ref for ref in os.listdir(self.refdir) if ref.endswith(".fa")]
+		'''references must be available in the refdir, both .fna (what CanSNPer2-download writes)
+			and the older .fa endings are aligned, an empty folder used to yield an empty command
+			list so the run finished silently without producing a single alignment (issue #172)'''
+		try:
+			refs = sorted(ref for ref in os.listdir(self.refdir) if ref.endswith((".fna",".fa",".fasta")))
+		except OSError as e:
+			raise MauveError("The reference directory {refdir} could not be read: {err}".format(refdir=self.refdir,err=e))
+		if not refs:
+			raise MauveError("No reference genomes (.fna/.fa) were found in {refdir}, run CanSNPer2-download --outdir {refdir} first".format(refdir=self.refdir))
+		return refs
 
 	def get_tempfiles(self):
 		'''List all files in the tmp directory'''
@@ -105,24 +113,40 @@ class RunMauve(object):
 			raise MauveError("At least of the progressiveMauve processes did not run correclty check the log files for more information")
 		return
 
+	def stage_for_mauve(self,path,prefix):
+		'''progressiveMauve writes a multi megabyte "<input>.sslist" progress file next to every input
+			genome, which pollutes the query and reference folders and makes them required to be
+			writable; same fix as CanSNPer2: symlink into the tmpdir and let cleanup remove it (issue #148)'''
+		source = os.path.abspath(path)
+		staged = os.path.join(self.tmpdir, "{prefix}_{name}".format(prefix=prefix,name=os.path.basename(source)))
+		if not os.path.lexists(staged):
+			try:
+				os.symlink(source,staged)
+			except (OSError,NotImplementedError,AttributeError):
+				'''a tmpdir on a filesystem without symlinks, fall back to a copy'''
+				if self.verbose: print("Could not symlink {source} into {tmpdir}, copying the genome instead".format(source=source,tmpdir=self.tmpdir))
+				shutil.copyfile(source,staged)
+		return staged
+
 	def align(self, query, references=[]):
 		'''Run mauve as a subprocess'''
 		commands =[]  	# store execute command
 		logs = []		# store log filepath
 		if len(references) == 0: 	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
+		query_file = self.stage_for_mauve(query,"query")
 		for ref in references:  	## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			self.query_name = os.path.basename(query).rsplit(".",1)[0]	## get name of file and remove ending
 			xmfa_output = "{tmpdir}/{ref}_{target}.xmfa".format(tmpdir=self.tmpdir.rstrip("/"),ref=ref_name,target=self.query_name)
-			ref_file = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
+			ref_file = self.stage_for_mauve("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref")
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
 			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #85)'''
 			command = ["{mauve_path}progressiveMauve".format(mauve_path=self.mauve_path),
 							"--output", xmfa_output,
 							ref_file,
-							query]
+							query_file]
 			commands.append(command)			## Mauve command
 			logs.append(log_file)				## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output)	## Store the path to xmfa files as they will be used later
@@ -151,11 +175,14 @@ class RunMauve(object):
 		if self.verbose: print("Done!")
 		return
 
-	def run(self,database):
+	def run(self,database=False):
 		'''Run RunMauve
 
-			organism was dropped from this signature: the parameter was never used in the body,
-			the --organism command line flag stays accepted but is currently ignored (issue #171)'''
+			Alignment only: every query is aligned against every reference in the refdir and the
+			xmfa files are written to outdir. SNP calling is not done here (CanSNPer2 does that),
+			so the database and the organism flag are kept for compatibility with the CanSNPer2
+			call pattern and are not used, and the alignments are copied out of the tmpdir before
+			cleanup, which used to remove them and leave the run with nothing at all (issue #172)'''
 		print("Run alignments to references using progressiveMauve")
 
 		'''Read query input file if a txt file is supplied insead of fasta files'''
@@ -164,39 +191,41 @@ class RunMauve(object):
 		if self.query[0].endswith(".txt"):
 			self.query=self.read_query_input(self.query)
 
-		'''Main function of RunMauve
-				1. Align sequences with progressiveMauve
-				2. Parse XMFA files for SNPs
-				3. Create a tree visualising which SNPs were found
-				3b. If requested create a list with SNPs
-				4. Clean up tmp directory
-				'''
-		xmfa = ParseXMFA(database=database,verbose=self.verbose)  ## Create XMFA object and connect to database
 		for q in self.query:  ## For each target file
+			if not os.path.exists(q):
+				'''mauve would only fail in a subprocess and the log file is easy to miss (issue #172)'''
+				raise MauveError("Input file: {q} was not found!".format(q=q))
 			if self.verbose: print("Running alignments on query: {query}".format(query=q))
 			'''For each query fasta align to all CanSNPer reference for selected organism'''
 			self.align(q)
 
-			# '''Find all SNPs found in each reference'''
-			# self.find_snps(xmfa=xmfa,organism=args.organism,save_tree=self.save_tree)
-
-			# '''Clean references to aligned xmfa files between queries'''
-			# self.xmfa_files = []
-		'''Clean up temporary folder when all alignments and trees has been printed!'''
+		aligned = []
+		for xmfa in self.xmfa_files:
+			if not os.path.exists(xmfa):
+				print("WARNING no alignment written for {xmfa}, check the mauve logs in {logdir}".format(xmfa=xmfa,logdir=self.logdir))
+				continue
+			target = os.path.join(self.outdir,os.path.basename(xmfa))
+			if os.path.abspath(target) != os.path.abspath(xmfa):
+				shutil.copyfile(xmfa,target)
+			aligned.append(target)
+		if not aligned:
+			raise MauveError("No alignments were produced, check the mauve logs in {logdir}".format(logdir=self.logdir))
+		print("{n} alignments written to {outdir}".format(n=len(aligned),outdir=self.outdir))
+		'''Clean up temporary folder when all alignments has been printed!'''
 		if not self.keep_temp:
 			self.cleanup()
-		return self.xmfa_files
+		return aligned
 
 if __name__=="__main__":  #main should be moved to the file __main__ for setup.py
 	import argparse
-	parser = argparse.ArgumentParser(description='Parse xmfa files and extract non overlapping sequences')
+	parser = argparse.ArgumentParser(description='Align query genomes against all CanSNPer2 references with progressiveMauve and write the xmfa files to outdir (alignment only, no SNP calling)')
 	parser.add_argument('query', nargs='+', metavar='', help="Takes multiple fasta files or a txt file with one fasta file per line")
-	parser.add_argument('-db','--database', 	metavar='', help='CanSNP database')
-	parser.add_argument('--save_tree',	type=bool, default=True , help='Save tree as PDF using ETE3 (default True)')
-	parser.add_argument('--organism', 	metavar='', default="Francisella", 	help="Specify organism")
+	parser.add_argument('-db','--database', 	metavar='', help='CanSNP database (kept for compatibility, alignment only so not used)')
+	parser.add_argument('--save_tree',	type=bool, default=True , help='Save tree as PDF using ETE3 (not used, CanSNPer2 creates the trees)')
+	parser.add_argument('--organism', 	metavar='', default="Francisella", 	help="Specify organism (not used, the refdir selects the references)")
 	parser.add_argument('--refdir', 	metavar='', default="references",		help="Specify reference directory")
-	parser.add_argument('--outdir', 	metavar='', default="results",	help="Specify output directory")
-	parser.add_argument('--tmpdir', 	metavar='', default=".tmp",		help="Specify reference directory")
+	parser.add_argument('--outdir', 	metavar='', default="results",	help="Directory the xmfa alignment files are written to")
+	parser.add_argument('--tmpdir', 	metavar='', default=".tmp",		help="Specify temporary directory")
 	parser.add_argument('--logs', 		metavar='', default="logs", 	help="Specify log directory")
 	parser.add_argument('--verbose',	action='store_true',help="print process info, default no output")
 	parser.add_argument('--skip_mauve' ,action='store_true', help="If xmfa files already exists skip step")
@@ -214,4 +243,9 @@ if __name__=="__main__":  #main should be moved to the file __main__ for setup.p
 								save_tree=args.save_tree,
 								keep_temp= args.keep_temp,
 								)
-	CanSNPer.run(args.database)
+	try:
+		CanSNPer.run(args.database)
+	except MauveError as e:
+		'''a missing reference folder or a bad query path is a usage error, not a traceback (issue #172)'''
+		print("ERROR: {err}".format(err=e))
+		exit(1)
