@@ -1,6 +1,11 @@
 build*
 *.pyc
-test*
+# development scratch inside the repository. a bare "test*" used to be here, and it matched
+# the "tests" directory as well, which kept the unit tests out of the repository (issue #223)
+test-run*
+test-output*
+*.pytest_cache
+.pytest_cache
 *.dmp
 .ctbd
 *.db
@@ -9,3 +14,6 @@ test*
 dist*
 results*
 logs
+references
+.commit-msg
+.fix-backups

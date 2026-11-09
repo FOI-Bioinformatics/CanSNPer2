@@ -69,7 +69,9 @@ class ReadTaxonomy(object):
 		if self.verbose: print("Read nodes in taxonomy file {}".format(treefile))
 		swap = False
 		if not treefile:
-			treefile = self.taxonomy_file
+			treefile = getattr(self, "taxonomy_file", False)
+		if not treefile:
+			raise InputError("No tree file given to read_nodes: pass treefile or set self.taxonomy_file")
 		with open(treefile, "r") as _treefile:
 			headers = _treefile.readline().strip().split(self.sep)
 			if "parent" not in headers or "child" not in headers:
@@ -78,12 +80,15 @@ class ReadTaxonomy(object):
 				swap = True
 			for tree_row in _treefile:
 				data = tree_row.strip().split(self.sep)
-				if swap:
-					data[0],data[1] = data[1],data[0]
-				'''Add nodes into database'''
 				if data[0] == "":
 					'''Check for empty rows'''
 					continue
+				if len(data) < 2: ## a row must name both a child and a parent, swapping an incomplete row would crash (issue #102-#104)
+					logging.warning("Skipped row without child and parent columns in the tree file: '{row}'".format(row=tree_row.strip()))
+					continue
+				if swap:
+					data[0],data[1] = data[1],data[0]
+				'''Add nodes into database'''
 				for node in data:
 					try:
 						self.names[node]

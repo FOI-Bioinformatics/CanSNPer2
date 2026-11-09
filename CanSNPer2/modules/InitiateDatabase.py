@@ -1,16 +1,8 @@
-import sys, os, inspect
-import sqlite3
-
-#from CanSNPer2.modules.DatabaseConnection import DatabaseConnection
-
-
 import logging
 logger = logging.getLogger(__name__)
-from flextaxd.modules.database.CreateDatabase import CreateDatabase
-from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS
 from importlib import import_module
 from datetime import date
-#script_path = os.path.dirname(os.path.abspath(__file__))  ## Retrieve the abspath of the location of this script
 
 def dynamic_import(abs_module_path, class_name):
 	module = import_module(".".join([abs_module_path,class_name]))
@@ -62,22 +54,26 @@ class CreateSNPDatabase(CreateDatabase):
 		return
 
 class CanSNPDatabase(DatabaseFunctions):
-	"""Class containing functions for Loading data into the database, inherits functions from flextaxd database"""
+	"""Class containing functions for Loading data into the database, inherits functions from the CanSNPer2 taxonomy database classes"""
 	def __init__(self,*args,**kwargs):
 		super().__init__(kwargs["database"],verbose=kwargs["verbose"])
 		logger.debug(kwargs)
 		'''Connect to database'''
 		if kwargs["create"]:
 			logger.debug("Create: {create}".format(create=kwargs["create"]))
-			CanSNPdatabase_obj = CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
+			'''the object is only created to run its side effect of making the database and its tables,
+				it is never used again and was kept in an attribute no other code read (issue #165)'''
+			CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
 		else:
 			logger.debug("Connect to database {db}".format(db=kwargs["database"]))
-		#CanSNPdatabase_obj.create_cansnptable(kwargs["create"])
 		source_type = kwargs["source_type"]
 		self.today = date.today()
+		'''load_annotation_file checks self.genomes before any reference file has been loaded, without
+			this it died with an AttributeError when only an annotation file was given'''
+		self.genomes = {}
 		if kwargs["tree"]:
 			logger.debug("Loading module ReadTaxonomy{type}".format(type=source_type))
-			read_module = dynamic_import("flextaxd.modules", "ReadTaxonomy{type}".format(type=source_type))
+			read_module = dynamic_import("CanSNPer2.modules", "ReadTaxonomy{type}".format(type=source_type))
 			read_obj = read_module(kwargs["tree"], database=kwargs["database"],root_name=False,rank="family",verbose=kwargs["verbose"])
 			read_obj.verbose = kwargs["verbose"]                                                          ## Set verbose mode
 			logger.info("Parse taxonomy")
@@ -105,7 +101,7 @@ class CanSNPDatabase(DatabaseFunctions):
 				"genome_i":         genome_i
 		}
 		### If ID is supplied skip autoincrement and add specific ID
-		if id:
+		if id is not False: ## the twin of issue #203 in the create path: an id of 0 is a real id
 			info["node_id"] = id
 		taxid_base = self.insert(info, table="snp_annotation")
 		return taxid_base
@@ -130,8 +126,12 @@ class CanSNPDatabase(DatabaseFunctions):
 			headers = f.readline().lstrip("#").strip().split("\t")
 			#dataArr = []
 			logging.debug(headers)
+			check_source_headers(headers,GENOME_SOURCE_COLUMNS,annotation_file)
 			for row in f:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
+					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
+					continue
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
@@ -149,14 +149,20 @@ class CanSNPDatabase(DatabaseFunctions):
 		logger.info(nodes)
 		logger.debug("nodes: {nnodes}".format(nnodes=len(nodes)/2))
 		if len(self.genomes) == 0:
-			self.genomes = self.get_genomes(table="snp_references")
+			self.genomes = {}
+			for genome_i, genome in self.conn.execute("SELECT id,genome FROM snp_references"):
+				self.genomes[genome] = genome_i
 		logger.debug(self.genomes)
 		with open(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
+			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
 			dataArr = []
 			for row in af:
 				data = row.strip().split("\t")
+				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #88)
+					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
+					continue
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
@@ -173,7 +179,7 @@ class CanSNPDatabase(DatabaseFunctions):
 					logger.warning("No genome annotation could be found add a genome annotation file to command!")
 					logger.debug(ddict)
 					_id = False
-				if _id:
+				if _id is not False: ## a looked up node id is checked against False, not for truth: an id of 0 is a real id (issue #202)
 					logger.debug("Add annotation: {dic}, {_id}, {gid}".format(dic=ddict,_id=_id,gid=genome_i))
 					self.add_annotation(ddict, id=_id, genome_i=genome_i)
 		### commit changes to database
@@ -182,13 +188,11 @@ class CanSNPDatabase(DatabaseFunctions):
 
 	def load_cansnp_annotation(self,annotation_file):
 		'''Function that loads data into the cansnp annotation table'''
-		dbConn = dynamic_import("flextaxd.modules.database", "DatabaseConnection")
 		data = self.load_annotation_file(annotation_file)
 		logging.info("CanSNPer annotation loaded!")
 
 	def load_genome_annotation(self,annotation_file):
 		'''Function that loads genome data into the cansnp genome annotation table'''
-		dbConn = dynamic_import("flextaxd.modules.database", "DatabaseConnection")
 		data = self.load_genome_annotation_file(annotation_file)
 		logging.debug(data)
 		logging.info("Genome annotation loaded!")

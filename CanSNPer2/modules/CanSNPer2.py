@@ -4,19 +4,30 @@ Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 '''
 
 import os
+import shutil
 import logging
 logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 from CanSNPer2.modules.NewickTree import NewickTree
-from CanSNPer2.CanSNPerTree import __version__
+from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+from CanSNPer2 import __version__
 
 
 ## import standard python libraries for subprocess and multiprocess
 from subprocess import Popen,PIPE,STDOUT
-from multiprocessing import Process, Queue
+import multiprocessing
 from time import sleep,time
+import signal
+
+# the workers inherit the parent's memory and share the sqlite connection on self, which
+# is what the fork start method gives. Python 3.14 made forkserver the default on linux,
+# where the worker target has to be pickled and "cannot pickle sqlite3.Connection" killed
+# every run, so the context is requested explicitly (issue #186). Queues must come from
+# the same context as the processes. The cleaner long term fix is to hand the workers the
+# database path and let each of them open its own connection.
+_MP_CTX = multiprocessing.get_context("fork")
 
 class Error(Exception):
 	"""docstring for Error"""
@@ -42,52 +53,60 @@ class CanSNPer2(object):
 		self.refdir = refdir
 		self.mauve_path = mauve_path
 		self.xmfa_files = []
-		self.export = kwargs["export"]
+		self.export = kwargs.get("export", False)  ## export is optional, defaults to False (issue #51)
 		self.database = database
-		self.min_required_hits = kwargs["min_required_hits"]
-		self.strictness = kwargs["strictness"]
-		self.rerun = kwargs["rerun"]
+		self.min_required_hits = kwargs.get("min_required_hits",3)
+		self.strictness = kwargs.get("strictness",0.7)
+		self.rerun = kwargs.get("rerun",False)
+
+		'''what each sample ended up as, so the command can tell a typed run from an
+			all NA run instead of always claiming success (issue #191)'''
+		self.typed = {}
+		self.not_typed = {}
+		self.skipped = {}
+		'''how long the queue loop may sit without a single item before it calls the run
+			stuck; a worker that keeps delivering is never cut off (issue #190)'''
+		self.queue_idle_timeout = kwargs.get("queue_idle_timeout", 5*60)
+		'''SNPs closer to an alignment edge than this are not evaluated (issue #175)'''
+		self.mask = int(kwargs.get("mask",0) or 0)
 
 		'''Create log and tmpdir if they do not exist'''
-		self.workdir = kwargs["workdir"]
+		self.workdir = kwargs.get("workdir","./")
 		if not os.path.exists(self.workdir):
 			logger.info("Creating working directory {workdir}".format(workdir=self.workdir))
 			os.makedirs(self.workdir)
 
-		try:
-			os.chdir(self.workdir)
-		except FileNotFoundError:
-			exit("The directory {workdir} could not be found!".format(workdir=self.workdir))
-
-		self.tmpdir = tmpdir
+		'''Resolve the working paths against workdir instead of changing the
+			process working directory, which is global state (issue #2)'''
+		self.tmpdir = os.path.join(self.workdir, tmpdir)
 		if not os.path.exists(self.tmpdir):
 			logger.info("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
 			os.makedirs(self.tmpdir)
 
-		self.logdir = kwargs["logdir"]
+		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
 		if not os.path.exists(self.logdir):
 			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
 			os.makedirs(self.logdir)
 
-		self.outdir = kwargs["outdir"]
+		self.outdir = os.path.join(self.workdir, kwargs.get("outdir","results"))
 		if not os.path.exists(self.outdir):
 			logger.info("Creating output directory {outdir}".format(outdir=self.outdir))
 			os.makedirs(self.outdir)
 
+		self.refdir = os.path.join(self.workdir, self.refdir)
+
 		'''Fetch other key word arguments'''
-		self.skip_mauve = kwargs["skip_mauve"]
-		self.save_tree = kwargs["save_tree"]
-		self.keep_temp = kwargs["keep_temp"]
+		self.skip_mauve = kwargs.get("skip_mauve",False)
+		self.save_tree = kwargs.get("save_tree",False)
+		self.keep_temp = kwargs.get("keep_temp",False)
 		self.keep_going = keep_going
 
-		if kwargs["summary"]:
+		if kwargs.get("summary",False):
 			self.summary_set = set()
 			self.called_genome = {}
 			self.summary = True
 		else:
 			self.summary = False
-
-		self.no_export = False
 
 	'''CanSNPer2 get functions'''
 
@@ -96,8 +115,31 @@ class CanSNPer2(object):
 		return self.xmfa_files
 
 	def get_references(self,selected=False):
-		'''references must be available in the refdir'''
-		return [ref for ref in os.listdir(self.refdir) if ref.endswith(".fna")]
+		'''references must be available in the refdir, and only the references listed in the
+			database are aligned against: a shared reference folder otherwise makes mauve align a
+			genome against unrelated species, which wastes hours and fails with a non zero exitcode (issue #124)
+		'''
+		refs = sorted(ref for ref in os.listdir(self.refdir) if ref.endswith(".fna"))
+		if not refs:
+			'''without references there is nothing to align against, say so instead of failing later
+				as "Mauve error skip" for every sample (issue #124)'''
+			raise CanSNPer2Error("No reference .fna files were found in {refdir}, run CanSNPer2-download --database {database} --outdir {refdir} first".format(refdir=self.refdir,database=self.database))
+		try:
+			db = CanSNPdbFunctions(self.database,verbose=self.verbose)
+			db_refs = set()
+			for genome,strain in db.query('''SELECT genome,strain FROM snp_references''').fetchall():
+				db_refs.update([genome,strain])
+		except Exception as e:
+			logger.warning("Could not read references from the database, using all fasta files in {refdir}: {err}".format(refdir=self.refdir,err=e))
+			return refs
+		matched = [ref for ref in refs if ref.rsplit(".",1)[0] in db_refs]
+		if not matched:
+			logger.warning("None of the {n} reference files in {refdir} matched the references in the database, using all of them!".format(n=len(refs),refdir=self.refdir))
+			return refs
+		skipped = [ref.rsplit(".",1)[0] for ref in refs if ref not in matched]
+		if skipped:
+			logger.warning("Skipping {n} reference file(s) in {refdir} that are not in the database: {names}".format(n=len(skipped),refdir=self.refdir,names=", ".join(skipped)))
+		return matched
 
 	def get_tempfiles(self):
 		'''List all files in the tmp directory'''
@@ -120,47 +162,102 @@ class CanSNPer2(object):
 		'''
 		retvalue=0
 		processes = []  #process container
-		log_f = {}	  #log container
+		logfiles = []   #open log file container, parallel to processes
 		error = 0   #Variable for errors
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
 			logger.debug(command)			## In verbose mode print the actual mauve command
-			p = Popen(command.split(" "),  stdout=PIPE, stderr=STDOUT)  ##Split command to avoid shell=True pipe stdout and stderr to stdout
-			log_f[p.stdout.fileno()] = logs[i]	  ## Store the reference to the correct log file
+			## stdout/stderr go straight to the log file: a pipe buffer would fill up and
+			## block mauve while this loop only polls for exitcodes, hanging the run (issue #68)
+			log = open(logs[i], "w")
+			p = Popen(command,  stdout=log, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
+			logfiles.append(log)
 			processes.append(p)
-		while processes:
-			for p in processes: ## Loop through processes
-				exitcode = p.poll()  #get exitcode for each process
-				if exitcode is not None: ## if there is no exitcode the program is still running
-
-					## When a process is finished open the log file and write stdout/stderr to log file
-					with open(log_f[p.stdout.fileno()], "w") as log:
-						print(p.stdout.read().decode('utf-8'),file=log)
-					### IF the exitcode is not 0 print a warning and ask user to read potential error messages
-					if exitcode == 11:
-						logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
-						logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes".format(exitcode=exitcode))
-						retvalue=11
-					elif exitcode == -6:
-						logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!!")
-						retvalue=6
-					elif exitcode != 0:
-						if not self.keep_going:
-							logger.error("Error: exitcode-{exitcode}".format(exitcode=exitcode))
-						error += 1
-						logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=log_f[p.stdout.fileno()],exitcode=exitcode))
-					## Remove process from container
-					processes.remove(p)
+		## SIGTERM (timeout, cluster schedulers, kill) ends the process at once and would leave every
+		## progressiveMauve child running unattended, so route it through the cleanup below (issue #151)
+		def stop_on_sigterm(signum,frame):
+			raise KeyboardInterrupt()
+		old_sigterm = None
+		try:
+			old_sigterm = signal.signal(signal.SIGTERM, stop_on_sigterm)
+		except ValueError:
+			logger.debug("SIGTERM handling is only possible in the main thread, no child cleanup installed")
+		try:
+			while processes:
+				finished = False
+				for idx in range(len(processes)-1, -1, -1): ## Loop through processes, walking backwards so removals are safe
+					p = processes[idx]
+					exitcode = p.poll()  #get exitcode for each process
+					if exitcode is not None: ## if there is no exitcode the program is still running
+						finished = True
+						## When a process is finished close its log file
+						logfiles[idx].close()
+						### IF the exitcode is not 0 print a warning and ask user to read potential error messages
+						if exitcode == 11:
+							logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
+							logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes".format(exitcode=exitcode))
+							retvalue=11
+						elif exitcode == -6:
+							logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!!")
+							retvalue=6
+						elif exitcode != 0:
+							if not self.keep_going:
+								logger.error("progressiveMauve failed with exitcode {exitcode} for {log}".format(exitcode=exitcode,log=logs[idx]))
+							error += 1
+							logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logs[idx],exitcode=exitcode))
+						## Remove process from container
+						processes.pop(idx)
+						logfiles.pop(idx)
+				if not finished: ## the poll loop would otherwise run flat out while mauve works (issue #152)
+					sleep(0.5)
+		except KeyboardInterrupt:
+			'''a cancelled CanSNPer2 left every progressiveMauve child running unattended, one of them
+				was still aligning sixteen hours after its parent had been stopped (issue #151)'''
+			logger.warning("CanSNPer2 was interrupted, stopping {n} running progressiveMauve processes".format(n=len(processes)))
+			for p in processes:
+				if p.poll() is None:
+					p.terminate()
+			for p in processes:
+				try:
+					p.wait(timeout=10)
+				except Exception:
+					p.kill()
+			for log in logfiles:
+				log.close()
+			raise
+		finally:
+			'''the SIGTERM handler belongs to this alignment round only, put the previous one back'''
+			if old_sigterm is not None:
+				signal.signal(signal.SIGTERM, old_sigterm)
 		if retvalue == 6 or retvalue == 11: ## This is done if sequence is not free of gaps
 			return retvalue
 		elif not self.keep_going:
 			if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
 				logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
 				raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
-		else:
+		elif error:
+			'''keep_going only means that a failing sample is skipped instead of stopping the run,
+				a run where every process succeeded must still report success (issue #126)'''
 			retvalue=1
 		return retvalue
+
+	def stage_for_mauve(self,path,prefix):
+		'''progressiveMauve writes a multi megabyte "<input>.sslist" progress file next to every input
+			genome, which polluted the reference and query folders and made them required to be writable.
+			There is no mauve option that turns this off, so the sequences are symlinked into the tmpdir
+			instead and the progress files land there and are removed by cleanup() (issue #148)
+		'''
+		source = os.path.abspath(path)
+		staged = os.path.join(self.tmpdir, "{prefix}_{name}".format(prefix=prefix,name=os.path.basename(source)))
+		if not os.path.lexists(staged):
+			try:
+				os.symlink(source,staged)
+			except (OSError,NotImplementedError,AttributeError):
+				'''a tmpdir on a filesystem without symlinks, fall back to a copy'''
+				logger.debug("Could not symlink {source} into {tmpdir}, copying the genome instead".format(source=source,tmpdir=self.tmpdir))
+				shutil.copyfile(source,staged)
+		return staged
 
 	def create_mauve_command(self,query,references=[]):
 		'''Mauve commands'''
@@ -168,20 +265,18 @@ class CanSNPer2(object):
 		logs = []	   # store log filepath
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
+		query_file = self.stage_for_mauve(query,"query")
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
-			#self.query_name = os.path.basename(query).rsplit(".",1)[0] ## get name of file and remove ending
 			xmfa_output = "{tmpdir}/{ref}_{target}.xmfa".format(tmpdir=self.tmpdir.rstrip("/"),ref=ref_name,target=self.query_name)
-			ref_file = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
+			ref_file = self.stage_for_mauve("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref")
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
-			'''Create run command for mauve'''
-			command = "{mauve_path}progressiveMauve --output {xmfa} {ref_fasta} {target_fasta}".format(
-							mauve_path	  = self.mauve_path,
-							xmfa			= xmfa_output,
-							ref_fasta	   = ref_file,
-							target_fasta	= query
-			)
+			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #3)'''
+			command = ["{mauve_path}progressiveMauve".format(mauve_path=self.mauve_path),
+							"--output", xmfa_output,
+							ref_file,
+							query_file]
 			commands.append(command)			## Mauve command
 			logs.append(log_file)			   ## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
@@ -189,17 +284,25 @@ class CanSNPer2(object):
 
 	def align(self, query, references=[]):
 		'''Align sequences and run mauve as subprocess'''
+		'''the name is set here, from the query actually being aligned, so that create_mauve_command
+			never depends on run() having set it before and the gap retry below keeps the original
+			sample name for its xmfa files (issue #160)'''
+		self.query_name = os.path.basename(query).rsplit(".",1)[0]
 		commands,logs = self.create_mauve_command(query,references)
 		if not self.skip_mauve: ### If mauve command was already run before don´t run mauve return xmfa paths
 			ret = self.run_mauve(commands,logs)
-			if int(ret) == 11:
-				'''This error might be caused by mauve not handling dash(-) in the sequence, change the incoming sequence and replace - with N and retry once'''
+			if int(ret) in (6,11):
+				'''exitcode 11 is often mauve not handling dashes(-) in the sequence, and run_mauve already
+					reports exitcode 6 as "not free of gaps, replace gaps with N and retry", so retry the same
+					way for both instead of only for 11 (issue #127)'''
 				logger.warning("Mauve ran into an error with sequence {seq} may contain a dash, replace with N characters and retry mauve".format(seq=query))
 				query_base = os.path.basename(query)
-				logger.debug("sed 's/-/N/g' {query} > {tmpdir}/{query_base}.tmp".format(query=query,query_base=query_base,tmpdir=self.tmpdir))
+				new_query = os.path.join(self.tmpdir, query_base + ".tmp")
+				logger.debug("Replacing all '-' with 'N' in {query}, writing copy to {tmp}".format(query=query,tmp=new_query))
 				self.xmfa_files = []
-				os.system("sed 's/-/N/g' {query} > {tmpdir}/{query_base}.tmp".format(query=query,query_base=query_base,tmpdir=self.tmpdir))
-				new_query = "{tmpdir}/{query}.tmp".format(query=query_base,tmpdir=self.tmpdir)
+				with open(query, "r") as seq_in, open(new_query, "w") as seq_out:
+					for line in seq_in:
+						seq_out.write(line.replace("-", "N"))
 				logger.debug("New query: {nq}".format(nq=new_query))
 				commands,logs = self.create_mauve_command(new_query,references)
 				ret = self.run_mauve(commands,logs)
@@ -220,9 +323,18 @@ class CanSNPer2(object):
 		return final_snp
 
 	def read_query_textfile_input(self,query_file):
-		'''If query input is a text file, parse file'''
+		'''If query input is a text file, parse file
+
+			query_file is the query list from the command line, so the text file is its
+			first entry; passing the list itself to open() raised TypeError and the
+			documented "one fasta per line" input never worked (issue #181). Blank lines
+			are skipped, they would otherwise fail the file existence check.'''
+		if isinstance(query_file,list):
+			query_file = query_file[0]
 		with open(query_file, "r") as f:
-			query = [query.strip() for query in f]
+			query = [query.strip() for query in f if query.strip()]
+		if not query:
+			raise CanSNPer2Error("The query input file {query_file} contained no filepaths".format(query_file=query_file))
 		return query
 
 	def cleanup(self):
@@ -235,18 +347,20 @@ class CanSNPer2(object):
 		logger.info("Done!")
 		return
 
-	def parse_xmfa(XMFA_obj, xmfa_file,results=[]):
-		'''Process xmfa file using ParseXMFA object'''
-		XMFA_obj.run(xmfa_file)
-		results.put(XMFA_obj.get_snps())
-		export_results.put(XMFA_obj.get_snp_info())
-		called_snps.put(XMFA_obj.get_called_snps())
-		return results
-	
-	def find_snps(self,XMFA_obj,xmfa_file,results=[],export_results=[],called_snps=[]):
+	def find_snps(self,XMFA_obj,xmfa_file,results=None,export_results=None,called_snps=None):
 		'''Align sequences to references and return SNPs'''
+		# default to None instead of mutable list defaults (issue #6); fresh queues when not supplied
+		if results is None: results = _MP_CTX.Queue()
+		if export_results is None: export_results = _MP_CTX.Queue()
+		if called_snps is None: called_snps = _MP_CTX.Queue()
 		# execute snp calling
-		XMFA_obj.run(xmfa_file)
+		'''a worker that dies here never sends its finish signal, so the queue loop waited
+			for the five minute time out and the sample was typed from whatever had
+			arrived; the failure is reported and the finish signals are still sent (issue #179)'''
+		try:
+			XMFA_obj.run(xmfa_file)
+		except Exception as e:
+			logger.error("SNP calling failed for {alignment}: {error}".format(alignment=xmfa_file,error=e))
 		#/
 		# stream output into Queues (if the complete job output is put in then the queue gets filled when having "large" outputs. It has to be streamed to the queue so that the queue can simultanously be cleared)
 		for result in XMFA_obj.get_snps().items(): # returns dictionary
@@ -264,46 +378,62 @@ class CanSNPer2(object):
 
 	def find_snps_multiproc(self,xmfa_obj,xmfa_files,export=False):
 		'''function to run genomes in paralell'''
+		'''the alignments are checked before the workers start: ParseXMFA.read_xmfa swallows a
+			FileNotFoundError and simply returns no SNPs, so --skip_mauve against a wrong tmpdir
+			(or alignments that were moved away) typed every sample NA and exited 0 (issue #176)'''
+		missing = [xmfa for xmfa in xmfa_files if not os.path.isfile(xmfa)]
+		if missing:
+			raise FileNotFoundError("{n} of {m} alignment files were not found in {tmpdir}, for example {first}".format(n=len(missing),m=len(xmfa_files),tmpdir=self.tmpdir,first=missing[0]))
 		jobs = []
 		SNPS = {}
 		SNP_info = []
 		called_snps = []
-		result_queue = Queue()
-		export_queue = Queue()
-		called_queue = Queue()
+		result_queue = _MP_CTX.Queue()
+		export_queue = _MP_CTX.Queue()
+		called_queue = _MP_CTX.Queue()
 		for enum,xmfa_file in enumerate(xmfa_files):
-			p = Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
+			p = _MP_CTX.Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
 			p.start()
 			jobs.append(p)
 			sleep(0.05) ## A short sleep to make sure all threads do not initiate access to the database file simultanously
 		
 		## Parse output queues from jobs continuously
-		finish_signals = {'SNPS':set(),'SNP_info':set(),'called_snps':set()} # will keep track when all workers are finished
-		tic = time() # "tic-toc" clock-sound
+		finish_signals = {'SNPS':0,'SNP_info':0,'called_snps':0} # how many workers sent their finish signal per queue
+		'''the timeout used to be total wall clock time: a run with more alignments than can
+			be parsed in five minutes stopped collecting on its own and typed the sample from
+			partial data. It is an idle timeout now, a working worker may take as long as it
+			needs, and only a queue that stays silent while no process is alive ends the loop
+			(the loop also used to spin at full core between the empty queue checks)'''
+		max_idle_seconds = self.queue_idle_timeout ## 5 minutes without a single queue item, by default
+		last_activity = time() # "tic-toc" clock-sound
 		while True:
+			queues_had_data = False
 			# check SNP queue
 			if not result_queue.empty():
+				queues_had_data = True
 				tmp_data = result_queue.get()
 				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
-					finish_signals['SNPS'].add(tmp_data.split('_')[-1])
+					finish_signals['SNPS'] += 1
 					logger.info("Output queue for 'SNPS' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					SNPS[tmp_data[0]] = tmp_data[1]
 			#/
 			# check SNP info queue
 			if not export_queue.empty():
+				queues_had_data = True
 				tmp_data = export_queue.get()
 				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
-					finish_signals['SNP_info'].add(tmp_data.split('_')[-1])
+					finish_signals['SNP_info'] += 1
 					logger.info("Output queue for 'SNP_info' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					SNP_info.append(tmp_data)
 			#/
 			# check called snps queue
 			if not called_queue.empty():
+				queues_had_data = True
 				tmp_data = called_queue.get()
 				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
-					finish_signals['called_snps'].add(tmp_data.split('_')[-1])
+					finish_signals['called_snps'] += 1
 					logger.info("Output queue for 'called_snps' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					called_snps.append(tmp_data)
@@ -311,25 +441,37 @@ class CanSNPer2(object):
 			# check if finished (all xmfa files has returned the "finish worker" in all output queues)
 			finish_signals_called = []
 			for queue_name,signals in finish_signals.items():
-				if len(signals) == len(xmfa_files):
+				if signals >= len(xmfa_files):
 					finish_signals_called.append(queue_name)
 			if len(finish_signals) == len(finish_signals_called):
 				logger.info("All output queues finished!")
 				break
 			#/
-			# check if we have computed for X amount of time, then break and assume something is wrong
-			max_time_seconds = 5*60 # 5*60 => 5 minutes
-			toc = time()
-			time_spent = toc - tic
-			if time_spent > max_time_seconds:
-				logger.warning("Maximum time spent reached to capture queue output. This is not expected to happen and might mean that your output data is corrupted.")
+			if queues_had_data: ## still delivering, the clock restarts (issue #190)
+				last_activity = time()
+				continue
+			#/
+			'''nothing arrived this round: keep waiting while any worker is alive, and stop
+				either when they are all gone or when the queues have been silent too long'''
+			alive = [job for job in jobs if job.is_alive()]
+			if not alive:
 				break
+			if time() - last_activity > max_idle_seconds:
+				logger.error("No queue output for {seconds} seconds while {n} SNP calling process(es) were still running".format(seconds=max_idle_seconds,n=len(alive)))
+				break
+			sleep(0.1)
 			#/
 		##/
 		## Wait until processes terminated (their output should already have been processed in the queue's)
 		for job in jobs:
 			job.join()
 		##/
+		'''a worker that died before sending its finish signals used to leave the sample typed
+			from whatever had arrived; an incomplete alignment set is an error now (issue #190)'''
+		answered = min(finish_signals.values())
+		if answered < len(xmfa_files):
+			raise CanSNPer2Error("Only {n} of {m} alignments reported their SNPs ({files}), refusing to type from partial data".format(
+					n=answered, m=len(xmfa_files), files=", ".join([os.path.basename(xmfa) for xmfa in xmfa_files[:3]])))
 		return SNPS,SNP_info,called_snps
 
 	def read_result_dir(self):
@@ -343,7 +485,8 @@ class CanSNPer2(object):
 							if row.startswith("SNP path:"):
 								snp = row.split(";")[-1].strip()
 								snplist.add(snp)
-								self.called_genome[snp] = f.rsplit(".fasta",1)[0]
+								'''the result files are named {query}_snps.txt, strip that suffix to get the query name (issue #123)'''
+								self.called_genome[snp] = f[:-len("_snps.txt")]
 		return snplist
 
 	def print_summary(self):
@@ -378,9 +521,10 @@ class CanSNPer2(object):
 			parse_xmfa_obj = ParseXMFA(
 						database=database,
 						export=self.export,
+						mask=self.mask,
 						verbose=self.verbose)  ## Create XMFA object and connect to database
 			'''Walk through the list of queries supplied'''
-			if not self.skip_mauve: print("Run {n} alignments to references using progressiveMauve".format(n=len(self.query)))
+			if not self.skip_mauve: print("Run alignments for {queries} queries against the references in {refdir} using progressiveMauve".format(queries=len(self.query),refdir=self.refdir))
 			for q in self.query:			## For each query file_path
 				try:
 					self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
@@ -392,6 +536,7 @@ class CanSNPer2(object):
 					outputfile = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
 					if os.path.exists(outputfile) and not self.rerun:
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
+						self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(outputfile=outputfile)
 						continue
 					logger.info("Running CanSNPer2 on {query}".format(query=qfile))
 					if not self.skip_mauve: ### If mauve command was already run before skip step
@@ -404,15 +549,19 @@ class CanSNPer2(object):
 					logger.debug(xmfa_files)
 					if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
 						logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
-						logger.warning("Mauve error skip {sample}".format(q))
+						logger.warning("Mauve error skip {sample}".format(sample=q))
+						self.skipped[self.query_name] = "progressiveMauve produced no alignments"
 						self.xmfa_files = []
 						continue
 					'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 					logger.info("Find SNPs")
 					try:
 						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,export=True)
-					except FileNotFoundError:
-						logger.warning("One or several xmfa files were not found for {qfile} continue with next file".format(qfile=qfile))
+					except FileNotFoundError as e:
+						'''the message has to carry the reason: the default log level only shows
+							warnings, and the folder that was searched is what the user needs (issue #176, #177)'''
+						logger.warning("One or several xmfa files were not found for {qfile}, continue with next file: {error}".format(qfile=qfile,error=e))
+						self.skipped[self.query_name] = str(e)
 						self.xmfa_files = []
 						continue
 					'''If file export is requested print the result for each SNP location to file'''
@@ -433,14 +582,17 @@ class CanSNPer2(object):
 
 					'''If save tree is requested print tree using ETE3 prints a pdf tree output'''
 					SNP = "NA" ## Default message if SNP cannot be confirmed
-					final_snp,message,called = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
+					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
+					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
+						tree_result = (False,"No SNP call was produced.",[])
+					final_snp,message,called = tree_result
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
 							SNP = "NA"
 						if self.export:
 							with open(outputfile2, "w") as called_out:
-								if True:
+								if called:
 									print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
 									for snp in called:
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)
@@ -455,14 +607,35 @@ class CanSNPer2(object):
 					if self.summary and SNP != "NA":
 						self.summary_set |= set([SNP])
 						self.called_genome[SNP] = self.query_name
+					'''remember the outcome per sample: the exit code is decided from this
+						(issue #191)'''
+					if SNP != "NA":
+						self.typed[self.query_name] = SNP
+					else:
+						self.not_typed[self.query_name] = message if not final_snp else "{snp} was not confirmed with enough hits".format(snp=final_snp[1])
 					if self.export:
 						print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 					'''Clean references to aligned xmfa files between queries if several was supplied'''
 					self.xmfa_files = []
-				except:
+				except Exception as e:
+					'''log the real failure before wrapping it, otherwise the cause is invisible (issue #121)'''
+					logger.debug("Traceback for {file}".format(file=self.query_name),exc_info=True)
+					logger.error("Error while processing {file}: {err}".format(file=self.query_name,err=e))
+					self.not_typed[self.query_name] = "failed: {err}".format(err=e)
 					if not self.keep_going:
-						raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)")
-					logger.debug("An error occured during processing of {file}".format(file=self.query_name))
+						raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)") from e
+					logger.warning("An error occured during processing of {file}, continuing!".format(file=self.query_name))
+
+		'''the run has to say what it actually produced: an all NA run used to end with
+			"finished successfully" and exit code 0 (issue #191)'''
+		if len(self.query) > 0:
+			logger.info("{typed} of {n} samples were typed, {na} were not called, {skipped} were skipped".format(
+					typed=len(self.typed), n=len(self.query), na=len(self.not_typed), skipped=len(self.skipped)))
+			if not self.typed:
+				reasons = ["{sample}: {why}".format(sample=sample,why=why) for sample,why in list(self.not_typed.items())+list(self.skipped.items())]
+				logger.error("No sample was typed - {reasons}".format(reasons="; ".join(reasons)))
+		else:
+			logger.warning("No input files were supplied, nothing was typed!")
 
 		if self.summary:
 			self.print_summary()
@@ -470,4 +643,5 @@ class CanSNPer2(object):
 		if not self.keep_temp and len(self.query) > 0: ## if keep temp is turned on do not remove away alignments also if no input files were given
 			self.cleanup()
 
-		logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir+"/"))
+		if self.typed or not self.query:
+			logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir.rstrip("/")+"/")) ## a trailing slash was already there would print dir// (issue #76)

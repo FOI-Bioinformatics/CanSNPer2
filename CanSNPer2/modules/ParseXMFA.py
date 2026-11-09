@@ -28,8 +28,13 @@ class ParseXMFA(object):
 
 		'''Define all base variables'''
 		self.verbose = verbose
-		self.export = kwargs["export"]
 		self.called_snps = []
+
+		'''SNP state is initialized here so _next_pos/_snpinfo never hit an
+			unbound attribute before run() fills them (issues #48, #49)'''
+		self.snplist = {}
+		self.snp_positions = []
+		self.current_snp = False
 
 		## as the snps are ordered according to the reference mauve positions they can be used sequentialy without search
 		'''SNPs will be stored as a sorted set containing (position, refBase, targetBase,SNPname)'''
@@ -38,7 +43,8 @@ class ParseXMFA(object):
 
 		'''Mask option, for distant relatives false SNPs near edges of alignments may become a problem,
 			this option allows masking of SNPs placed within n bases of the edge of an alignment'''
-		#self.mask = kwargs["mask"]
+		self.mask = int(kwargs.get("mask",0) or 0) ## the option was advertised but never read (issue #175)
+		self.masked = {} ## how many positions each reference lost to the mask
 		kwargs["verbose"] = True
 		if "database" in kwargs:
 			self.database = XMFAFunctions(kwargs["database"],verbose=self.verbose)
@@ -57,11 +63,6 @@ class ParseXMFA(object):
 		'''Return true snps'''
 		return self.called_snps
 
-	def reverse_complement(self,dna):
-		'''Complement and reverse DNA string'''
-		dna_rev = [ self.rcDict[x] for x in dna[::-1] ]
-		return "".join(dna_rev)
-
 	def _next_pos(self):
 		'''return the next SNP position if list is not empty'''
 		if len(self.snp_positions) > 0:
@@ -77,10 +78,13 @@ class ParseXMFA(object):
 		'''Walk through the paired sequences and save SNPs'''
 		snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP
 		SNP = {snp_id:0} ## SNP not found
+		masked_ids = []
 		'''will count the relative position in the reference (without gaps -)'''
 		i = 0
 		''' ii is the actual position in the sequence'''
 		base_positions = range(len(ref))
+		'''the block length in reference bases, to measure the distance to the far edge (issue #175)'''
+		block_len = int(head["end"]) - int(head["start"]) + 1
 
 		'''	If sign is "-" it means the reference sequence is the
 			reverse complement, hence positions need to be reversed
@@ -89,14 +93,25 @@ class ParseXMFA(object):
 			base_positions = reversed(base_positions)
 		'''Walk through the positions and check whenever the position matches a SNP'''
 		for ii in base_positions:
+			if ii >= len(target): ## target sequence shorter than the reference block, the rest is unaligned (issue #97)
+				break
 			if ref[ii] != "-":          	## if the reference contains a gap "-" do not count
 				i+=1
 			if i == snppos:                	## if current possition contains a snp
+				if self.mask and (snppos <= self.mask or block_len - snppos < self.mask):
+					'''the flanking mask: a SNP this close to either edge of the alignment is
+						not trustworthy, and it is dropped completely: counting it as absent
+						would penalise the sample for a base that was never compared (issue #175)'''
+					masked_ids.append(snp_id)
+					self.masked[self.reference] = self.masked.get(self.reference,0)+1
+					self._next_pos()  ## SNP handled, get next
+					snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP
+					continue
 				SNP[snp_id] = 0
 				_snp = target[ii].upper()        	## get base in target sequence make sure it is upper case!
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
-					_snp = self.rcDict[_snp]
+					_snp = self.rcDict.get(_snp,"N") ## unknown base characters become N (issue #96)
 				'''Fetch information about snp to allow print to file'''
 				orig_snp_pos = str(self.snplist[self.current_snp][0])
 				snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
@@ -107,10 +122,13 @@ class ParseXMFA(object):
 					self.called_snps.append(snp_id)
 				elif rbase == _snp:  		## SNP is confirmed to be ancestral
 					SNP[snp_id] = 2			## Ancestral SNP
-				elif _snp != "-" or _snp != "N":
+				elif _snp != "-" and _snp != "N":
 					SNP[snp_id] = 3			## Other base than ancestral or derived was found
 				self._next_pos()  ## SNP found get next
 				snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP
+		'''masked positions are not part of this alignment result at all (issue #175)'''
+		if masked_ids:
+			return {id:state for id,state in SNP.items() if id not in masked_ids}
 		return SNP
 
 	def parse_head(self,head):
@@ -122,15 +140,21 @@ class ParseXMFA(object):
 		start,end = list(map(int,cols[0].split(":")[-1].split("-")))
 		return {"sign":sign,"start":start,"end":end}
 
-	def read_sequence(self,seqP,res={}):
+	def read_sequence(self,seqP,res=None):
 		'''Read information in sequence pair'''
+		if res is None:
+			res = {}
 		seqLines = seqP.strip().split("> ") 	### Split pair into two sequences
 		headinfo = seqLines[0]					### Get header info of xmfa file (All comments)
 		if len(seqLines) > 2:  					### Both target and reference have sequence
 			refSeq = seqLines[1].split("\n")				## reference sequence
-			refHead = self.parse_head(refSeq.pop(0))		## parse reference header info
 			targetSeq = seqLines[2].split("\n")				## target sequence
-			targetHead = self.parse_head(targetSeq.pop(0))	## parse target sequence header
+			try:
+				refHead = self.parse_head(refSeq.pop(0))		## parse reference header info
+				targetHead = self.parse_head(targetSeq.pop(0))	## parse target sequence header
+			except (ValueError, IndexError): ## malformed sequence block header, skip this alignment pair (issue #98)
+				logger.warning("Malformed xmfa sequence block header, skipping block: {head}".format(head=(refSeq[:1] or [""])[0]))
+				return res
 			'''Parse aligned sequence pair '''
 			while int(self.current_snp) < int(refHead["start"]): ## Current SNP not aligned
 				# Keep iterating new canSNP-positions until the end of current alignment or until there are no more canSNPs to check
@@ -159,7 +183,11 @@ class ParseXMFA(object):
 					### Join together all SNPs found in data
 					self.SNPS = dict(**self.SNPS, **self.read_sequence(seqP))
 		except FileNotFoundError:
-			return False
+			'''this used to return False, which every caller read as "no SNPs in this
+				alignment", so a missing alignment typed the sample NA and exited 0
+				(issue #176, #179)'''
+			logger.error("The alignment file {f} was not found".format(f=f))
+			raise
 		return self.SNPS
 
 	def run(self, xmfa, reference=False,database=False):
@@ -167,6 +195,8 @@ class ParseXMFA(object):
 		self.SNPS = {}  ## For each run SNPs has to be emtpy
 		'''Create connection to SNP database if it is not connected'''
 		if not self.database:
+			if not database:
+				raise ValueError("No database was provided to ParseXMFA, cannot retrieve snps from the database!")
 			self.database = XMFAFunctions(database)
 		''' retrieve registered SNPs'''
 		if not reference:
@@ -175,8 +205,14 @@ class ParseXMFA(object):
 		self.snplist, self.snp_positions = self.database.get_snps(reference)
 		#if self.verbose: print(self.snplist)
 		'''save first snp to look for'''
+		if not self.snp_positions: ## the reference has no registered SNPs in this database, nothing to look for (issue #99)
+			logger.warning("No SNPs are registered in the database for reference {reference}, no SNP calls possible".format(reference=reference))
+			return self.SNPS
 		self.current_snp = self.snp_positions.pop(0)
 		snps = self.read_xmfa(xmfa)
+		if self.mask and self.masked.get(self.reference):
+			logger.info("{n} SNP positions against {reference} were within {mask} bases of an alignment edge and were not evaluated".format(
+					n=self.masked[self.reference], reference=self.reference, mask=self.mask))
 		return snps
 
 if __name__=="__main__":

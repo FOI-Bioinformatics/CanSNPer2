@@ -2,15 +2,20 @@
 Module to read and write newick trees
 
 '''
-from flextaxd.modules.database.DatabaseConnection import DatabaseFunctions
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-import ete3
-'''Temporary fix for conda that refuses to select the correct version of ete3 during test installation.
-	It fails due to faces not being available in that ete3 version on import, but it works when ete3 is
-	 being installed manually using conda.
-'''
-
+import os
 import sys
+'''ete3 renders trees through Qt, which aborts the whole process when it cannot open a display
+	(headless servers, containers), so select the offscreen platform unless the user chose one'''
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and not os.environ.get("QT_QPA_PLATFORM"):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import ete3
+'''ete3 only exposes the drawing classes (NodeStyle, TreeStyle, AttrFace, faces) through its treeview
+	subpackage, which fails to import when no Qt binding is installed, and ete3 swallows that error.
+	Warn here and raise a readable error when a tree is actually drawn (issue #122).
+'''
+ETENEWICK_OK = all(hasattr(ete3, name) for name in ("NodeStyle","TreeStyle","AttrFace","faces"))
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -143,15 +148,15 @@ class NewickTree(object):
 	def get_parent(self,name):
 		'''return parent'''
 		#QUERY = '''SELECT parent,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
-		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE child = "{node}"'''.format(node=name)
-		res = self.database.query(QUERY).fetchone()
+		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE child = ?'''
+		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
 		return res
 
 	def get_child(self,name):
 		'''return child'''
 		#QUERY = '''SELECT child,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
-		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE parent = "{node}"'''.format(node=name)
-		res = self.database.query(QUERY).fetchone()
+		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE parent = ?'''
+		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
 		return res
 
 	def new_node(self,child,nodes,parent):
@@ -170,7 +175,11 @@ class NewickTree(object):
 			pnode.add_child(node)
 		except KeyError:
 			logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add parent".format(parent=parent))
-			t_parent,t_child,rank = self.get_parent(parent)
+			parent_link = self.get_parent(parent)
+			if parent_link is None:	## parent has no link in the tree table, node can not be attached
+				logger.warning("Not adding node {child}: parent {parent} does not exist and has no parent link in the tree table".format(child=child,parent=parent))
+				return
+			t_parent,t_child,rank = parent_link
 			logger.debug("Adding parent: {parent} of parent: {child}".format(parent=t_parent,child=t_child))
 			self.new_node(t_child,nodes,t_parent)
 			self.new_node(child,nodes,parent)
@@ -224,7 +233,7 @@ class NewickTree(object):
 				else: ## If ancestral node is found in the path it means it is confirmed ancestral, therefore the current path is not correct!
 					count = 0
 				node = node.up
-			quota = float(count)/dist
+			quota = float(count)/dist if dist else 0 ## a path of distance zero can never meet the strictness quota, no crash (issue #95)
 			logger.debug("-- Confirm strictness: {quota}".format(quota=quota))
 			logger.debug("-- Min required hits: {minhit}, {count}".format(minhit= self.min_required_hits, count=count))
 			if quota >= self.strictness and count >=self.min_required_hits:
@@ -278,10 +287,13 @@ class NewickTree(object):
 		snplist -- a list of the SNP names, positions and state
 		'''
 		logger.debug("Draw tree from snplist")
+		if not ETENEWICK_OK:
+			raise ImportError("ete3 is missing its drawing classes (NodeStyle, TreeStyle, AttrFace), install PyQt5 to enable tree output: pip install PyQt5")
 		try:
 			tree = ete3.Tree(self.newickTree, format=1)
-		except:
+		except Exception as e:
 			logger.debug(self.newickTree)
+			raise ValueError("The newick tree in the database could not be parsed by ete3, cannot draw the tree: {err}".format(err=e))
 		farthest_leaf, tree_depth = tree.get_farthest_leaf()
 		for n in tree.traverse():
 			# The ancestral node is set to have a red colour
@@ -381,7 +393,12 @@ class NewickTree(object):
 					return False,msg,[]
 				else:#dist,node = dlist[0]
 					logger.debug("Calling SNP")
-					node = tree.search_nodes(name=node)[0]
+					matches = tree.search_nodes(name=node)
+					if not matches: ## the node name from the db is not in the ete3 tree, cannot call (issue #78)
+						msg = "Start node {node} was not found in the tree, cannot call SNPs.".format(node=node)
+						logger.warning(msg)
+						return False,msg,[]
+					node = matches[0]
 					### Loop different nodes
 					confirmed = self._confirm_path([dist,node],called_snps,snplist)
 					called = dlist[0]+[confirmed]
