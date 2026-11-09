@@ -64,6 +64,8 @@ class CanSNPer2(object):
 		self.typed = {}
 		self.not_typed = {}
 		self.skipped = {}
+		'''the SNP path per sample, so the summary can print it for every sample (issue #24)'''
+		self.result_paths = {}
 		'''how long the queue loop may sit without a single item before it calls the run
 			stuck; a worker that keeps delivering is never cut off (issue #190)'''
 		self.queue_idle_timeout = kwargs.get("queue_idle_timeout", 5*60)
@@ -102,8 +104,6 @@ class CanSNPer2(object):
 		self.keep_going = keep_going
 
 		if kwargs.get("summary",False):
-			self.summary_set = set()
-			self.called_genome = {}
 			self.summary = True
 		else:
 			self.summary = False
@@ -474,31 +474,47 @@ class CanSNPer2(object):
 					n=answered, m=len(xmfa_files), files=", ".join([os.path.basename(xmfa) for xmfa in xmfa_files[:3]])))
 		return SNPS,SNP_info,called_snps
 
-	def read_result_dir(self):
-		'''Fetch all final SNPs from result file after run to produce summary'''
-		snplist = set()
-		for root, dirs, files in os.walk(self.outdir, topdown=False):
-			for f in files:
-				if f.endswith("_snps.txt"):
-					with open(os.path.join(root,f)) as snpfile:
-						for row in snpfile:
-							if row.startswith("SNP path:"):
-								snp = row.split(";")[-1].strip()
-								snplist.add(snp)
-								'''the result files are named {query}_snps.txt, strip that suffix to get the query name (issue #123)'''
-								self.called_genome[snp] = f[:-len("_snps.txt")]
-		return snplist
+	def read_result_file(self,resultfile):
+		'''Read the final SNP and the SNP path from a sample's result file, used for samples
+			skipped because their result file already exists. The final SNP is read from the
+			"Final SNP:" line, not from the last SNP of the path: that last SNP is exactly the
+			one that can have failed its check, which made the summary disagree with the
+			per-sample file (issue #36). An empty or missing file reads as NA/NA (issue #35
+			makes empty NA files possible)'''
+		final_snp = "NA"
+		snp_path = "NA"
+		if os.path.isfile(resultfile):
+			with open(resultfile) as handle:
+				for row in handle:
+					if row.startswith("SNP path:"):
+						path = row.split(":",1)[1].strip()
+						if path and path != "NA":
+							snp_path = path
+					elif row.startswith("Final SNP:"):
+						final_snp = row.split(":",1)[1].strip().split()[0]
+		return final_snp,snp_path
 
 	def print_summary(self):
-		'''Create summary file and tree'''
+		'''Create summary file and tree. Every sample of the run is listed, NA included, as
+			three tab separated columns "ID final_snp snp_path" matching what the run reported
+			on stdout: the old summary only contained samples that had a final SNP, silently
+			omitting the rest of the run (issue #24)'''
 		summarypath = "{outdir}/snps_summary.txt".format(outdir=self.outdir)
-		SNPS = self.read_result_dir()
+		final_snps = set()
 		with open(summarypath,"w") as summaryout:
-			for snp in SNPS:
-				print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
+			for q in self.query:
+				name = os.path.basename(q).rsplit(".",1)[0]
+				if name in self.skipped:
+					final_snp,snp_path = self.read_result_file("{outdir}/{name}_snps.txt".format(outdir=self.outdir,name=name))
+				else:
+					final_snp = self.typed.get(name,"NA")
+					snp_path = self.result_paths.get(name,"NA")
+				print("{name}\t{final_snp}\t{snp_path}".format(name=name,final_snp=final_snp,snp_path=snp_path),file=summaryout)
+				if final_snp != "NA":
+					final_snps.add(final_snp)
 
 		'''Print summary tree showing all unique SNPs in the final tree'''
-		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
+		self.create_tree([],"summary",final_snps,True,min_required_hits=self.min_required_hits,summary=True)
 
 	def run(self,database):
 		'''Run CanSNPer2'''
@@ -586,6 +602,7 @@ class CanSNPer2(object):
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
 						tree_result = (False,"No SNP call was produced.",[])
 					final_snp,message,called = tree_result
+					self.result_paths[self.query_name] = ";".join([snp[1] for snp in called]) if called else "NA"
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
@@ -604,9 +621,6 @@ class CanSNPer2(object):
 							with open(outputfile2, "a") as called_out:
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 						logger.info(message)
-					if self.summary and SNP != "NA":
-						self.summary_set |= set([SNP])
-						self.called_genome[SNP] = self.query_name
 					'''remember the outcome per sample: the exit code is decided from this
 						(issue #191)'''
 					if SNP != "NA":

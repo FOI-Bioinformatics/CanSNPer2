@@ -3,7 +3,7 @@
 CanSNPer2: A toolkit for SNP-typing NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
-VERSION 2.1.0 release of CanSNPer2
+VERSION 2.1.1 release of CanSNPer2
 
 The second release of CanSNPer (CanSNPer2) is exclusively written for python3
 CanSNPer2 is simplified from CanSNPer1 stripped to only perform
