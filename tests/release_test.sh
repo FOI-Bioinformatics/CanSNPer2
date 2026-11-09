@@ -146,7 +146,7 @@ mkdir -p "$OUT/refs"
 for r in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do cp "$PKG/references/$r.fna" "$OUT/refs/"; done
 mkdir -p "$OUT/inputs" && cp "$PKG/references/FSC200.fna" "$OUT/inputs/query.fna"
 
-say "== the failure paths must be loud (issues #176, #177, #179, #181, #190, #191)"
+say "== the failure paths must be loud (issues #43, #176, #177, #179, #181, #190, #191)"
 mkdir -p "$OUT/empty_refs"
 cmd no-references fail "No reference genomes" "$PY" -m CanSNPer2.modules.runMauve \
     "$PKG/references/FSC200.fna" --refdir "$OUT/empty_refs" --tmpdir "$OUT/t_norefs" \
@@ -157,6 +157,12 @@ cmd missing-query-file fail "was not found" "$PY" -m CanSNPer2.modules.runMauve 
 cmd skip-mauve-without-alignments fail "No alignments were produced" "$PY" -m CanSNPer2.modules.runMauve \
     "$OUT/inputs/query.fna" --refdir "$OUT/refs" --tmpdir "$OUT/t_empty" \
     --logs "$OUT/logs/empty" --outdir "$OUT/r_empty" --skip_mauve
+# --keep_going must stay loud when every sample failed: the 2.0.6 run typed nothing,
+# wrote no files and still exited 0, which is why the reporter saw "no output at all" (#43)
+cmd keep-going-no-output fail "No sample was typed" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
+    "$OUT/no_such_file.fna" -db "$DB" --refdir "$OUT/refs" -o "$OUT/r_keepgoing" \
+    --tmpdir "$OUT/t_keepgoing" --logdir "$OUT/logs/keepgoing" --keep_going --skip_mauve
+expect "keep_going left no result files behind" "0" "$(ls "$OUT/r_keepgoing" 2>/dev/null | wc -l | tr -d ' ')"
 
 say "== download failure is reported and fails the command (issue #218)"
 DLLOG=$OUT/logs/download
@@ -198,6 +204,14 @@ cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$O
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
 expect "same snps through --skip_mauve" "19" "$(wc -l < "$OUT/res_skip/query_snps.txt")"
 expect "same not-called through --skip_mauve" "313" "$(wc -l < "$OUT/res_skip/query_not_called.txt")"
+
+# the other half of #43: with --keep_going a failing sample must not take the output of
+# the samples that did work along with it
+cmd keep-going-mixed ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
+    "$OUT/no_such_file.fna" "$OUT/inputs/query.fna" -db "$DB" --refdir "$OUT/refs" \
+    -o "$OUT/res_keepgoing" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/keepgoing_ok" \
+    --keep_going --skip_mauve
+expect "keep_going kept the working sample's output" "19" "$(wc -l < "$OUT/res_keepgoing/query_snps.txt" 2>/dev/null || echo 0)"
 
 if ls "$ROOT"/test_data/*.fasta >/dev/null 2>&1; then
     ls "$ROOT"/test_data/*.fasta > "$OUT/real_list.txt"

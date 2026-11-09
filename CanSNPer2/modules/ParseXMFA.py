@@ -46,10 +46,11 @@ class ParseXMFA(object):
 		self.mask = int(kwargs.get("mask",0) or 0) ## the option was advertised but never read (issue #175)
 		self.masked = {} ## how many positions each reference lost to the mask
 		kwargs["verbose"] = True
-		if "database" in kwargs:
-			self.database = XMFAFunctions(kwargs["database"],verbose=self.verbose)
-		else:
-			self.database = False
+		'''the database is only connected in run(), by whichever process uses this object:
+			the SNP calling workers are forked from the parent and used to inherit its open
+			sqlite connection and cursor, so several processes read through one cursor (issue #49)'''
+		self.database_path = kwargs.get("database",False)
+		self.database = False
 
 	def get_snp_info(self):
 		'''Return SNP_info'''
@@ -163,8 +164,11 @@ class ParseXMFA(object):
 					break
 				#/
 
-			if refHead["start"] < self.current_snp and refHead["end"] > self.current_snp:
-				'''Check if current snp is within this mapped region else skip'''
+			if refHead["start"] <= self.current_snp and refHead["end"] >= self.current_snp:
+				'''Check if current snp is within this mapped region else skip; the block
+					covers start..end inclusive (block_len counts both ends, issue #175), so a
+					SNP exactly at the first or last position is inside too and the whole block
+					must not be skipped for it (issue #39)'''
 				ref = "".join(refSeq)				 ## Make reference sequence one string
 				target = "".join(targetSeq)			 ## Make target sequence one string
 				'''For each snp within this region find it and merge with all others'''
@@ -193,11 +197,14 @@ class ParseXMFA(object):
 	def run(self, xmfa, reference=False,database=False):
 		'''Parse XMFA file and return SNPS matching the given database'''
 		self.SNPS = {}  ## For each run SNPs has to be emtpy
-		'''Create connection to SNP database if it is not connected'''
+		'''Create the connection to the SNP database here, in the process that parses the
+			alignment, so a forked worker never reads through a cursor opened by its parent
+			(issue #49)'''
 		if not self.database:
+			database = self.database_path or database
 			if not database:
 				raise ValueError("No database was provided to ParseXMFA, cannot retrieve snps from the database!")
-			self.database = XMFAFunctions(database)
+			self.database = XMFAFunctions(database,verbose=self.verbose)
 		''' retrieve registered SNPs'''
 		if not reference:
 			reference = os.path.basename(xmfa).split("_")[0]

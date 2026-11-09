@@ -217,69 +217,30 @@ class NewickTree(object):
 		if not node.is_root():
 			ete3.faces.add_face_to_node(ete3.AttrFace("name"), node, column=0, position="branch-top")
 
-	def _confirm_path(self,dist_list,called_snps,snplist):
-		'''Confirm path of snps'''
-		try:
-			logger.debug("Confirm path")
-			count = 0
-			logger.debug(dist_list)
-			dist,node = dist_list
-			while node:
-				if node.name == "ROOT":
-					pass
-				elif node.name in called_snps and snplist[node.name] != 2:
-					logger.debug("count1")
-					count +=1
-				else: ## If ancestral node is found in the path it means it is confirmed ancestral, therefore the current path is not correct!
-					count = 0
-				node = node.up
-			quota = float(count)/dist if dist else 0 ## a path of distance zero can never meet the strictness quota, no crash (issue #95)
-			logger.debug("-- Confirm strictness: {quota}".format(quota=quota))
-			logger.debug("-- Min required hits: {minhit}, {count}".format(minhit= self.min_required_hits, count=count))
-			if quota >= self.strictness and count >=self.min_required_hits:
-				logger.info("Confirm strictness: {quota}, ({count}/{dist})".format(quota=quota,count=count,dist=dist))
-				logger.info("Min required hits: {minhit}, hits: {count}".format(minhit= self.min_required_hits, count=count))
-				return True,count
-			return False,count
-		except KeyError as e:
-			logger.error("KeyError, {e}".format(e=e))
-			logger.critical("Could not confirm path!")
-
-	def _check_start(self,dlist):
-		'''Check so that the most distant node actually have support for at least three parents, else check the next deepest node'''
-		n=0
-		f_dist,f_node = dlist[n]
-		_dist,_node = dlist[n]
-		sublist = dlist[n:] ## remove first element is that first node is child of the first object in the list
-		n+=1
-		lcount = 0
-		logger.debug("Check which start node is the deepest with at least three available parents")
-		logger.debug(dlist)
-		logger.debug(sublist)
-		for dist,node in sublist:
-			logger.debug("1-{dist}: {node}".format(dist=dist,node=node))
-			logger.debug("2-{dist}: {node}".format(dist=_dist,node=_node))
-			if (_dist != dist+1) and (_dist != dist):
-				logger.debug("Leaf does not have parent support go to next leaf!")
-				lcount = 0
-				n+=1
-				f_dist,f_node = dist,node ## Final node
-				#sublist = dlist[n:] ## remove first n elements
-			elif lcount >= self.min_required_hits:
-				logger.debug("Final count ok return")
-				if n >= 1:
-					sublist = dlist[n-1:] ## remove elements -1
-					logger.debug(sublist)
-				else:
-					sublist = dlist
-				return f_dist,f_node,sublist
+	def _confirm_path(self,node,called_snps,snplist):
+		'''Confirm that the ACTUAL ancestor chain of the node, from the root of the tree down to
+			the node itself, is entirely made up of called SNPs (issue #25).
+			Returns (confirmed, number_of_snps_on_the_chain).
+			A SNP that was not called, or that was called ancestral, breaks the chain: the walk down
+			the tree should have left the branch at that point, so no node below it can be final-called.
+			The quota of a complete chain is always 1, only min_required_hits gates the call now;
+			competing complete paths are handled by the caller (policy of issue #47).'''
+		logger.debug("Confirm path of {node}".format(node=node.name))
+		count = 0
+		while node.name != "ROOT":
+			if node.name in called_snps and snplist.get(node.name,0) != 2:
+				count +=1
 			else:
-				logger.debug("Parent ok continue")
-				lcount+=1
-			_dist,_node = dist,node
-			if lcount >= self.min_required_hits and len(dlist) <= self.min_required_hits:
-				return f_dist,f_node,dlist
-		return False,False,dlist
+				'''not called (or missing from the alignments) here, or confirmed ancestral:
+					the chain to this node is incomplete, the branch was left at this SNP'''
+				logger.debug("Chain broken at {node}, {count} called SNPs below it".format(node=node.name,count=count))
+				return False,count
+			node = node.up
+		if count >= self.min_required_hits:
+			logger.info("Confirm complete path of {count} SNPs (min required hits: {minhit})".format(count=count,minhit=self.min_required_hits))
+			return True,count
+		logger.debug("Complete chain too short: {count} < {minhit}".format(count=count,minhit=self.min_required_hits))
+		return False,count
 
 	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True,summary=False):
 		'''Draws a phylogenetic tree using ETE3
@@ -363,8 +324,6 @@ class NewickTree(object):
 			if summary:
 				return
 		dlist = []
-		confirmed = [False,0]
-		final = "NA"
 		logger.info("Called snps: {called}".format(called=called_snps))
 		if called_snps:
 			try:
@@ -385,31 +344,50 @@ class NewickTree(object):
 					msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(min=self.min_required_hits)
 					logger.debug(msg)
 					return False,msg,[]
-				## Check so that the starting node have at least tree consecutive nodes, otw look for another start
-				dist,node,dlist = self._check_start(dlist)
-				if not node:
-					msg = "No valid start SNP found."
-					logger.info(msg)
-					return False,msg,[]
-				else:#dist,node = dlist[0]
-					logger.debug("Calling SNP")
-					matches = tree.search_nodes(name=node)
+				'''The final SNP is the deepest called SNP whose ACTUAL ancestor chain in the tree, from the
+					root down to the node, is entirely made up of called SNPs. The old walk accepted SNPs from
+					branches it should have left: _check_start picked a start node by depth adjacency in the
+					flat sorted list and _confirm_path counted any called ancestor, so a node on another
+					branch could be final-called (issue #25).
+					When complete paths compete at the same depth no path is auto-picked: the sample stays NA
+					and the candidates are reported, leaving room for the calling policy of issue #47.'''
+				logger.debug("Calling SNP")
+				candidates = [] ## complete called paths, all at the greatest confirmed depth
+				deepest = None ## deepest called SNP found in the tree, kept for the "not confirmed" report
+				for dist,tsnp in dlist: ## loop the called SNPs from deepest
+					matches = tree.search_nodes(name=tsnp)
 					if not matches: ## the node name from the db is not in the ete3 tree, cannot call (issue #78)
-						msg = "Start node {node} was not found in the tree, cannot call SNPs.".format(node=node)
-						logger.warning(msg)
-						return False,msg,[]
-					node = matches[0]
-					### Loop different nodes
-					confirmed = self._confirm_path([dist,node],called_snps,snplist)
-					called = dlist[0]+[confirmed]
-					dlist = sorted(dlist,key=lambda l:l[0], reverse=False)
-					#dlist[0].append(confirmed)
-					if confirmed[0]:
-						final = node.name.strip()
-						msg = "Final SNP called: {snp}".format(snp=final)
-						logger.info(msg)
-					else:
-						msg = "SNP could not be confirmed!"
+						logger.debug("Called SNP {snp} was not found in the tree, cannot confirm it".format(snp=tsnp))
+						continue
+					ok,count = self._confirm_path(matches[0],called_snps,snplist)
+					if not deepest:
+						deepest = [dist,tsnp,(False,count)]
+					if not ok:
+						continue
+					if not candidates:
+						candidates = [[dist,tsnp,count]]
+					elif dist == candidates[0][0]:
+						candidates.append([dist,tsnp,count])
+					else: ## a shallower complete path cannot beat the deepest confirmed one
+						break
+				dlist = sorted(dlist,key=lambda l:l[0], reverse=False)
+				if len(candidates) == 1:
+					dist,tsnp,count = candidates[0]
+					called = [dist,tsnp,(True,count)]
+					msg = "Final SNP called: {snp}".format(snp=tsnp)
+					logger.info(msg)
+				elif len(candidates) > 1:
+					paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1],n=c[2]) for c in candidates])
+					msg = "Two or more complete SNP paths compete at the same depth: {paths}, no path is auto-picked, check {pdf}".format(paths=paths,pdf=self.tree_file)
+					logger.warning(msg)
+					called = deepest
+				elif deepest:
+					msg = "SNP could not be confirmed!"
+					called = deepest
+				else:
+					msg = "None of the called SNPs was found in the tree, cannot call SNPs."
+					logger.warning(msg)
+					return False,msg,[]
 				logger.debug(dlist)
 			except KeyError as e:
 				logger.error("KeyError, {e}".format(e=e))

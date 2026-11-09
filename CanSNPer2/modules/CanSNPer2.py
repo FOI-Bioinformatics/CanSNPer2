@@ -18,15 +18,16 @@ from CanSNPer2 import __version__
 ## import standard python libraries for subprocess and multiprocess
 from subprocess import Popen,PIPE,STDOUT
 import multiprocessing
+from queue import Empty
 from time import sleep,time
 import signal
 
-# the workers inherit the parent's memory and share the sqlite connection on self, which
-# is what the fork start method gives. Python 3.14 made forkserver the default on linux,
-# where the worker target has to be pickled and "cannot pickle sqlite3.Connection" killed
-# every run, so the context is requested explicitly (issue #186). Queues must come from
-# the same context as the processes. The cleaner long term fix is to hand the workers the
-# database path and let each of them open its own connection.
+# the workers are forked and inherit the parent's memory, which is what the fork start method
+# gives. Python 3.14 made forkserver the default on linux, where the worker target has to be
+# pickled and "cannot pickle sqlite3.Connection" killed every run, so the context is requested
+# explicitly (issue #186). Queues must come from the same context as the processes. The database
+# connection is opened inside the worker now, from the path ParseXMFA carries, so no cursor is
+# shared between processes (issue #49).
 _MP_CTX = multiprocessing.get_context("fork")
 
 class Error(Exception):
@@ -69,6 +70,10 @@ class CanSNPer2(object):
 		'''how long the queue loop may sit without a single item before it calls the run
 			stuck; a worker that keeps delivering is never cut off (issue #190)'''
 		self.queue_idle_timeout = kwargs.get("queue_idle_timeout", 5*60)
+		'''how long a worker may stay alive after the collection loop ended before it is
+			stopped: joining forever is what turned a stalled worker into a run that never
+			returned (issue #41)'''
+		self.worker_join_timeout = kwargs.get("worker_join_timeout", 2*60)
 		'''SNPs closer to an alignment edge than this are not evaluated (issue #175)'''
 		self.mask = int(kwargs.get("mask",0) or 0)
 
@@ -356,11 +361,18 @@ class CanSNPer2(object):
 		# execute snp calling
 		'''a worker that dies here never sends its finish signal, so the queue loop waited
 			for the five minute time out and the sample was typed from whatever had
-			arrived; the failure is reported and the finish signals are still sent (issue #179)'''
+			arrived; the failure is reported and signalled at once (issue #179).
+			Nothing of the half-read alignment is passed on and the failure is sent as its
+			own signal, because the sample must not be typed from a parse that stopped
+			midway (issue #50)'''
 		try:
 			XMFA_obj.run(xmfa_file)
 		except Exception as e:
+			reference = getattr(XMFA_obj,"reference",os.path.basename(xmfa_file).split("_")[0])
 			logger.error("SNP calling failed for {alignment}: {error}".format(alignment=xmfa_file,error=e))
+			for queue in (results,export_results,called_snps):
+				queue.put('XMFA_obj_failed_worker_{reference}: {error}'.format(reference=reference,error=e))
+			return
 		#/
 		# stream output into Queues (if the complete job output is put in then the queue gets filled when having "large" outputs. It has to be streamed to the queue so that the queue can simultanously be cleared)
 		for result in XMFA_obj.get_snps().items(): # returns dictionary
@@ -399,6 +411,8 @@ class CanSNPer2(object):
 		
 		## Parse output queues from jobs continuously
 		finish_signals = {'SNPS':0,'SNP_info':0,'called_snps':0} # how many workers sent their finish signal per queue
+		failed_reports = [] ## workers that reported a failed SNP calling, they never count as finished (issue #50)
+		idle_timeout_hit = False ## the loop ended because the queues went silent, see the join below (issue #51)
 		'''the timeout used to be total wall clock time: a run with more alignments than can
 			be parsed in five minutes stopped collecting on its own and typed the sample from
 			partial data. It is an idle timeout now, a working worker may take as long as it
@@ -406,33 +420,48 @@ class CanSNPer2(object):
 			(the loop also used to spin at full core between the empty queue checks)'''
 		max_idle_seconds = self.queue_idle_timeout ## 5 minutes without a single queue item, by default
 		last_activity = time() # "tic-toc" clock-sound
+		def drain(queue, batch=1000):
+			'''take everything the queue holds right now instead of one item per round: a
+				custom database with thousands of SNPs per reference sends tens of thousands of
+				items per alignment through these queues, and picking a single item per check
+				let the queue pipes fill up until the workers blocked in put() (issue #41)'''
+			items = []
+			while len(items) < batch:
+				try:
+					items.append(queue.get_nowait())
+				except Empty:
+					break
+			return items
 		while True:
 			queues_had_data = False
 			# check SNP queue
-			if not result_queue.empty():
+			for tmp_data in drain(result_queue):
 				queues_had_data = True
-				tmp_data = result_queue.get()
-				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_failed_worker_') != -1:
+					failed_reports.append(tmp_data)
+				elif type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
 					finish_signals['SNPS'] += 1
 					logger.info("Output queue for 'SNPS' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					SNPS[tmp_data[0]] = tmp_data[1]
 			#/
 			# check SNP info queue
-			if not export_queue.empty():
+			for tmp_data in drain(export_queue):
 				queues_had_data = True
-				tmp_data = export_queue.get()
-				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_failed_worker_') != -1:
+					failed_reports.append(tmp_data)
+				elif type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
 					finish_signals['SNP_info'] += 1
 					logger.info("Output queue for 'SNP_info' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					SNP_info.append(tmp_data)
 			#/
 			# check called snps queue
-			if not called_queue.empty():
+			for tmp_data in drain(called_queue):
 				queues_had_data = True
-				tmp_data = called_queue.get()
-				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_failed_worker_') != -1:
+					failed_reports.append(tmp_data)
+				elif type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
 					finish_signals['called_snps'] += 1
 					logger.info("Output queue for 'called_snps' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
@@ -458,13 +487,40 @@ class CanSNPer2(object):
 				break
 			if time() - last_activity > max_idle_seconds:
 				logger.error("No queue output for {seconds} seconds while {n} SNP calling process(es) were still running".format(seconds=max_idle_seconds,n=len(alive)))
+				idle_timeout_hit = True
 				break
 			sleep(0.1)
 			#/
 		##/
-		## Wait until processes terminated (their output should already have been processed in the queue's)
+		## Wait until processes terminated (their output should already have been processed in the queue's).
+		## The wait is bounded: joining forever is what made the whole command hang when one SNP calling
+		## worker stalled, which is what "software hang with a large custom SNP database" looked like
+		## (issue #41). Stuck workers are stopped here, and the incomplete result check below turns the
+		## run into a reported failure instead of a silent freeze.
+		## Once the idle timeout had already called the run stuck, waiting the full join timeout on top
+		## of the idle wait only made one stalled sample cost seven minutes before --keep_going moved on,
+		## so the grace period after a silent queue is short (issue #51).
+		join_grace = 10 if idle_timeout_hit else self.worker_join_timeout
 		for job in jobs:
-			job.join()
+			job.join(timeout=join_grace)
+		stalled = [job for job in jobs if job.is_alive()]
+		if stalled:
+			logger.error("Stopping {n} SNP calling process(es) that were still running {seconds} seconds after the queues went silent".format(
+					n=len(stalled), seconds=join_grace))
+			for job in stalled:
+				job.terminate()
+			for job in stalled:
+				job.join(timeout=10)
+				if job.is_alive():
+					job.kill()
+		##/
+		'''a worker whose parse failed mid-alignment used to send normal finish signals, so the
+			sample was typed from a half-read alignment; the failure signal is its own report now
+			and the run refuses the sample instead (issue #50)'''
+		if failed_reports:
+			reports = sorted(set(failed_reports))
+			raise CanSNPer2Error("{n} of {m} alignments failed during SNP calling ({reports}), refusing to type from a half-read alignment".format(
+					n=len(reports), m=len(xmfa_files), reports="; ".join(reports)))
 		##/
 		'''a worker that died before sending its finish signals used to leave the sample typed
 			from whatever had arrived; an incomplete alignment set is an error now (issue #190)'''
