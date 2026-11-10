@@ -70,6 +70,22 @@ class DatabaseConnection(object):
 		self.cursor = self.create_cursor(self.conn)
 		logging.debug("Database connected!")
 
+	def __getstate__(self):
+		'''A sqlite3 connection cannot be pickled. Objects holding one are handed to multiprocessing
+			workers, which pickles them under the spawn start method (the default on macOS) and the
+			forkserver start method (the default on linux from Python 3.14), so the connection is left
+			out here and the worker opens its own in __setstate__'''
+		state = self.__dict__.copy()
+		state.pop("conn",None)
+		state.pop("cursor",None)
+		return state
+
+	def __setstate__(self,state):
+		'''Restore a pickled object with its own connection to the same database'''
+		self.__dict__.update(state)
+		self.conn = self.connect(self.database)
+		self.cursor = self.create_cursor(self.conn)
+
 	def __str__(self):
 		return "Object of class DatabaseConnection, connected to {database}".format(database=self.database)
 
