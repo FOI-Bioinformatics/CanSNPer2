@@ -79,7 +79,7 @@ def main():
 
 
 	debugopts = parser.add_argument_group("Logging and debug options")
-	debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify reference directory")
+	debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify tmp directory default (/tmp/CanSNPer2)")
 	debugopts.add_argument('--logdir', 			metavar='', default="logs/", 								help="Specify log directory")
 	debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,					help="Verbose output")
 	debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")

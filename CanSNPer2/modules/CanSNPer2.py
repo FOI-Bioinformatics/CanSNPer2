@@ -30,6 +30,11 @@ import signal
 # shared between processes (issue #49).
 _MP_CTX = multiprocessing.get_context("fork")
 
+'''column header of the per sample SNP tables, both <sample>_snps.txt and
+	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
+	near an alignment edge (issue #48)'''
+SNP_FILE_COLUMNS = ["Name","Reference","Pos","Ancestral base","Derived base","Target base","Edge flag"]
+
 class Error(Exception):
 	"""docstring for Error"""
 	def __init__(self, value):
@@ -169,7 +174,26 @@ class CanSNPer2(object):
 		processes = []  #process container
 		logfiles = []   #open log file container, parallel to processes
 		error = 0   #Variable for errors
+		def alignment_names(idx):
+			'''the mauve commands are [program, --output, xmfa, ref_file, query_file] and the
+				staged input names carry their "ref_"/"query_" prefixes: a warning that only says
+				"exitcode: 11" five times over never told which genome failed against which
+				reference (issue #12)'''
+			try:
+				def staged_name(arg,kind):
+					'''staged inputs are named "ref_"/"query_" + file, and a pre-cleaned copy
+						(issues #26, #28) adds a "cleaned_<kind>_" layer in between'''
+					base = os.path.basename(arg).rsplit(".",1)[0]
+					for prefix in ("{0}_".format(kind), "cleaned_", "{0}_".format(kind)):
+						if base.startswith(prefix):
+							base = base[len(prefix):]
+					return base
+				return staged_name(commands[idx][3],"ref"), staged_name(commands[idx][4],"query")
+			except IndexError:
+				return "unknown genome", "unknown reference"
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
+		names = []      #query/reference name of each running alignment, parallel to processes
+		logpaths = []   #log path of each running alignment, parallel to processes
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
 			logger.debug(command)			## In verbose mode print the actual mauve command
@@ -179,6 +203,8 @@ class CanSNPer2(object):
 			p = Popen(command,  stdout=log, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
 			logfiles.append(log)
 			processes.append(p)
+			names.append(alignment_names(i))
+			logpaths.append(logs[i])
 		## SIGTERM (timeout, cluster schedulers, kill) ends the process at once and would leave every
 		## progressiveMauve child running unattended, so route it through the cleanup below (issue #151)
 		def stop_on_sigterm(signum,frame):
@@ -198,22 +224,28 @@ class CanSNPer2(object):
 						finished = True
 						## When a process is finished close its log file
 						logfiles[idx].close()
+						## the containers are popped as processes finish, so the running position
+						## in these containers is the index for the names and logs, not the one
+						## in the original commands list (issue #12)
+						ref_name, query_name = names[idx]
 						### IF the exitcode is not 0 print a warning and ask user to read potential error messages
 						if exitcode == 11:
-							logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
-							logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes".format(exitcode=exitcode))
+							logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode} for genome {query} against reference {ref}".format(exitcode=exitcode,query=query_name,ref=ref_name))
+							logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes ({query} vs {ref})".format(query=query_name,ref=ref_name))
 							retvalue=11
 						elif exitcode == -6:
-							logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!!")
+							logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!! ({query} vs {ref})".format(query=query_name,ref=ref_name))
 							retvalue=6
 						elif exitcode != 0:
 							if not self.keep_going:
-								logger.error("progressiveMauve failed with exitcode {exitcode} for {log}".format(exitcode=exitcode,log=logs[idx]))
+								logger.error("progressiveMauve failed with exitcode {exitcode} for {log}".format(exitcode=exitcode,log=logpaths[idx]))
 							error += 1
-							logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logs[idx],exitcode=exitcode))
+							logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode} for genome {query} against reference {ref}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logpaths[idx],exitcode=exitcode,query=query_name,ref=ref_name))
 						## Remove process from container
 						processes.pop(idx)
 						logfiles.pop(idx)
+						names.pop(idx)
+						logpaths.pop(idx)
 				if not finished: ## the poll loop would otherwise run flat out while mauve works (issue #152)
 					sleep(0.5)
 		except KeyboardInterrupt:
@@ -264,17 +296,49 @@ class CanSNPer2(object):
 				shutil.copyfile(source,staged)
 		return staged
 
+	def clean_input_fasta(self,path,kind):
+		'''Replace every sequence character that is not A/C/G/T (or their lowercase) with N before
+			anything is aligned: gaps ('-', '.', '*') made progressiveMauve fail with exitcode 6/11
+			(the gap retry used to replace dashes only after a failure, and could not see dashes it
+			could not "see", issue #28), and the ambiguous IUPAC codes (R,Y,M,K,S,W,B,D,H,V) can never
+			match the target base of a SNP, so replacing them with N is the honest call (issue #26).
+			Every replacement keeps the exact position of the base, so database SNP positions still
+			match, and an already clean file is returned unchanged.
+		'''
+		keep = set("ACGTacgtn")
+		dirty = False
+		lines = []
+		with open(path) as seq_in:
+			for line in seq_in:
+				if line.startswith(">"):
+					lines.append(line)
+					continue
+				body = line.rstrip("\n")
+				cleaned = "".join(ch if ch in keep or ch in "Nn" else "N" for ch in body)
+				'''whitespace-only lines are kept as they are; a line ending in a bare \r or a
+					stray space inside the sequence is not clean sequence either'''
+				if cleaned != body:
+					dirty = True
+				lines.append(cleaned + "\n")
+		if not dirty:
+			return path
+		cleaned_path = os.path.join(self.tmpdir, "cleaned_{kind}_{name}".format(kind=kind,name=os.path.basename(path)))
+		with open(cleaned_path,"w") as seq_out:
+			seq_out.write("".join(lines))
+		logger.info("Replaced characters that are not ACGT with N in {name} before alignment (gaps and ambiguous nucleotides, issues #26, #28)".format(name=os.path.basename(path)))
+		return cleaned_path
+
 	def create_mauve_command(self,query,references=[]):
 		'''Mauve commands'''
 		commands =[]	# store execute command
 		logs = []	   # store log filepath
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
-		query_file = self.stage_for_mauve(query,"query")
+		query_file = self.stage_for_mauve(self.clean_input_fasta(query,"query"),"query")
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			xmfa_output = "{tmpdir}/{ref}_{target}.xmfa".format(tmpdir=self.tmpdir.rstrip("/"),ref=ref_name,target=self.query_name)
-			ref_file = self.stage_for_mauve("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref")
+			ref_file = self.stage_for_mauve(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
 			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #3)'''
@@ -645,7 +709,7 @@ class CanSNPer2(object):
 						self.csnpdict = {}
 						'''Print SNPs to tab separated file'''
 						with open(outputfile,"w") as snplist_out:
-							print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=snplist_out)
+							print("\t".join(SNP_FILE_COLUMNS),file=snplist_out)
 							for snp in SNP_info:
 								if snp[0] in called_snps:
 									self.csnpdict[snp[0]] = snp
@@ -656,8 +720,8 @@ class CanSNPer2(object):
 					SNP = "NA" ## Default message if SNP cannot be confirmed
 					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
-						tree_result = (False,"No SNP call was produced.",[])
-					final_snp,message,called = tree_result
+						tree_result = (False,"No SNP call was produced.",[],[])
+					final_snp,message,called,no_data_snps = tree_result
 					self.result_paths[self.query_name] = ";".join([snp[1] for snp in called]) if called else "NA"
 					if final_snp:
 						SNP = final_snp[1]
@@ -666,7 +730,7 @@ class CanSNPer2(object):
 						if self.export:
 							with open(outputfile2, "w") as called_out:
 								if called:
-									print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
+									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 									for snp in called:
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
@@ -674,9 +738,28 @@ class CanSNPer2(object):
 						logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 					else:
 						if self.export:
-							with open(outputfile2, "a") as called_out:
+							'''an NA sample used to write a snps file with nothing but the final
+								line: the SNPs that WERE called on the way to the failing point are
+								real information, and with them in this file the two result files
+								together list every evaluated position of the tree (issue #35)'''
+							with open(outputfile2, "w") as called_out:
+								called_ids = set(called_snps)
+								called_rows = [row for row in SNP_info if row[0] in called_ids]
+								if called_rows:
+									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
+									for row in called_rows:
+										print("\t".join(row),file=called_out)
+								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
-						logger.info(message)
+							logger.info(message)
+					'''SNP positions of the tree that no alignment carried a base for had no data at all,
+						and were missing from both result files, so the only place they showed up was the
+						log; they are listed in the not called file with an N/A target base (issue #27)'''
+					if self.export and no_data_snps:
+						logger.info("Listing {n} SNP positions without any alignment data in {file}".format(n=len(no_data_snps),file=outputfile))
+						with open(outputfile,"a") as nodata_out:
+							for snp in no_data_snps:
+								print("\t".join(snp),file=nodata_out)
 					'''remember the outcome per sample: the exit code is decided from this
 						(issue #191)'''
 					if SNP != "NA":

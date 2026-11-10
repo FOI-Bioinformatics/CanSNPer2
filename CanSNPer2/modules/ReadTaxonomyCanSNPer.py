@@ -52,12 +52,6 @@ class ReadTaxonomyBase(object):
 		self.length = 0
 		self.ids = 0
 
-		## Add base node
-		self.root = self.add_node("root")
-		self.add_rank("no rank")
-		## Add basic link
-		self.add_link(child=1, parent=1,rank="no rank")
-
 	def zopen(self, path,*args, **kwargs):
 		'''Redefine open to handle zipped files automatically'''
 		if path.endswith(".gz"):
@@ -71,6 +65,16 @@ class ReadTaxonomyBase(object):
 
 	def parse_taxonomy(self,treefile=False):
 		'''Parse taxonomy information'''
+		'''the base node and its self-link used to be created in __init__, which also gave every
+			subclass an extra node named "root" above its own tree: ReadTaxonomyCanSNPer builds
+			its root from the source file and overrode parse_taxonomy, so the "root" node was
+			never even connected to the tree it sat above (issues #32, #34, and the
+			"#Node has no snp_annotation root" warning came from that orphan). The base node
+			creation belongs in parse_taxonomy, where the subclasses that build their own root
+			can skip it.'''
+		self.root = self.add_node("root")
+		self.add_rank("no rank")
+		self.add_link(child=1, parent=1,rank="no rank")
 		self.read_nodes(treefile=treefile)
 
 	def set_separator(self,sep):

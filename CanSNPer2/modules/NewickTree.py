@@ -12,9 +12,24 @@ if sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and not os
 import ete3
 '''ete3 only exposes the drawing classes (NodeStyle, TreeStyle, AttrFace, faces) through its treeview
 	subpackage, which fails to import when no Qt binding is installed, and ete3 swallows that error.
-	Warn here and raise a readable error when a tree is actually drawn (issue #122).
+	An ete3 from the etetoolkit conda channel without pyqt is exactly that case: ete3 imported fine but
+	ete3.NodeStyle() died with "module 'ete3' has no attribute 'NodeStyle'" in the middle of drawing
+	(issue #19). Import the names explicitly from where they live, so the failure is one ImportError at
+	import time, and raise a readable error when a tree is actually drawn (issue #122).
 '''
-ETENEWICK_OK = all(hasattr(ete3, name) for name in ("NodeStyle","TreeStyle","AttrFace","faces"))
+try:
+	'''the names live in different parts of the treeview subpackage: NodeStyle and TreeStyle in main,
+		the face classes in faces'''
+	from ete3.treeview.main import NodeStyle, TreeStyle
+	from ete3.treeview.faces import AttrFace
+	from ete3.treeview import faces
+	ETENEWICK_OK = True
+	ETE_TREEVIEW_ERROR = ""
+except ImportError as e:
+	NodeStyle = TreeStyle = AttrFace = faces = None
+	ETENEWICK_OK = False
+	'''the message ete3's own import produced, kept so the error at draw time names what is missing'''
+	ETE_TREEVIEW_ERROR = str(e)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -67,10 +82,15 @@ class NewickNode(object):
 			else:
 				return "root"
 		elif self.__class__.print_opt == "newick":
+			'''children are rendered in name order: the children container is a set, and its
+				iteration order changes between processes with the python hash seed, which made
+				the newick export (and with it the drawn trees and the release gate's check on
+				them) different from one run to the next'''
+			children = sorted(self.children, key=lambda child: child.name)
 			if len(self.children) > 0 and self.parent:
-				return "({children}){name}".format(name=self.name,children=",".join(str(child) for child in self.children))
+				return "({children}){name}".format(name=self.name,children=",".join(str(child) for child in children))
 			elif not self.parent:  #Only the root node has this property
-				return "(({children}){parent})ROOT;".format(children=",".join(str(child) for child in self.children),parent=self.name)
+				return "(({children}){parent})ROOT;".format(children=",".join(str(child) for child in children),parent=self.name)
 			else:
 				return "{name}".format(name=self.name)
 		else:
@@ -215,7 +235,7 @@ class NewickTree(object):
 		'''Layout function for ETE3 trees.'''
 		# Adds the name face to the image at the top side of the branch
 		if not node.is_root():
-			ete3.faces.add_face_to_node(ete3.AttrFace("name"), node, column=0, position="branch-top")
+			faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
 
 	def _confirm_path(self,node,called_snps,snplist):
 		'''Confirm that the ACTUAL ancestor chain of the node, from the root of the tree down to
@@ -249,16 +269,19 @@ class NewickTree(object):
 		'''
 		logger.debug("Draw tree from snplist")
 		if not ETENEWICK_OK:
-			raise ImportError("ete3 is missing its drawing classes (NodeStyle, TreeStyle, AttrFace), install PyQt5 to enable tree output: pip install PyQt5")
+			raise ImportError("ete3 has no drawing classes (NodeStyle, TreeStyle, AttrFace), no tree can be drawn: {why}. Install a Qt binding for ete3: pip install PyQt5, or in conda conda install pyqt - an ete3 from the etetoolkit channel needs pyqt on its own (issues #19, #122)".format(why=ETE_TREEVIEW_ERROR))
 		try:
 			tree = ete3.Tree(self.newickTree, format=1)
 		except Exception as e:
 			logger.debug(self.newickTree)
 			raise ValueError("The newick tree in the database could not be parsed by ete3, cannot draw the tree: {err}".format(err=e))
 		farthest_leaf, tree_depth = tree.get_farthest_leaf()
+		'''nodes of the tree that no alignment carried any base for: they have to be reported,
+			not left out of the pdf and out of both result files (issue #27)'''
+		no_data_nodes = set()
 		for n in tree.traverse():
 			# The ancestral node is set to have a red colour
-			nstyle = ete3.NodeStyle()
+			nstyle = NodeStyle()
 			# If the SNP is missing due to a gap, make it grey
 			nstyle["fgcolor"] = self.snp_colors["non_aligned"]
 			nstyle["size"] = 10
@@ -272,33 +295,44 @@ class NewickTree(object):
 				try:
 					snpvalue = snplist[n.name]
 				except KeyError:
-					'''SNP not in list make grey'''
-					continue
-				if snpvalue == 2:
-					nstyle["fgcolor"] = self.snp_colors["ancestral"]
-					nstyle["size"] = 10
-					nstyle["vt_line_color"] = "#000000"
-					nstyle["hz_line_color"] = "#000000"
-					nstyle["vt_line_type"] = 0
-					nstyle["hz_line_type"] = 0
-					nstyle["vt_line_width"] = 2
-					nstyle["hz_line_width"] = 2
-				elif snpvalue == 1:
-					## If the SNP was derived make it green
-					nstyle["fgcolor"] = self.snp_colors["derived"]
-					nstyle["size"] = 15
-					nstyle["vt_line_color"] = "#000000"
-					nstyle["hz_line_color"] = "#000000"
-					nstyle["vt_line_type"] = 0
-					nstyle["hz_line_type"] = 0
-				elif snpvalue == 3:
-					## If the SNP was neither of ancestral or derived make it blue
-					nstyle["fgcolor"] = self.snp_colors["other_base"]
-					nstyle["size"] = 15
-					nstyle["vt_line_color"] = "#000000"
-					nstyle["hz_line_color"] = "#000000"
-					nstyle["vt_line_type"] = 0
-					nstyle["hz_line_type"] = 0
+					if n.name == "ROOT" or (n.name.startswith("-") and n.name.endswith("-")):
+						'''ROOT and the "-name-" labels that get_nodes gives to nodes without any
+							snp_annotation (the root of a database like that) are not SNPs: they keep
+							no style, the root is only meant to be a line and a label node must not be
+							drawn as a grey SNP dot (issue #52, with #32 and #34)'''
+						continue
+					'''SNP not in list: no alignment covered this position at all, keep the grey
+						"non aligned" style that was set above. The node used to be skipped with a
+						continue, which also skipped set_style below and left the node at the ete3
+						default size, so it was invisible in the pdf (issue #27)'''
+					no_data_nodes.add(n.name)
+				else:
+					if snpvalue == 2:
+						nstyle["fgcolor"] = self.snp_colors["ancestral"]
+						nstyle["size"] = 10
+						nstyle["vt_line_color"] = "#000000"
+						nstyle["hz_line_color"] = "#000000"
+						nstyle["vt_line_type"] = 0
+						nstyle["hz_line_type"] = 0
+						nstyle["vt_line_width"] = 2
+						nstyle["hz_line_width"] = 2
+					elif snpvalue == 1:
+						## If the SNP was derived make it green
+						nstyle["fgcolor"] = self.snp_colors["derived"]
+						nstyle["size"] = 15
+						nstyle["vt_line_color"] = "#000000"
+						nstyle["hz_line_color"] = "#000000"
+						nstyle["vt_line_type"] = 0
+						nstyle["hz_line_type"] = 0
+					elif snpvalue == 3:
+						## If the SNP was neither of ancestral or derived make it blue
+						nstyle["fgcolor"] = self.snp_colors["other_base"]
+						nstyle["size"] = 15
+						nstyle["vt_line_color"] = "#000000"
+						nstyle["hz_line_color"] = "#000000"
+						nstyle["vt_line_type"] = 0
+						nstyle["hz_line_type"] = 0
+
 			elif called_snps:
 				if set([n.name]) & set(called_snps):
 					### Only care about called SNPs and color all green
@@ -311,7 +345,15 @@ class NewickTree(object):
 
 			if n.name != "ROOT": ## Root should be just a line not a false "ancenstral node"
 				n.set_style(nstyle)
-		ts = ete3.TreeStyle()
+		'''the nodes without data are drawn grey now, and their database annotation is returned as
+			well, so the per sample files can list them instead of hiding that they were never
+			compared at all (issue #27)'''
+		no_data_info = []
+		if no_data_nodes:
+			logger.warning("{n} SNP positions in the tree had no alignment data at all, no reference block covered them or --mask dropped them: {ids}".format(
+					n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])))
+			no_data_info = self.get_no_data_info(no_data_nodes)
+		ts = TreeStyle()
 		ts.show_leaf_name = False  						# Do not print(leaf names, they are added in layout)
 		ts.show_scale = False  							# Do not show the scale
 		ts.layout_fn = self.CanSNPer_tree_layout  		# Use the custom layout
@@ -343,7 +385,7 @@ class NewickTree(object):
 				if len(dlist) < self.min_required_hits: ## the number of SNPs found is too small to be valid,
 					msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(min=self.min_required_hits)
 					logger.debug(msg)
-					return False,msg,[]
+					return False,msg,[],no_data_info
 				'''The final SNP is the deepest called SNP whose ACTUAL ancestor chain in the tree, from the
 					root down to the node, is entirely made up of called SNPs. The old walk accepted SNPs from
 					branches it should have left: _check_start picked a start node by depth adjacency in the
@@ -387,15 +429,45 @@ class NewickTree(object):
 				else:
 					msg = "None of the called SNPs was found in the tree, cannot call SNPs."
 					logger.warning(msg)
-					return False,msg,[]
+					return False,msg,[],no_data_info
 				logger.debug(dlist)
 			except KeyError as e:
 				logger.error("KeyError, {e}".format(e=e))
 				msg = "called_snps function failed, KeyError {e}".format(e=e)
 				logger.debug(msg)
-				return False,msg,[]
+				return False,msg,[],no_data_info
 		else:
 			msg = "No SNPs were called."
 			logger.debug(msg)
-			return False,msg,[]
-		return called,msg,dlist
+			return False,msg,[],no_data_info
+		return called,msg,dlist,no_data_info
+
+	def get_no_data_info(self,snp_ids):
+		'''Look up the database annotation of the SNP nodes that no alignment carried a base for, in the
+			same columns as the SNP_info rows (Name, Reference, Pos, Ancestral base, Derived base, Target
+			base), so the per sample output can list the positions that were never compared instead of
+			leaving them out of both result files (issue #27). The target base is "N/A": there is no base
+			there at all, which is different from a base that was read and did not confirm the SNP.'''
+		names = sorted(set(snp_ids))
+		if not names:
+			return []
+		rows = []
+		'''sqlite limits how many variables one statement may bind, so the lookup runs in chunks'''
+		for i in range(0, len(names), 400):
+			chunk = names[i:i+400]
+			QUERY = '''SELECT snp_annotation.snp_id, COALESCE(snp_references.genome, snp_annotation.reference),
+							snp_annotation.position, snp_annotation.ancestral_base, snp_annotation.derived_base
+						FROM snp_annotation
+						LEFT JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)
+						WHERE snp_annotation.snp_id IN ({marks})'''.format(marks=",".join(["?"]*len(chunk)))
+			for snp_id,genome,position,ancestral,derived in self.database.query(QUERY,insert_val=tuple(chunk),getres=True).fetchall():
+				'''the empty last column keeps the rows in the shape of SNP_FILE_COLUMNS, whose
+					edge flag cannot be computed for a position that no alignment carried'''
+				rows.append([str(snp_id),str(genome),str(position),str(ancestral),str(derived),"N/A",""])
+		found = set([row[0] for row in rows])
+		for name in names:
+			if name not in found:
+				'''a tree node without any annotation row: still a node the alignments never covered,
+					list it rather than hide it again'''
+				rows.append([name,"-","-","-","-","N/A",""])
+		return sorted(rows, key=lambda row: row[0])

@@ -206,7 +206,7 @@ Run options:
   --keep_temp           keep temporary files
 
 Logging and debug options:
-  --tmpdir              Specify reference directory
+  --tmpdir              Specify tmp directory default (/tmp/CanSNPer2)
   --logdir              Specify log directory
   --verbose             Verbose output
   --debug               Debug output

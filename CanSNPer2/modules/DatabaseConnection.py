@@ -206,6 +206,9 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 			'''Define new headers as they must match the database'''
 			headers = ["node_id", "snp_id", "position", "ancestral_base","derived_base","reference","date","genome_i"]
 			for row in f:
+				if row.strip() == "" or row.strip().startswith("#"):
+					'''# lines are comments in the annotation file (issue #22)'''
+					continue
 				data = row.strip().split("\t")
 				if len(data) < len(headers): ## short row would die with a bare IndexError in add_node, same guard as ModifyDatabase.load_annotation_file (issue #88, #215)
 					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))

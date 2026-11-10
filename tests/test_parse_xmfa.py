@@ -55,7 +55,7 @@ def run(tmp_path, rows, blocks):
 	make_xmfa(xmfa, blocks)
 	parser = ParseXMFA()
 	snps = parser.run(xmfa=str(xmfa), reference="REF", database=str(db))
-	return snps, parser.get_called_snps()
+	return snps, parser.get_called_snps(), parser
 
 
 def test_custom_snp_at_block_start_is_called(tmp_path):
@@ -63,7 +63,7 @@ def test_custom_snp_at_block_start_is_called(tmp_path):
 	# skipped by the strict range check, dropping every SNP of the block (#39)
 	rows = [("C.1", 10, "A", "T"), ("B.1", 25, "C", "T"), ("C.2", 40, "G", "T")]
 	ref, target = pair(31, {0: ("A", "T"), 15: ("C", "T"), 30: ("G", "T")})
-	snps, called = run(tmp_path, rows, [(10, 40, ref, target)])
+	snps, called, parser = run(tmp_path, rows, [(10, 40, ref, target)])
 	assert called == ["C.1", "B.1", "C.2"]
 	assert snps == {"C.1": 1, "B.1": 1, "C.2": 1}
 
@@ -73,7 +73,7 @@ def test_snp_beyond_current_block_is_found_in_a_later_block(tmp_path):
 	rows = [("B.1", 15, "C", "T"), ("C.gap", 25, "A", "T"), ("C.1", 45, "G", "T")]
 	ref1, target1 = pair(11, {5: ("C", "T")})
 	ref2, target2 = pair(21, {15: ("G", "T")})
-	snps, called = run(tmp_path, rows, [(10, 20, ref1, target1), (30, 50, ref2, target2)])
+	snps, called, parser = run(tmp_path, rows, [(10, 20, ref1, target1), (30, 50, ref2, target2)])
 	assert called == ["B.1", "C.1"]
 	assert "C.gap" not in snps ## unaligned region, the SNP was never comparable
 
@@ -82,7 +82,7 @@ def test_block_without_snps_does_not_end_the_scan(tmp_path):
 	rows = [("C.1", 45, "G", "T")]
 	ref1, target1 = pair(11, {})
 	ref2, target2 = pair(21, {15: ("G", "T")})
-	snps, called = run(tmp_path, rows, [(10, 20, ref1, target1), (30, 50, ref2, target2)])
+	snps, called, parser = run(tmp_path, rows, [(10, 20, ref1, target1), (30, 50, ref2, target2)])
 	assert called == ["C.1"]
 
 def test_short_target_only_skips_the_uncovered_tail(tmp_path):
@@ -90,6 +90,19 @@ def test_short_target_only_skips_the_uncovered_tail(tmp_path):
 	# covered part are still evaluated, SNPs in the uncovered tail are not
 	rows = [("B.1", 15, "C", "T"), ("C.1", 38, "G", "T")]
 	ref, target = pair(31, {5: ("C", "T"), 28: ("G", "T")})
-	snps, called = run(tmp_path, rows, [(10, 40, ref, target[:20])])
+	snps, called, parser = run(tmp_path, rows, [(10, 40, ref, target[:20])])
 	assert called == ["B.1"]
 	assert "C.1" not in snps
+
+
+def test_snps_at_the_alignment_edges_are_flagged_but_still_called(tmp_path):
+	# issue #48: a SNP sitting within EDGE_MARGIN bases of either end of an alignment block
+	# is the most likely misalignment, it must be evaluated AND flagged "edge" in the info
+	# rows so it can be reviewed, not silently trusted (mask) and not silently dropped
+	rows = [("B.1", 10, "C", "T"), ("M.1", 100, "C", "T"), ("C.1", 180, "G", "T")]
+	ref, target = pair(171, {0: ("C", "T"), 90: ("C", "T"), 170: ("G", "T")})
+	snps, called, parser = run(tmp_path, rows, [(10, 180, ref, target)])
+	assert called == ["B.1", "M.1", "C.1"], "the edge SNPs are still called"
+	flags = {row[0]: row[6] for row in parser.get_snp_info()}
+	assert flags == {"B.1": "edge", "M.1": "", "C.1": "edge"}, flags
+	assert parser.edge_snps == {"B.1", "C.1"}
