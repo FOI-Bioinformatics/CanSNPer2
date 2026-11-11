@@ -467,30 +467,66 @@ class NewickTree(object):
 		walk(self.root, root_id)
 		return entries
 
-	def _confirm_path(self,entry,entries,called_snps,snplist):
-		'''Confirm that the ACTUAL ancestor chain of the node, from the root of the tree down to
-			the node itself, is entirely made up of called SNPs (issue #25).
-			Returns (confirmed, number_of_snps_on_the_chain).
-			A SNP that was not called, or that was called ancestral, breaks the chain: the walk down
-			the tree should have left the branch at that point, so no node below it can be final-called.
-			The quota of a complete chain is always 1, only min_required_hits gates the call now;
-			competing complete paths are handled by the caller (policy of issue #47).'''
-		logger.debug("Confirm path of {node}".format(node=entry["name"]))
-		count = 0
+	def _parent_snp(self,entry,entries):
+		'''name of the nearest SNP above the entry, skipping "-name-" label nodes; None at the top'''
+		entry = entries[entry["parent"]]
 		while entry["name"] != "ROOT":
-			if entry["name"] in called_snps and snplist.get(entry["name"],0) != 2:
-				count +=1
-			else:
-				'''not called (or missing from the alignments) here, or confirmed ancestral:
-					the chain to this node is incomplete, the branch was left at this SNP'''
-				logger.debug("Chain broken at {node}, {count} called SNPs below it".format(node=entry["name"],count=count))
-				return False,count
+			if not (entry["name"].startswith("-") and entry["name"].endswith("-")):
+				return entry["name"]
 			entry = entries[entry["parent"]]
-		if count >= self.min_required_hits:
-			logger.info("Confirm complete path of {count} SNPs (min required hits: {minhit})".format(count=count,minhit=self.min_required_hits))
-			return True,count
-		logger.debug("Complete chain too short: {count} < {minhit}".format(count=count,minhit=self.min_required_hits))
-		return False,count
+		return None
+
+	def _confirm_path(self,entry,entries,called_snps,snplist):
+		'''Confirm the ACTUAL ancestor chain of the node, from the root of the tree down to the
+			node itself (issue #25). Every SNP on the chain is one of:
+			  called    derived in the query, counts as a hit;
+			  no data   no alignment covered the position, or the query has a gap or N there
+			            (state 0): there is no evidence either way, so it is a gap in the path;
+			  against   ancestral (2) or a third base (3): the walk down the tree should have left
+			            the branch here, so the chain is broken and the node cannot be called.
+			"-name-" label nodes (a database root without snp_annotation) are not SNPs and are
+			skipped. The node is confirmed when the chain is not broken, at least min_required_hits
+			SNPs are called, the called fraction of the SNPs on the chain is at least strictness,
+			and the SNP directly above the node is called: without that last rule one stray derived
+			SNP on a neighbouring branch, whose parent had no data, outranked the real lineage.
+			A single unaligned SNP near the root used to break every chain below it, so the sample
+			was NA however many SNPs on its path were derived, and --strictness had no effect.
+			Returns (confirmed, called, snps_on_chain, [SNPs without data]).'''
+		logger.debug("Confirm path of {node}".format(node=entry["name"]))
+		start = entry
+		count = 0
+		on_chain = 0
+		missing = []
+		called = set(called_snps)
+		while entry["name"] != "ROOT":
+			name = entry["name"]
+			entry = entries[entry["parent"]]
+			if name.startswith("-") and name.endswith("-"):
+				continue
+			on_chain += 1
+			state = snplist.get(name,0)
+			if name in called and state != 2:
+				count +=1
+			elif state in (2,3):
+				logger.debug("Chain broken at {node} ({state}), {count} called SNPs below it".format(
+						node=name,state="ancestral" if state == 2 else "other base",count=count))
+				return False,count,on_chain,missing
+			else:
+				missing.append(name)
+		quota = float(count)/on_chain if on_chain else 0
+		'''the SNP right above the node is the second SNP of the chain, counted from the node'''
+		parent_missing = on_chain > 1 and self._parent_snp(start,entries) in missing
+		if parent_missing:
+			logger.debug("Path not confirmed: the SNP directly above {node} has no data".format(node=start["name"]))
+			return False,count,on_chain,missing
+		if count >= self.min_required_hits and quota >= self.strictness:
+			logger.info("Confirm path: {count}/{n} SNPs called (strictness {strictness}, min required hits {minhit}){gaps}".format(
+					count=count,n=on_chain,strictness=self.strictness,minhit=self.min_required_hits,
+					gaps=", without data: "+", ".join(missing) if missing else ""))
+			return True,count,on_chain,missing
+		logger.debug("Path not confirmed: {count}/{n} SNPs called (strictness {strictness}, min required hits {minhit})".format(
+				count=count,n=on_chain,strictness=self.strictness,minhit=self.min_required_hits))
+		return False,count,on_chain,missing
 
 	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False):
 		'''Colors the SNP tree with the states found in the query alignments and writes the
@@ -588,39 +624,43 @@ class NewickTree(object):
 					logger.debug(msg)
 					return False,msg,[],no_data_info
 				'''The final SNP is the deepest called SNP whose ACTUAL ancestor chain in the tree, from the
-					root down to the node, is entirely made up of called SNPs. The old walk accepted SNPs from
-					branches it should have left: _check_start picked a start node by depth adjacency in the
-					flat sorted list and _confirm_path counted any called ancestor, so a node on another
-					branch could be final-called (issue #25).
-					When complete paths compete at the same depth no path is auto-picked: the sample stays NA
+					root down to the node, is confirmed by _confirm_path: no ancestral or third base on it,
+					and enough of its SNPs called (min_required_hits, strictness). The old walk accepted SNPs
+					from branches it should have left: _check_start picked a start node by depth adjacency
+					in the flat sorted list and _confirm_path counted any called ancestor, so a node on
+					another branch could be final-called (issue #25).
+					When confirmed paths compete at the same depth no path is auto-picked: the sample stays NA
 					and the candidates are reported, leaving room for the calling policy of issue #47.'''
 				logger.debug("Calling SNP")
-				candidates = [] ## complete called paths, all at the greatest confirmed depth
+				candidates = [] ## confirmed paths, all at the greatest confirmed depth
 				deepest = None ## deepest called SNP found in the tree, kept for the "not confirmed" report
 				for dist,tsnp in dlist: ## loop the called SNPs from deepest
 					if tsnp not in node_index: ## the node name from the db is not in the tree, cannot call (issue #78)
 						logger.debug("Called SNP {snp} was not found in the tree, cannot confirm it".format(snp=tsnp))
 						continue
-					ok,count = self._confirm_path(entries[node_index[tsnp]],entries,called_snps,snplist)
+					ok,count,on_chain,missing = self._confirm_path(entries[node_index[tsnp]],entries,called_snps,snplist)
 					if not deepest:
 						deepest = [dist,tsnp,(False,count)]
 					if not ok:
 						continue
 					if not candidates:
-						candidates = [[dist,tsnp,count]]
+						candidates = [[dist,tsnp,count,on_chain,missing]]
 					elif dist == candidates[0][0]:
-						candidates.append([dist,tsnp,count])
-					else: ## a shallower complete path cannot beat the deepest confirmed one
+						candidates.append([dist,tsnp,count,on_chain,missing])
+					else: ## a shallower confirmed path cannot beat the deepest confirmed one
 						break
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=False)
 				if len(candidates) == 1:
-					dist,tsnp,count = candidates[0]
+					dist,tsnp,count,on_chain,missing = candidates[0]
 					called = [dist,tsnp,(True,count)]
-					msg = "Final SNP called: {snp}".format(snp=tsnp)
+					msg = "Final SNP called: {snp} ({count}/{n} SNPs on the path called)".format(snp=tsnp,count=count,n=on_chain)
+					if missing:
+						'''a call that relies on the strictness tolerance says which SNPs had no data'''
+						msg += ", {k} without alignment data: {ids}".format(k=len(missing),ids=", ".join(missing))
 					logger.info(msg)
 				elif len(candidates) > 1:
 					paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1],n=c[2]) for c in candidates])
-					msg = "Two or more complete SNP paths compete at the same depth: {paths}, no path is auto-picked, check {tree}".format(paths=paths,tree=self.tree_file)
+					msg = "Two or more confirmed SNP paths compete at the same depth: {paths}, no path is auto-picked, check {tree}".format(paths=paths,tree=self.tree_file)
 					logger.warning(msg)
 					called = deepest
 				elif deepest:
