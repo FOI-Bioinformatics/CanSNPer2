@@ -143,3 +143,36 @@ def test_viewer_is_self_contained(tmp_path):
 	assert "var DATA =" in html and "render()" in html
 	assert "ete3" not in html and "ete4" not in html
 	assert not re.search(r"src\s*=\s*[\"']https?://", html), "no external javascript may be referenced"
+
+
+def test_node_names_cannot_close_the_script_block(tmp_path):
+	# the payload is embedded in a <script> block, and json.dumps does not escape "</": a node
+	# name from the database such as 'B.1</script><script>...' ended the block and the rest ran
+	# as script when the tree was opened; the name must reach the viewer unchanged as data
+	db = str(tmp_path / "t.db")
+	make_db(db)
+	name = 'B.1</script><script>document.title="injected"</script><!--'
+	conn = sqlite3.connect(db)
+	conn.execute("UPDATE snp_annotation SET snp_id = ? WHERE node_id = 3", (name,))
+	conn.commit()
+	conn.close()
+	newick_tree = NewickTree(db, name="t", outdir=str(tmp_path))
+	newick_tree.draw_tree({name: 1}, [name], save_tree=True)
+	html = open(newick_tree.tree_file).read()
+	assert html.lower().count("</script") == 1, "only the viewer's own script block may be closed"
+	assert "<!--" not in html.split("var DATA =", 1)[1].split(";", 1)[0]
+	assert name in [n["name"] for n in payload(newick_tree)["nodes"]]
+
+
+def test_sample_name_is_escaped_in_the_title(tmp_path):
+	# the title is the tree file name, which comes from the query file name; markup in it must
+	# be shown as text, and a placeholder in it must not pull the payload into the title
+	db = str(tmp_path / "t.db")
+	make_db(db)
+	newick_tree = NewickTree(db, name='<img src=x onerror=alert(1)>__PAYLOAD__', outdir=str(tmp_path))
+	newick_tree.draw_tree({}, save_tree=True)
+	html = open(newick_tree.tree_file).read()
+	title = re.search(r"<title>(.*)</title>", html).group(1)
+	assert "<img" not in title and "&lt;img" in title
+	assert "__PAYLOAD__" in title and '"nodes"' not in title
+	assert html.count("var DATA =") == 1
