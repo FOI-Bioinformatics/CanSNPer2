@@ -34,7 +34,7 @@ _MP_CTX = multiprocessing.get_context("fork")
 '''column header of the per sample SNP tables, both <sample>_snps.txt and
 	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
 	near an alignment edge (issue #48)'''
-SNP_FILE_COLUMNS = ["Name","Reference","Pos","Ancestral base","Derived base","Target base","Edge flag"]
+SNP_FILE_COLUMNS = ["Name","Reference","Pos","QuerySeq","QueryPosition","Ancestral base","Derived base","Target base","Edge flag"]
 
 '''file that marks a private run directory created by CanSNPer2 below --tmpdir; cleanup()
 	only removes a directory it created itself, and the command line uses a marked

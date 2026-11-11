@@ -82,13 +82,19 @@ class ParseXMFA(object):
 		snppos -= int(head["start"])-1  	## python counts from 0 not 1
 		return snppos,rbase,tbase,snp_id
 
-	def find_snps(self,ref,target,head=0):
+	def find_snps(self,ref,target,head=0,query_head=None):
 		'''Walk through the paired sequences and save SNPs'''
-		snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information known about the next upcoming SNP
+		snppos,rbase,tbase,snp_id = self._snpinfo(head)    	## Retrieve all information about the next upcoming SNP
 		SNP = {snp_id:0} ## SNP not found
 		masked_ids = []
 		'''will count the relative position in the reference (without gaps -)'''
 		i = 0
+		'''same count for the query side, so a SNP can be traced back to a contig and a
+			position in the submitted assembly, not only to the reference coordinates (issue #23);
+			the walk goes backwards on "-" blocks, so the total is needed to convert the
+			right-to-left count into the left-to-left position the contig coordinates use'''
+		q = 0
+		q_total = len(target) - target.count("-")
 		''' ii is the actual position in the sequence'''
 		base_positions = range(len(ref))
 		'''the block length in reference bases, to measure the distance to the far edge (issue #175)'''
@@ -103,6 +109,14 @@ class ParseXMFA(object):
 		for ii in base_positions:
 			if ii >= len(target): ## target sequence shorter than the reference block, the rest is unaligned (issue #97)
 				break
+			'''q_here is the number of query bases before this column, counted in the walking
+				direction, which maps the column to a position in the query contig; a gap column
+				has no query base and no position (issue #23)'''
+			if target[ii] != "-":
+				q_here = q
+				q += 1
+			else:
+				q_here = None
 			if ref[ii] != "-":          	## if the reference contains a gap "-" do not count
 				i+=1
 			if i == snppos:                	## if current possition contains a snp
@@ -125,8 +139,18 @@ class ParseXMFA(object):
 					the output, so the user can review the positions that sit on the ends of the
 					assembly or of an alignment, where errors are most likely (issue #48)'''
 				orig_snp_pos = str(self.snplist[self.current_snp][0])
+				'''query contig and position behind the target base: the walk above counted the
+					query bases up to this column, and the block header gives the contig name and
+					the coordinate the block starts at; a target gap has no query position (issue #23)'''
+				query_name = query_head["name"] if query_head and query_head.get("name") else "-"
+				if q_here is None or not query_head:
+					query_pos = "N/A"
+				elif query_head["sign"] == "-":
+					query_pos = str(int(query_head["end"]) - (q_total - q_here - 1))
+				else:
+					query_pos = str(int(query_head["start"]) + q_here)
 				edge_flag = "edge" if (snppos <= EDGE_MARGIN or block_len - snppos < EDGE_MARGIN) else ""
-				snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp,edge_flag]
+				snpinfo = [snp_id,self.reference,orig_snp_pos,query_name,query_pos,rbase,tbase,_snp,edge_flag]
 				if edge_flag:
 					self.edge_snps.add(snp_id)
 				self.SNP_info.append(snpinfo)
@@ -146,13 +170,16 @@ class ParseXMFA(object):
 		return SNP
 
 	def parse_head(self,head):
-		'''This help function parses the head of an xmfa file and returns info'''
+		'''This help function parses the head of an xmfa sequence line and returns info.
+			The mauve layout is "> 1:start-end sign name", the name being the contig the
+			block comes from, needed to trace calls back to the assembly (issue #23).'''
 		cols = head.split(" ") 	## Split header information into columns
 		sign = cols[1]			## Save sign of read (orientation of sequence)
 
 		'''Parse out start and end position information of sequence'''
 		start,end = list(map(int,cols[0].split(":")[-1].split("-")))
-		return {"sign":sign,"start":start,"end":end}
+		name = " ".join(cols[2:]).strip() if len(cols) > 2 else ""
+		return {"sign":sign,"start":start,"end":end,"name":name}
 
 	def read_sequence(self,seqP,res=None):
 		'''Read information in sequence pair'''
@@ -184,8 +211,9 @@ class ParseXMFA(object):
 					must not be skipped for it (issue #39)'''
 				ref = "".join(refSeq)				 ## Make reference sequence one string
 				target = "".join(targetSeq)			 ## Make target sequence one string
-				'''For each snp within this region find it and merge with all others'''
-				res = dict(**res, **self.find_snps(ref,target,head=refHead))
+				'''For each snp within this region find it and merge with all others; the
+					target head gives the query contig name for the result columns (issue #23)'''
+				res = dict(**res, **self.find_snps(ref,target,head=refHead,query_head=targetHead))
 		return res
 
 	def read_xmfa(self,f=False):

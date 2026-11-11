@@ -32,11 +32,14 @@ def make_db(path, rows):
 
 
 def make_xmfa(path, blocks):
-	'''blocks: (start, end, ref_seq, target_seq) using the mauve xmfa layout'''
+	'''blocks: (start, end, ref_seq, target_seq) or (start, end, ref_seq, target_seq, sign)
+		using the mauve xmfa layout'''
 	with open(path, "w") as f:
 		f.write("#FormatVersion Mauve1\n")
-		for start, end, ref, target in blocks:
-			f.write("============\n> 1:{s}-{e} + ref\n{r}\n> 1:{s}-{e} + query\n{t}\n".format(s=start, e=end, r=ref, t=target))
+		for block in blocks:
+			start, end, ref, target = block[:4]
+			sign = block[4] if len(block) > 4 else "+"
+			f.write("============\n> 1:{s}-{e} {sign} ref\n{r}\n> 1:{s}-{e} {sign} query\n{t}\n".format(s=start, e=end, sign=sign, r=ref, t=target))
 
 
 def pair(length, overrides):
@@ -49,8 +52,8 @@ def pair(length, overrides):
 	return "".join(ref), "".join(target)
 
 
-def run(tmp_path, rows, blocks):
-	db, xmfa = tmp_path / "t.db", tmp_path / "REF_query.xmfa"
+def run(tmp_path, rows, blocks, name="t"):
+	db, xmfa = tmp_path / (name + ".db"), tmp_path / ("REF_" + name + ".xmfa")
 	make_db(db, rows)
 	make_xmfa(xmfa, blocks)
 	parser = ParseXMFA()
@@ -103,6 +106,27 @@ def test_snps_at_the_alignment_edges_are_flagged_but_still_called(tmp_path):
 	ref, target = pair(171, {0: ("C", "T"), 90: ("C", "T"), 170: ("G", "T")})
 	snps, called, parser = run(tmp_path, rows, [(10, 180, ref, target)])
 	assert called == ["B.1", "M.1", "C.1"], "the edge SNPs are still called"
-	flags = {row[0]: row[6] for row in parser.get_snp_info()}
+	flags = {row[0]: row[8] for row in parser.get_snp_info()}
 	assert flags == {"B.1": "edge", "M.1": "", "C.1": "edge"}, flags
 	assert parser.edge_snps == {"B.1", "C.1"}
+
+
+def test_query_contig_and_position_are_reported(tmp_path):
+	# issue #23: every called position must say where it sits in the submitted assembly,
+	# not only in the reference; the query count skips target gaps, and a "-" block maps
+	# back through the reversed block
+	rows = [("B.1", 15, "C", "T")]
+	ref = list("C" * 11); target = list("C" * 11)
+	ref[5] = "C"; target[5] = "T"
+	target[3] = "-"                                  ## gap before the SNP: query is one base earlier
+	ref_gap, target_gap = "".join(ref), "".join(target)
+	_, _, parser = run(tmp_path, rows, [(10, 20, ref_gap, target_gap)], name="gap")
+	info = {row[0]: row for row in parser.get_snp_info()}
+	assert info["B.1"][3] == "query", "the contig name from the xmfa block header"
+	assert info["B.1"][4] == "14", "start 10 + 5 columns - 1 skipped gap"
+
+	rows = [("B.1", 15, "C", "T")]
+	ref2, target2 = pair(11, {5: ("C", "T")})
+	_, _, parser = run(tmp_path, rows, [(10, 20, ref2, target2, "-")], name="rev")
+	info = {row[0]: row for row in parser.get_snp_info()}
+	assert info["B.1"][4] == "15", "end 20 - 5 bases from the far side of the reversed block"
