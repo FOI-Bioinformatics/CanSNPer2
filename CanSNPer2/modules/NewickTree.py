@@ -3,8 +3,10 @@ Module to read and write newick trees
 
 '''
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+import html
 import json
 import os
+import re
 import logging
 '''the tree drawing used ete3 (issue #19: it silently lost its drawing classes when no Qt
 	binding was installed, issues #27/#52: its node loop hid positions without alignment data)
@@ -646,9 +648,15 @@ class NewickTree(object):
 		'''Write the self-contained viewer: the colored tree and its data are embedded in a single
 			html file, no server, no javascript downloads, opens in any browser on any OS'''
 		payload = json.dumps({"colors": self.snp_colors, "nodes": entries}, separators=(",", ":"))
-		page = (TREE_HTML_TEMPLATE
-				.replace("__TITLE__", str(os.path.basename(self.tree_file)))
-				.replace("__PAYLOAD__", payload))
+		'''The payload sits inside a <script> block, and json.dumps leaves "<" as it is, so a node
+			name from the database such as "B.1</script><script>..." closed the block and the rest
+			ran as script when the tree was opened. "<" only occurs inside json strings, where
+			\\u003c is the same character, so the data the viewer reads is unchanged.
+			The title comes from the query file name and is escaped as html text. Both
+			placeholders are filled in one pass, so a placeholder inside a name is not expanded.'''
+		values = {"TITLE": html.escape(os.path.basename(self.tree_file)),
+				  "PAYLOAD": payload.replace("<", "\\u003c")}
+		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], TREE_HTML_TEMPLATE)
 		with open(self.tree_file, "w") as out:
 			out.write(page)
 
