@@ -145,7 +145,6 @@ def test_viewer_is_self_contained(tmp_path):
 	assert not re.search(r"src\s*=\s*[\"']https?://", html), "no external javascript may be referenced"
 
 
-<<<<<<< HEAD
 def test_node_names_cannot_close_the_script_block(tmp_path):
 	# the payload is embedded in a <script> block, and json.dumps does not escape "</": a node
 	# name from the database such as 'B.1</script><script>...' ended the block and the rest ran
@@ -177,7 +176,8 @@ def test_sample_name_is_escaped_in_the_title(tmp_path):
 	assert "<img" not in title and "&lt;img" in title
 	assert "__PAYLOAD__" in title and '"nodes"' not in title
 	assert html.count("var DATA =") == 1
-=======
+
+
 def call(tmp_path, snplist, called, strictness=0.7, min_required_hits=1):
 	'''final call for the test tree: (snp, confirmed, called count, message)'''
 	db = str(tmp_path / "t.db")
@@ -265,4 +265,3 @@ def test_snp_directly_above_the_final_snp_must_be_called(tmp_path):
 	# final-called even though 1/2 passes a strictness of 0.5
 	snp, confirmed, count, msg = call(tmp_path, {"B.1": 1}, ["B.1"], strictness=0.5)
 	assert confirmed is False
->>>>>>> 1512fa9 (Tolerate SNPs without alignment data on the path to the final SNP, as set by --strictness)

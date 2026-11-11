@@ -50,7 +50,6 @@ import os,sys
 import argparse
 
 
-<<<<<<< HEAD
 def resolve_tmpdir(path):
 	'''The working folder is a CanSNPer2 subfolder of --tmpdir. It used to be added only
 		when --tmpdir was exactly /tmp, so --skip_mauve looked in <tmpdir> for a custom tmpdir
@@ -61,7 +60,8 @@ def resolve_tmpdir(path):
 	if os.path.basename(tmpdir) == "CanSNPer2" or os.path.isfile(os.path.join(tmpdir, RUN_MARKER)):
 		return tmpdir
 	return tmpdir + "/CanSNPer2"
-=======
+
+
 def fraction(value):
 	'''argparse type for --strictness: a number from 0 to 1'''
 	try:
@@ -71,7 +71,6 @@ def fraction(value):
 	if not 0 <= number <= 1:
 		raise argparse.ArgumentTypeError("{value} is not between 0 and 1".format(value=value))
 	return number
->>>>>>> 1512fa9 (Tolerate SNPs without alignment data on the path to the final SNP, as set by --strictness)
 
 
 def main():
