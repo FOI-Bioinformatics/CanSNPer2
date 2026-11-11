@@ -5,8 +5,9 @@ name: CI
 # progressiveMauve. The Bacillus anthracis scheme from CanSNPer2-data is used
 # because it is the smallest (13 SNPs, one reference genome).
 #
-# Only Python 3.12 is tested for now. CanSNPer2 does not install on 3.13 or
-# later, because ete3 3.1.3 imports the cgi module that Python 3.13 removed.
+# CanSNPer2 has no third party runtime dependencies since 2.2.0 (the ete3
+# dependency capped python at 3.12), so the whole supported range 3.11-3.14
+# is tested.
 
 on:
   push:
@@ -19,10 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
-    env:
-      # ete3 draws trees through Qt, and the runner has no display
-      QT_QPA_PLATFORM: offscreen
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -35,10 +33,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install progressiveMauve and the Qt runtime libraries
+      - name: Install progressiveMauve
         run: |
           sudo apt-get update
-          sudo apt-get install -y progressivemauve libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+          sudo apt-get install -y progressivemauve
 
       - name: Install CanSNPer2
         run: |
