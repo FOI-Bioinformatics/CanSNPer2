@@ -1,0 +1,83 @@
+name: CI
+
+# Installs CanSNPer2 and runs each command once: build a database, export it,
+# download its reference genome and type that genome against itself with
+# progressiveMauve. The Bacillus anthracis scheme from CanSNPer2-data is used
+# because it is the smallest (13 SNPs, one reference genome).
+#
+# Only Python 3.12 is tested for now. CanSNPer2 does not install on 3.13 or
+# later, because ete3 3.1.3 imports the cgi module that Python 3.13 removed.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    env:
+      # ete3 draws trees through Qt, and the runner has no display
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: FOI-Bioinformatics/CanSNPer2-data
+          path: cansnper2-data
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install progressiveMauve and the Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y progressivemauve libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Install CanSNPer2
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pytest
+          python -m pip check
+
+      - name: Self test and command line help
+        run: |
+          CanSNPer2-test
+          CanSNPer2 --help
+          CanSNPer2-database --help
+          CanSNPer2-download --help
+
+      - name: Unit tests
+        run: python -m pytest -q tests
+
+      - name: Build and export a database
+        working-directory: ${{ runner.temp }}
+        run: |
+          SRC=$GITHUB_WORKSPACE/cansnper2-data/source
+          CanSNPer2-database --create --database ba.db \
+            --tree $SRC/bacillus_anthracis_tree.txt \
+            --annotation $SRC/bacillus_anthracis_snp.txt \
+            --references $SRC/bacillus_anthracis_references.txt
+          CanSNPer2-database --database ba.db --export -o export
+          CanSNPer2-database --database ba.db --export --export_format newick -o export
+          test -s export/annotation.dmp
+          test -s export/ba_tree.nwk
+
+      - name: Download the reference genome
+        working-directory: ${{ runner.temp }}
+        run: |
+          CanSNPer2-download --database ba.db -o references
+          test -s references/Ames.fna
+
+      - name: Type the reference genome against itself
+        working-directory: ${{ runner.temp }}
+        run: |
+          cp -L references/Ames.fna query_Ames.fna
+          CanSNPer2 --database ba.db --refdir references -o results query_Ames.fna --summary
+          grep -q "A.Br.001" results/snps_summary.txt
