@@ -195,8 +195,10 @@ Run options:
   --min_required_hits MIN_REQUIRED_HITS
                         Minimum sequential hits to call a SNP!
   --strictness STRICTNESS
-                        Percent of snps in path reqired for calling SNP
-                        (default 0.7)
+                        Fraction of the SNPs on the path to the final SNP
+                        that must be called; SNPs without alignment data count
+                        against it, an ancestral SNP stops the path (0-1,
+                        default 0.7)
   --mask MASK           Ignore SNPs closer than this many bases to the edge of
                         an alignment (default 0, off)
   --keep_going          If Error occurs, continue with the rest of samples

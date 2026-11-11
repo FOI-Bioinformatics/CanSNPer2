@@ -145,6 +145,7 @@ def test_viewer_is_self_contained(tmp_path):
 	assert not re.search(r"src\s*=\s*[\"']https?://", html), "no external javascript may be referenced"
 
 
+<<<<<<< HEAD
 def test_node_names_cannot_close_the_script_block(tmp_path):
 	# the payload is embedded in a <script> block, and json.dumps does not escape "</": a node
 	# name from the database such as 'B.1</script><script>...' ended the block and the rest ran
@@ -176,3 +177,92 @@ def test_sample_name_is_escaped_in_the_title(tmp_path):
 	assert "<img" not in title and "&lt;img" in title
 	assert "__PAYLOAD__" in title and '"nodes"' not in title
 	assert html.count("var DATA =") == 1
+=======
+def call(tmp_path, snplist, called, strictness=0.7, min_required_hits=1):
+	'''final call for the test tree: (snp, confirmed, called count, message)'''
+	db = str(tmp_path / "t.db")
+	if not (tmp_path / "t.db").exists():
+		make_db(db)
+	newick_tree = NewickTree(db, name="t", outdir=str(tmp_path), min_required_hits=min_required_hits, strictness=strictness)
+	result, msg, _dlist, _no_data = newick_tree.draw_tree(snplist, called, save_tree=False)
+	if not result:
+		return None, False, 0, msg
+	return result[1], result[2][0], result[2][1], msg
+
+
+def make_deep_db(path):
+	'''a single lineage R.1 -> R.2 -> R.3 -> R.4, the root R.1 annotated'''
+	conn = sqlite3.connect(path)
+	conn.executescript("""
+		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
+		CREATE TABLE tree (parent integer, child integer, rank_i integer, unique (parent, child, rank_i));
+		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
+			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
+			date datetime, genome_i integer);
+		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6), strain varchar(200));
+		INSERT INTO snp_references (id, genome, strain) VALUES (5, 'REF', 'ref strain');
+		INSERT INTO nodes (id, name) VALUES (1, 'R.1'), (2, 'R.2'), (3, 'R.3'), (4, 'R.4');
+		INSERT INTO tree (parent, child, rank_i) VALUES (1, 1, 1), (1, 2, 1), (2, 3, 1), (3, 4, 1);
+	""")
+	for node_id in (1, 2, 3, 4):
+		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, position, ancestral_base, derived_base,"
+			" reference, date, genome_i) VALUES (?, ?, ?, 'C', 'T', 'REF', '06/11/26', 5)", (node_id, "R.%d" % node_id, node_id * 10))
+	conn.commit()
+	conn.close()
+
+
+def deep_call(tmp_path, snplist, strictness):
+	db = str(tmp_path / "deep.db")
+	if not (tmp_path / "deep.db").exists():
+		make_deep_db(db)
+	newick_tree = NewickTree(db, name="deep", outdir=str(tmp_path), min_required_hits=1, strictness=strictness)
+	called = [name for name, state in snplist.items() if state == 1]
+	result, msg, _dlist, _no_data = newick_tree.draw_tree(snplist, called, save_tree=False)
+	return (result[1], result[2][0], result[2][1], msg) if result else (None, False, 0, msg)
+
+
+def test_snp_without_data_on_the_path_is_tolerated_by_strictness(tmp_path):
+	# R.4 derived, the root SNP R.1 has no alignment data: three of the four SNPs on the path
+	# are called, so the call passes a strictness of 0.7 and fails one of 0.8 (one unaligned
+	# SNP near the root made every sample NA, whatever --strictness said)
+	snps = {"R.2": 1, "R.3": 1, "R.4": 1}
+	snp, confirmed, count, msg = deep_call(tmp_path, snps, strictness=0.7)
+	assert (snp, confirmed, count) == ("R.4", True, 3)
+	assert "R.1" in msg, "the SNPs without data on the path are reported"
+	snp, confirmed, count, msg = deep_call(tmp_path, snps, strictness=0.8)
+	assert snp != "R.4" or confirmed is False
+
+
+def test_unaligned_base_counts_as_missing_data(tmp_path):
+	# state 0 is a gap or N in the query at the SNP position: no evidence either way
+	snp, confirmed, count, msg = deep_call(tmp_path, {"R.1": 0, "R.2": 1, "R.3": 1, "R.4": 1}, strictness=0.7)
+	assert (snp, confirmed) == ("R.4", True)
+
+
+def test_ancestral_or_other_base_on_the_path_still_breaks_it(tmp_path):
+	# an ancestral base (2) or a third base (3) is evidence against the path, not a gap
+	for state in (2, 3):
+		snp, confirmed, count, msg = call(tmp_path, {"A.1": state, "B.1": 1}, ["B.1"], strictness=0.1)
+		assert confirmed is False, "state {0} on the path must not be tolerated".format(state)
+
+
+def test_unannotated_root_label_does_not_break_the_path(tmp_path):
+	# the "-root-" label node of a database whose root has no snp_annotation is not a SNP: a
+	# complete called path below it was never confirmed, so such a database typed nothing
+	snp, confirmed, count, msg = call(tmp_path, {"A.1": 1, "B.1": 1}, ["A.1", "B.1"], strictness=1.0, min_required_hits=2)
+	assert (snp, confirmed, count) == ("B.1", True, 2)
+
+
+def test_min_required_hits_counts_called_snps_only(tmp_path):
+	snp, confirmed, count, msg = call(tmp_path, {"B.1": 1}, ["B.1"], strictness=0.5, min_required_hits=2)
+	assert confirmed is False
+
+
+def test_snp_directly_above_the_final_snp_must_be_called(tmp_path):
+	# a gap is tolerated higher up the path, but not right above the final SNP: one stray
+	# derived SNP on a neighbouring branch whose parent had no data would otherwise outrank the
+	# sample's real lineage. Here B.1 is derived but its parent A.1 has no data, so B.1 is not
+	# final-called even though 1/2 passes a strictness of 0.5
+	snp, confirmed, count, msg = call(tmp_path, {"B.1": 1}, ["B.1"], strictness=0.5)
+	assert confirmed is False
+>>>>>>> 1512fa9 (Tolerate SNPs without alignment data on the path to the final SNP, as set by --strictness)
