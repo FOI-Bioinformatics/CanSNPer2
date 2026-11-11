@@ -207,6 +207,12 @@ Run options:
 
 Logging and debug options:
   --tmpdir              Specify tmp directory default (/tmp/CanSNPer2)
+
+Each run that aligns writes its temporary files to its own directory,
+`<tmpdir>/CanSNPer2/run_<random>`, and removes only that directory when it
+finishes, so several runs can share the same `--tmpdir`. With `--keep_temp` the
+directory is kept and its path is logged; the alignments in it can be reused
+with `--skip_mauve --tmpdir <that directory>`.
   --logdir              Specify log directory
   --verbose             Verbose output
   --debug               Debug output

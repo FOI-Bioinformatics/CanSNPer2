@@ -5,6 +5,7 @@ Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
 import os
 import shutil
+import tempfile
 import logging
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ _MP_CTX = multiprocessing.get_context("fork")
 	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
 	near an alignment edge (issue #48)'''
 SNP_FILE_COLUMNS = ["Name","Reference","Pos","Ancestral base","Derived base","Target base","Edge flag"]
+
+'''file that marks a private run directory created by CanSNPer2 below --tmpdir; cleanup()
+	only removes a directory it created itself, and the command line uses a marked
+	directory as it is so a kept run can be reused with --skip_mauve'''
+RUN_MARKER = ".cansnper2_run"
 
 class Error(Exception):
 	"""docstring for Error"""
@@ -94,6 +100,18 @@ class CanSNPer2(object):
 		if not os.path.exists(self.tmpdir):
 			logger.info("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
 			os.makedirs(self.tmpdir)
+		'''An aligning run works in its own run_* directory below the shared tmpdir. All runs
+			used to write their staged genomes and alignments straight into the shared folder
+			(by default /tmp/CanSNPer2), and cleanup() removed every file in it, so two runs on
+			the same machine deleted each other's files. With --skip_mauve the given folder is
+			where existing alignments are read from, it is used as it is and never removed.'''
+		self.own_tmpdir = False
+		if not kwargs.get("skip_mauve",False):
+			self.tmpdir = tempfile.mkdtemp(prefix="run_", dir=self.tmpdir)
+			with open(os.path.join(self.tmpdir, RUN_MARKER), "w"):
+				pass
+			self.own_tmpdir = True
+			logger.info("Temporary files of this run are written to {tmpdir}".format(tmpdir=self.tmpdir))
 
 		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
 		if not os.path.exists(self.logdir):
@@ -407,12 +425,14 @@ class CanSNPer2(object):
 		return query
 
 	def cleanup(self):
-		'''Remove files in temporary folder'''
-		logger.info("Clean up temporary files... ")
-		files = self.get_tempfiles()
-		for f in files:
-			os.remove(os.path.join(self.tmpdir,f))
-		os.rmdir(self.tmpdir)
+		'''Remove the run directory of this run, and nothing else: other runs and other
+			files below the shared tmpdir are left untouched. A folder this run did not
+			create (the alignments read with --skip_mauve) is never removed.'''
+		if not self.own_tmpdir:
+			logger.debug("Not removing {tmpdir}, it was not created by this run".format(tmpdir=self.tmpdir))
+			return
+		logger.info("Clean up temporary files in {tmpdir}".format(tmpdir=self.tmpdir))
+		shutil.rmtree(self.tmpdir, ignore_errors=True)
 		logger.info("Done!")
 		return
 
@@ -795,6 +815,8 @@ class CanSNPer2(object):
 		'''Finally clean up temporary folder when all alignments and trees has been printed!'''
 		if not self.keep_temp and len(self.query) > 0: ## if keep temp is turned on do not remove away alignments also if no input files were given
 			self.cleanup()
+		elif self.own_tmpdir:
+			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip_mauve --tmpdir {tmpdir}".format(tmpdir=self.tmpdir))
 
 		if self.typed or not self.query:
 			logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir.rstrip("/")+"/")) ## a trailing slash was already there would print dir// (issue #76)
