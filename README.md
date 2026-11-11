@@ -195,8 +195,10 @@ Run options:
   --min_required_hits MIN_REQUIRED_HITS
                         Minimum sequential hits to call a SNP!
   --strictness STRICTNESS
-                        Percent of snps in path reqired for calling SNP
-                        (default 0.7)
+                        Fraction of the SNPs on the path to the final SNP
+                        that must be called; SNPs without alignment data count
+                        against it, an ancestral SNP stops the path (0-1,
+                        default 0.7)
   --mask MASK           Ignore SNPs closer than this many bases to the edge of
                         an alignment (default 0, off)
   --keep_going          If Error occurs, continue with the rest of samples
@@ -207,6 +209,12 @@ Run options:
 
 Logging and debug options:
   --tmpdir              Specify tmp directory default (/tmp/CanSNPer2)
+
+Each run that aligns writes its temporary files to its own directory,
+`<tmpdir>/CanSNPer2/run_<random>`, and removes only that directory when it
+finishes, so several runs can share the same `--tmpdir`. With `--keep_temp` the
+directory is kept and its path is logged; the alignments in it can be reused
+with `--skip_mauve --tmpdir <that directory>`.
   --logdir              Specify log directory
   --verbose             Verbose output
   --debug               Debug output

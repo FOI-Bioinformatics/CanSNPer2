@@ -284,6 +284,19 @@ else
 fi
 
 say "== leave-one-out: every reference typed without its own genome"
+# the subtaxons below are the recorded baseline (MANUAL_TEST_COMMANDS.txt step 7,
+# re-measured 2026-11-11 after the --strictness tolerance of druvus #53, which moved
+# FSC200 from B.12 to B.21: 12/13 called with the single gap B.72 being a position
+# only FSC200's own removed genome covered). a typed sample whose subtaxon moved is
+# a regression unless the baseline was re-measured on purpose; NA stays a warning.
+loo_expect() {
+    case "$1" in
+        FSC200)      echo B.21 ;;
+        FTNF002-00)  echo B.49 ;;
+        LVS)         echo B.77 ;;
+        *)           echo NA ;;
+    esac
+}
 for q in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do
     mkdir -p "$OUT/loo_refs_$q"
     for r in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do
@@ -294,14 +307,23 @@ for q in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do
         --logdir "$OUT/logs/loo_$q"
     SUB=$(grep -h "$q:" "$LASTLOG" | tail -1 | sed "s/.*: //")
     SNPS=$(wc -l < "$OUT/res_loo_$q/${q}_snps.txt" 2>/dev/null | tr -d ' ')
-    echo "leave-one-out $q -> ${SUB:-no result} (snps ${SNPS:-0})" >> "$OUT/leave_one_out_baseline.txt"
+    EXP=$(loo_expect "$q")
+    echo "leave-one-out $q -> ${SUB:-no result} (snps ${SNPS:-0}, expected $EXP)" >> "$OUT/leave_one_out_baseline.txt"
     if [ -n "$SUB" ] && [ "$SUB" != NA ] && [ "${SNPS:-0}" -gt 0 ]; then
-        printf '  ok    %-52s %s, %s snps\n' "leave-one-out $q" "$SUB" "$SNPS"; PASSED=$((PASSED+1))
-    elif [ "$SUB" = NA ]; then
-        if grep -q "No sample was typed" "$LASTLOG"; then
-            warn "leave-one-out $q" "NA, said so loudly (see $OUT/leave_one_out_baseline.txt)"
+        if [ "$SUB" = "$EXP" ]; then
+            printf '  ok    %-52s %s, %s snps\n' "leave-one-out $q" "$SUB" "$SNPS"; PASSED=$((PASSED+1))
         else
-            printf '  FAIL  %-52s NA without any error message\n' "leave-one-out $q"; FAILED=$((FAILED+1))
+            printf '  FAIL  %-52s %s, expected %s (re-measure MANUAL_TEST_COMMANDS.txt step 7 to accept)\n' "leave-one-out $q" "$SUB" "$EXP"; FAILED=$((FAILED+1))
+        fi
+    elif [ "$SUB" = NA ]; then
+        if [ "$EXP" = NA ]; then
+            if grep -q "No sample was typed" "$LASTLOG"; then
+                warn "leave-one-out $q" "NA, said so loudly (see $OUT/leave_one_out_baseline.txt)"
+            else
+                printf '  FAIL  %-52s NA without any error message\n' "leave-one-out $q"; FAILED=$((FAILED+1))
+            fi
+        else
+            printf '  FAIL  %-52s NA, expected %s\n' "leave-one-out $q" "$EXP"; FAILED=$((FAILED+1))
         fi
     else
         printf '  FAIL  %-52s no subtaxon, no result files\n' "leave-one-out $q"; FAILED=$((FAILED+1))

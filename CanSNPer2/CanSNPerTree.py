@@ -38,7 +38,7 @@ __email__ 		= ["bioinformatics@foi.se", "david.sundell@foi.se"]
 __date__ 		= "2020-04-23"
 __status__ 		= "Production"
 
-from CanSNPer2.modules.CanSNPer2 import CanSNPer2
+from CanSNPer2.modules.CanSNPer2 import CanSNPer2, RUN_MARKER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging
 import logging
@@ -48,6 +48,29 @@ import os,sys
 
 '''CanSNPer2 settings'''
 import argparse
+
+
+def resolve_tmpdir(path):
+	'''The working folder is a CanSNPer2 subfolder of --tmpdir. It used to be added only
+		when --tmpdir was exactly /tmp, so --skip_mauve looked in <tmpdir> for a custom tmpdir
+		but in <tmpdir>/CanSNPer2 for the default (issue #177). A run directory that CanSNPer2
+		created and kept (--keep_temp) carries a marker file and is used as it is, so its
+		alignments can be read again with --skip_mauve.'''
+	tmpdir = path.rstrip("/")
+	if os.path.basename(tmpdir) == "CanSNPer2" or os.path.isfile(os.path.join(tmpdir, RUN_MARKER)):
+		return tmpdir
+	return tmpdir + "/CanSNPer2"
+
+
+def fraction(value):
+	'''argparse type for --strictness: a number from 0 to 1'''
+	try:
+		number = float(value)
+	except ValueError:
+		raise argparse.ArgumentTypeError("{value} is not a number".format(value=value))
+	if not 0 <= number <= 1:
+		raise argparse.ArgumentTypeError("{value} is not between 0 and 1".format(value=value))
+	return number
 
 
 def main():
@@ -68,7 +91,7 @@ def main():
 	run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 	run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
 	run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
-	run_options.add_argument('--strictness', 		type=float, default=0.7,			help="Percent of snps in path reqired for calling SNP (default 0.7)")
+	run_options.add_argument('--strictness', 		type=fraction, default=0.7,			help="Fraction of the SNPs on the path to the final SNP that must be called; SNPs without alignment data count against it, an ancestral SNP stops the path (0-1, default 0.7)")
 	run_options.add_argument('--mask',				type=int, default=0,					help="Ignore SNPs closer than this many bases to the edge of an alignment (default 0, off)")
 	run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 	run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
@@ -132,19 +155,10 @@ def main():
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
 
-	'''Fix temp path: the working folder is always a CanSNPer2 subfolder of --tmpdir.
-		It used to be added only when --tmpdir was exactly /tmp, so --skip_mauve looked in
-		<tmpdir> for a custom tmpdir but in <tmpdir>/CanSNPer2 for the default, and the
-		cleanup at the end of a run removed everything in the folder the user had pointed
-		--tmpdir at (issue #177)'''
-	tmpdir = args.tmpdir.rstrip("/")
-	if not tmpdir:
+	'''Fix temp path, see resolve_tmpdir (issue #177)'''
+	if not args.tmpdir.rstrip("/"):
 		parser.error("--tmpdir cannot be empty")
-	if os.path.basename(tmpdir) != "CanSNPer2":
-		args.tmpdir = tmpdir + "/CanSNPer2"
-	else:
-		args.tmpdir = tmpdir
-	print("Alignments and temporary files are kept in {path}".format(path=args.tmpdir))
+	args.tmpdir = resolve_tmpdir(args.tmpdir)
 	if not os.path.exists(args.tmpdir):
 		logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
 		os.makedirs(args.tmpdir,exist_ok=True)
@@ -171,6 +185,7 @@ def main():
 									summary=args.summary,
 									strictness=args.strictness
 	)
+	print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))
 
 	'''Run CanSNPer2'''
 	try:
