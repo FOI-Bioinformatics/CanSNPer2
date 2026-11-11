@@ -1,21 +1,20 @@
-"""Regression tests for modules/NewickTree.py, issues #27 and #19.
+"""Regression tests for modules/NewickTree.py.
 
 #27: a SNP node that no alignment carried a base for was skipped with a
-continue in the drawing loop, which also skipped set_style, so the node came
+continue in the old ete3 drawing loop, which also skipped set_style, so the node came
 out of the pdf as an almost invisible default dot and the position was absent
-from both per sample result files.
-#19: an ete3 without a Qt binding (an ete3 from the etetoolkit conda channel
-without pyqt) has no drawing classes, and drawing died with "module 'ete3' has
-no attribute 'NodeStyle'" in the middle of the node loop."""
+from both per sample result files; the html viewer keeps that rule: the node is
+drawn grey and reported.
+#52: ROOT and the unannotated "-root-" label are not SNPs and must not get SNP dots.
+issue #184: ete3 could not import on python >=3.13 (it imports cgi), and its ete4
+replacement still needs PyQt6 or selenium+Chrome to write image files, so the tree
+viewer is written by CanSNPer2 itself: a self-contained html file with an embedded
+json payload and a plain javascript svg renderer."""
+import json
 import re
 import sqlite3
 
-import pytest
-
-from CanSNPer2.modules import NewickTree as nwk
 from CanSNPer2.modules.NewickTree import NewickTree
-
-needs_qt = pytest.mark.skipif(not nwk.ETENEWICK_OK, reason="ete3 has no drawing classes, no Qt binding installed")
 
 
 def make_db(path):
@@ -46,26 +45,63 @@ def tree(tmp_path):
 	return NewickTree(db, name="t", outdir=str(tmp_path))
 
 
-@needs_qt
+def payload(newick_tree):
+	'''the json the viewer embedded in the written html, the same node data the old
+		ete3 NodeStyles carried'''
+	html = open(newick_tree.tree_file).read()
+	match = re.search(r"var DATA = (\{.*\});", html)
+	assert match, "the html viewer must embed its json payload"
+	return json.loads(match.group(1))
+
+
 def test_snp_without_any_data_is_drawn_and_reported(tmp_path):
 	# B.2 was never covered by an alignment, so it is missing from the snp list: it used to be
 	# skipped by the drawing loop and left at the ete3 default size, invisible in the pdf (#27)
 	newick_tree = tree(tmp_path)
-	newick_tree.tree_file = str(tmp_path / "t_tree.svg")
 	snplist = {"A.1": 1, "B.1": 1, "C.1": 2}
-	final, msg, called, no_data = newick_tree.draw_ete3_tree(snplist, ["A.1", "B.1"], save_tree=True)
+	final, msg, called, no_data = newick_tree.draw_tree(snplist, ["A.1", "B.1"], save_tree=True)
 	assert [row[0] for row in no_data] == ["B.2"], "the position without data has to be reported"
 
-	radii = re.findall(r'<circle[^>]*\br="([\d.]+)"', open(newick_tree.tree_file).read())
-	# 1.5 is the ete3 default size the old code left the missing node at, 5 is the grey
-	# "no data" dot, 7.5 the green derived ones; the six nodes are ROOT and the unannotated
-	# "-root-" label (both without a style of their own, #52), A.1, B.1, B.2 (no data) and C.1
-	assert radii.count("1.5") == 2, "ROOT and the unannotated root label keep no dot, got %s" % sorted(radii)
-	assert radii.count("5") == 2, "B.2 (no data) and C.1 (ancestral) are grey: %s" % sorted(radii)
-	assert radii.count("7.5") == 2, "A.1 and B.1 are derived: %s" % sorted(radii)
+	nodes = {n["name"]: n for n in payload(newick_tree)["nodes"]}
+	# r keeps the ete3 scale: size was a diameter, 10 drew as r=5 and 15 as r=7.5
+	assert nodes["B.2"]["fill"] == newick_tree.snp_colors["non_aligned"] and nodes["B.2"]["r"] == 5, \
+		"B.2 without alignment data is drawn as a grey dot, never dropped"
+	assert nodes["C.1"]["fill"] == newick_tree.snp_colors["ancestral"] and nodes["C.1"]["r"] == 5
+	assert nodes["A.1"]["fill"] == newick_tree.snp_colors["derived"] and nodes["A.1"]["r"] == 7.5
+	assert nodes["B.1"]["fill"] == newick_tree.snp_colors["derived"] and nodes["B.1"]["r"] == 7.5
 
 
-@needs_qt
+def test_root_and_label_nodes_carry_no_snp_dot(tmp_path):
+	# the ROOT wrapper and the "-root-" label that get_nodes invents for a root node without
+	# snp_annotation are not SNPs and must not be drawn as grey SNP dots (#52, #32, #34)
+	newick_tree = tree(tmp_path)
+	newick_tree.draw_tree({"A.1": 1}, save_tree=True)
+	nodes = {n["name"]: n for n in payload(newick_tree)["nodes"]}
+	assert nodes["ROOT"]["dot"] is False
+	assert nodes["-root-"]["dot"] is False
+	'''the old ete default drew ROOT and the label node without a set_style: the viewer
+		keeps them as plain junctions, and B.2 stays a SNP dot (#27)'''
+	assert nodes["B.2"]["dot"] is True
+
+
+def test_payload_mirrors_the_newick_structure(tmp_path):
+	# the flattened tree is what the viewer draws: the ROOT wrapper above the database root,
+	# preorder ids, and depths that reproduce the ete distances (unit branches) the SNP
+	# calling sorted dlist by
+	newick_tree = tree(tmp_path)
+	newick_tree.draw_tree({}, save_tree=True)
+	nodes = payload(newick_tree)["nodes"]
+	entries = {n["name"]: n for n in nodes}
+	by_id = {n["id"]: n for n in nodes}
+	assert nodes[0]["name"] == "ROOT" and nodes[0]["parent"] is None and nodes[0]["depth"] == 0
+	assert entries["-root-"]["parent"] == 0 and entries["-root-"]["depth"] == 1
+	assert entries["A.1"]["name"] == "A.1" and by_id[entries["A.1"]["parent"]]["name"] == "-root-"
+	assert entries["B.1"]["depth"] == 3 and entries["B.2"]["depth"] == 3 and entries["C.1"]["depth"] == 2
+	parents = [entries[name]["parent"] for name in ("B.1", "B.2", "C.1", "A.1", "-root-")]
+	assert all(by_id[n]["id"] < entries[name]["id"]
+		for name, n in zip(("B.1", "B.2", "C.1", "A.1", "-root-"), parents)), "parents come before children (preorder)"
+
+
 def test_no_data_rows_carry_the_database_annotation(tmp_path):
 	# the same columns as the SNP_info rows written to <sample>_not_called.txt, the target
 	# base being N/A because there is no base at that position at all (#27)
@@ -76,47 +112,34 @@ def test_no_data_rows_carry_the_database_annotation(tmp_path):
 	assert newick_tree.get_no_data_info([]) == []
 
 
-@needs_qt
 def test_every_snp_node_of_the_tree_ends_up_in_one_of_the_two_lists(tmp_path):
 	# the two files together have to cover the tree: everything not evaluated is reported,
 	# nothing is silently dropped (#27, and the coverage the reporter asked for in #35)
 	newick_tree = tree(tmp_path)
 	snplist = {"A.1": 1, "B.1": 2, "C.1": 0}
-	_, _, called, no_data = newick_tree.draw_ete3_tree(snplist, ["A.1"], save_tree=False)
+	_, _, called, no_data = newick_tree.draw_tree(snplist, ["A.1"], save_tree=False)
 	evaluated = set(snplist)
 	assert set(row[0] for row in no_data) == {"B.2"}, "B.2 is the only node without data"
 	assert not (evaluated & set(row[0] for row in no_data)), "a position cannot be listed twice"
 
 
-@needs_qt
 def test_nodes_without_snp_annotation_are_not_listed_as_snps(tmp_path):
 	# the "-root-" label that get_nodes invents for a root node without snp_annotation is not a
 	# SNP position: it belongs neither in the tree dots nor in the list of positions without
 	# data, which the #27 fix would otherwise have started reporting (#52)
 	newick_tree = tree(tmp_path)
-	_, _, called, no_data = newick_tree.draw_ete3_tree({"A.1": 1, "B.1": 1}, ["A.1"], save_tree=False)
+	_, _, called, no_data = newick_tree.draw_tree({"A.1": 1, "B.1": 1}, ["A.1"], save_tree=False)
 	names = set(row[0] for row in no_data)
 	assert names == {"B.2", "C.1"}, names
 	assert "-root-" not in names and "ROOT" not in names
 
 
-def test_ete3_without_qt_raises_a_readable_error(monkeypatch, tmp_path):
-	# #19: ete3 imported but its drawing classes are missing (etetoolkit channel without pyqt):
-	# the failure has to name the cause instead of dying with AttributeError on ete3.NodeStyle
+def test_viewer_is_self_contained(tmp_path):
+	# the html must carry everything it needs to render: embedded json and javascript, no
+	# library or network references (issue #184: the ete3/Qt chain is gone for good)
 	newick_tree = tree(tmp_path)
-	monkeypatch.setattr(nwk, "ETENEWICK_OK", False)
-	monkeypatch.setattr(nwk, "ETE_TREEVIEW_ERROR", "No module named 'PyQt5'")
-	with pytest.raises(ImportError) as error:
-		newick_tree.draw_ete3_tree({"A.1": 1}, ["A.1"], save_tree=False)
-	text = str(error.value)
-	assert "no drawing classes" in text and "PyQt5" in text
-
-
-def test_drawing_classes_are_imported_from_where_they_live():
-	# #19: the names are imported explicitly at module level, so no attribute of ete3 is
-	# probed in the middle of the drawing loop any more
-	if nwk.ETENEWICK_OK:
-		for name in (nwk.NodeStyle, nwk.TreeStyle, nwk.AttrFace, nwk.faces):
-			assert name is not None
-		assert nwk.NodeStyle.__module__ == "ete3.treeview.main"
-		assert nwk.AttrFace.__module__ == "ete3.treeview.faces"
+	newick_tree.draw_tree({"A.1": 1}, ["A.1"], save_tree=True)
+	html = open(newick_tree.tree_file).read()
+	assert "var DATA =" in html and "render()" in html
+	assert "ete3" not in html and "ete4" not in html
+	assert not re.search(r"src\s*=\s*[\"']https?://", html), "no external javascript may be referenced"

@@ -383,12 +383,12 @@ class CanSNPer2(object):
 	'''Functions'''
 
 	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False):
-		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
-			and outputs a pdf file
+		'''This function colors the SNP tree of the database with the SNPS found in the query and
+			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
-		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree,summary=summary)
-		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
+		final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary)
+		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
 		return final_snp
 
 	def read_query_textfile_input(self,query_file):

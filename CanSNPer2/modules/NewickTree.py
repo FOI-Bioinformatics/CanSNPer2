@@ -3,35 +3,18 @@ Module to read and write newick trees
 
 '''
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+import json
 import os
-import sys
-'''ete3 renders trees through Qt, which aborts the whole process when it cannot open a display
-	(headless servers, containers), so select the offscreen platform unless the user chose one'''
-if sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and not os.environ.get("QT_QPA_PLATFORM"):
-    os.environ["QT_QPA_PLATFORM"] = "offscreen"
-import ete3
-'''ete3 only exposes the drawing classes (NodeStyle, TreeStyle, AttrFace, faces) through its treeview
-	subpackage, which fails to import when no Qt binding is installed, and ete3 swallows that error.
-	An ete3 from the etetoolkit conda channel without pyqt is exactly that case: ete3 imported fine but
-	ete3.NodeStyle() died with "module 'ete3' has no attribute 'NodeStyle'" in the middle of drawing
-	(issue #19). Import the names explicitly from where they live, so the failure is one ImportError at
-	import time, and raise a readable error when a tree is actually drawn (issue #122).
-'''
-try:
-	'''the names live in different parts of the treeview subpackage: NodeStyle and TreeStyle in main,
-		the face classes in faces'''
-	from ete3.treeview.main import NodeStyle, TreeStyle
-	from ete3.treeview.faces import AttrFace
-	from ete3.treeview import faces
-	ETENEWICK_OK = True
-	ETE_TREEVIEW_ERROR = ""
-except ImportError as e:
-	NodeStyle = TreeStyle = AttrFace = faces = None
-	ETENEWICK_OK = False
-	'''the message ete3's own import produced, kept so the error at draw time names what is missing'''
-	ETE_TREEVIEW_ERROR = str(e)
-
 import logging
+'''the tree drawing used ete3 (issue #19: it silently lost its drawing classes when no Qt
+	binding was installed, issues #27/#52: its node loop hid positions without alignment data)
+	and ete3 3.1.3 cannot even import on python >=3.13 (it imports cgi, removed in 3.13, issue
+	#184). ete4's replacement renderer needs PyQt6 or selenium+Chrome for static files, so the
+	package no longer depends on either: draw_tree walks the NewickNode structure the database
+	already built and writes a self-contained html file (embedded JSON plus a plain javascript
+	SVG viewer). The file opens in any browser on any system, shows the same SNP colors, and
+	can toggle the branches without called SNPs - the dynamic view the ete pdfs never allowed.
+'''
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +27,236 @@ __email__ = ["bioinformatics@foi.se", "david.sundell@foi.se"]
 __date__ = "2019-06-07"
 __status__ = "Production"
 __partof__ = "CanSNPer2"
+
+'''The viewer written by NewickTree.write_tree_html: the colored tree arrives as JSON in
+	__PAYLOAD__, everything else is plain javascript drawing an svg, no libraries, no network,
+	so the html file works the same on any machine (issue #184 removed the ete3/Qt dependency
+	that produced the old pdfs). The view is interactive: clicking a dot collapses or expands
+	its subtree, collapse/expand/filters relayout the tree and refit it into the window, the
+	viewBox pans by dragging and zooms with the wheel, and trees with more than 60 leaves open
+	pre-collapsed to an overview - the full depth is only expanded when it is asked for.
+	Branches that contain called SNPs are never collapsed (auto or manual): the called path
+	and every green dot are always visible in full, and "overview" returns to the starting
+	auto-collapsed depth'''
+TREE_HTML_TEMPLATE = '''<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+html, body { height: 100%; margin: 0; background: #fff; }
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+#bar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center;
+       gap: 8px; flex-wrap: wrap; padding: 8px 14px; background: #fbfcfd;
+       border-bottom: 1px solid #e3e6e9; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+#tools, #filters { display: flex; align-items: center; gap: 6px; }
+button { appearance: none; border: 1px solid #d4d9de; background: #fff; color: #1f2937;
+         border-radius: 7px; padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+button:hover { background: #f1f4f7; border-color: #c2c8cf; }
+button:active { background: #e8ecf0; }
+#zoomIn, #zoomOut { width: 32px; padding: 5px 0; font-size: 15px; }
+.sep { width: 1px; height: 24px; background: #e3e6e9; margin: 0 4px; }
+label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #374151;
+              cursor: pointer; padding: 4px 9px; border-radius: 7px; }
+label.check:hover { background: #f1f4f7; }
+input[type="checkbox"] { width: 14px; height: 14px; accent-color: #3a7d5c; }
+#legend { display: flex; gap: 14px; align-items: center; font-size: 12px; color: #4b5563; margin-left: auto; }
+#legend .key { display: flex; align-items: center; gap: 5px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; }
+#tree { position: fixed; top: 52px; bottom: 0; left: 0; right: 0; }
+svg { width: 100%; height: 100%; display: block; cursor: grab; }
+circle.node { cursor: pointer; }
+text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
+#hint { position: fixed; bottom: 10px; right: 12px; z-index: 10; color: #6b7280; font-size: 12px;
+        background: rgba(255, 255, 255, 0.85); border: 1px solid #e5e7eb; border-radius: 999px;
+        padding: 4px 12px; }
+</style>
+</head>
+<body>
+<div id="bar">
+<div id="tools">
+<button id="overview" title="back to the starting collapsed overview">overview</button>
+<button id="expandAll">expand all</button>
+<button id="collapseAll">collapse</button>
+<button id="fit" title="fit the tree into the window">fit</button>
+<button id="zoomIn" title="zoom in">+</button>
+<button id="zoomOut" title="zoom out">&minus;</button>
+</div>
+<span class="sep"></span>
+<div id="filters">
+<label class="check"><input type="checkbox" id="onlyCalled"><span>called paths only</span></label>
+<label class="check"><input type="checkbox" id="showLabels" checked><span>labels</span></label>
+</div>
+<span class="sep"></span>
+<div id="legend"></div>
+</div>
+<div id="tree"></div>
+<div id="hint">click a dot: collapse / expand &middot; drag: pan &middot; wheel: zoom &middot; double click: fit &middot; called paths stay open</div>
+<script>
+var DATA = __PAYLOAD__;
+var COL = 130, ROW = 22, MARGIN = 24, OVERVIEW_LEAVES = 60;
+var nodes = DATA.nodes;
+var children = {};
+nodes.forEach(function(n){ if (n.parent !== null) { (children[n.parent] = children[n.parent] || []).push(n); } });
+nodes.forEach(function(n){ n.collapsed = false; });
+var LEGEND = [["derived","derived (present)"],["ancestral","ancestral (not present)"],["other_base","other base"],["non_aligned","no alignment data / untested"]];
+document.getElementById("legend").innerHTML = LEGEND.map(function(l){ return '<span class="key"><span class=\\"dot\\" style=\\"background:' + DATA.colors[l[0]] + '"></span>' + l[1] + "</span>"; }).join("");
+function hasCalled(n){ if (n.called) { return true; } return (children[n.id] || []).some(hasCalled); }
+function keep(n){ return !onlyCalled || hasCalled(n); }
+function visKids(n){ if (n.collapsed) { return []; } return (children[n.id] || []).filter(keep); }
+function canCollapse(n){ return (children[n.id] || []).some(keep) && !hasCalled(n); }
+var onlyCalled = false, vb = null, svgEl = null;
+function layout(){
+\tnodes.forEach(function(n){ n.y = undefined; });
+\tvar nextY = 0;
+\t(function place(n){
+\t\tn.x = n.depth * COL + MARGIN;
+\t\tvar kids = visKids(n);
+\t\tif (!kids.length) { n.y = nextY * ROW + MARGIN; nextY += 1; }
+\t\telse { kids.forEach(place); n.y = (kids[0].y + kids[kids.length-1].y) / 2; }
+\t})(nodes[0]);
+\treturn nextY;
+}
+function esc(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function render(){
+\tlayout();
+\tvar maxX = 0, maxY = 0;
+\tnodes.forEach(function(n){ if (n.x !== undefined && n.y !== undefined) { maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); } });
+\tvar W = maxX + 320, H = maxY + 2 * MARGIN;
+\tvar parts = ['<svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">'];
+\tparts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="white"/>');
+\tnodes.forEach(function(n){
+\t\tif (n.parent === null || n.y === undefined || !keep(n)) { return; }
+\t\tvar p = nodes[n.parent];
+\t\tvar dash = n.dash ? ' stroke-dasharray="4,3"' : "";
+\t\tparts.push('<line x1="' + p.x + '" y1="' + p.y + '" x2="' + p.x + '" y2="' + n.y + '" stroke="' + n.line + '" stroke-width="2"' + dash + "/>");
+\t\tparts.push('<line x1="' + p.x + '" y1="' + n.y + '" x2="' + n.x + '" y2="' + n.y + '" stroke="' + n.line + '" stroke-width="2"' + dash + "/>");
+\t});
+\tnodes.forEach(function(n){
+\t\tif (n.y === undefined || !keep(n)) { return; }
+\t\tvar hasKids = visKids(n).length > 0 || (n.collapsed && (children[n.id] || []).some(keep));
+\t\tvar triW = 0;
+\t\tif (n.collapsed && (children[n.id] || []).some(keep)) {
+\t\t\tvar s = triScale(subtreeSize(n));
+\t\t\ttriW = COL * 0.7 * s;
+\t\t\tparts.push('<path d="M ' + n.x + ' ' + n.y + ' l ' + triW + ' ' + (-ROW * 1.5 * s) + ' l 0 ' + (ROW * 3 * s) + ' z" fill="' + n.fill + '" fill-opacity="0.35" stroke="' + n.line + '" stroke-width="1"/>');
+\t\t}
+\t\tif (n.dot !== false) {
+\t\t\tparts.push('<circle class="node" data-id="' + n.id + '" cx="' + n.x + '" cy="' + n.y + '" r="' + Math.max(3, n.r) + '" fill="' + n.fill + '" stroke="' + (n.collapsed ? "#333" : "none") + '" stroke-width="' + (n.collapsed ? 2 : 0) + '"><title>' + esc(n.name) + (hasKids ? (hasCalled(n) ? " (called SNP path: always open)" : " (click to " + (n.collapsed ? "expand" : "collapse") + ")") : "") + "</title></circle>");
+\t\t} else {
+\t\t\tparts.push('<circle class="node" data-id="' + n.id + '" cx="' + n.x + '" cy="' + n.y + '" r="3" fill="#fff" stroke="#999"><title>' + esc(n.name) + "</title></circle>");
+\t\t}
+\t\tif (labels && n.name !== "ROOT") {
+\t\t\tvar extra = n.collapsed ? " [" + subtreeSize(n) + "]" : "";
+\t\t\tparts.push('<text x="' + (n.x + 6 + triW) + '" y="' + (n.y - 5) + '">' + esc(n.name) + extra + "</text>");
+\t\t}
+\t});
+\tparts.push("</svg>");
+\tdocument.getElementById("tree").innerHTML = parts.join("");
+\tsvgEl = document.querySelector("#tree svg");
+\tapply();
+}
+function subtreeSize(n){ var c = 0; (children[n.id] || []).forEach(function(k){ if (keep(k)) { c += 1 + subtreeSize(k); } }); return c; }
+/*the collapsed triangle grows with the hidden subtree in steps: a 300-SNP branch should
+\tlook like a clump and a 4-SNP one like a stub, without pretending exact proportion*/
+function triScale(cnt){ if (cnt < 5) { return 0.6; } if (cnt < 10) { return 0.85; } if (cnt < 20) { return 1; } if (cnt < 50) { return 1.3; } if (cnt < 150) { return 1.6; } return 2; }
+function bounds(){
+\tvar x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+\tnodes.forEach(function(n){ if (n.y === undefined || !keep(n)) { return; }
+\t\tvar ext = 0, tw = 0;
+\t\tif (n.collapsed && (children[n.id] || []).some(keep)) {
+\t\t\tvar s = triScale(subtreeSize(n));
+\t\t\text = ROW * 1.5 * s; tw = COL * 0.7 * s;
+\t\t}
+\t\tx0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y - ext); x1 = Math.max(x1, n.x + tw); y1 = Math.max(y1, n.y + ext); });
+\treturn {x0: x0 - MARGIN, y0: y0 - MARGIN, x1: x1 + 300, y1: y1 + MARGIN};
+}
+function apply(){ if (svgEl && vb) { svgEl.setAttribute("viewBox", vb.x + " " + vb.y + " " + vb.w + " " + vb.h); } }
+function fit(){
+\tif (!svgEl) { return; }
+\tvar box = bounds(), el = svgEl.getBoundingClientRect(), aspect = (el.width / el.height) || 1;
+\tvar w = box.x1 - box.x0, h = box.y1 - box.y0;
+\tif (w / h > aspect) { h = w / aspect; } else { w = h * aspect; }
+\tvb = {x: (box.x0 + box.x1) / 2 - w / 2, y: (box.y0 + box.y1) / 2 - h / 2, w: w, h: h};
+\tapply();
+}
+function zoomBy(f){ if (!vb) { return; } vb.x += vb.w * (1 - f) / 2; vb.y += vb.h * (1 - f) / 2; vb.w *= f; vb.h *= f; apply(); }
+function leavesIfCollapsedAt(d){
+\tvar c = 0;
+\t(function walk(n){
+\t\tvar kids = (children[n.id] || []).filter(keep);
+\t\tif (!kids.length || (n.depth >= d && !hasCalled(n))) { c++; return; }
+\t\tkids.forEach(walk);
+\t})(nodes[0]);
+\treturn c;
+}
+function autoCollapse(){
+\tvar maxDepth = Math.max.apply(null, nodes.map(function(n){ return n.depth; }));
+\tif (leavesIfCollapsedAt(maxDepth) <= OVERVIEW_LEAVES) { return; }
+\tvar bestD = 0;
+\tfor (var t = 1; t <= maxDepth; t++) { if (leavesIfCollapsedAt(t) <= OVERVIEW_LEAVES) { bestD = t; } else { break; } }
+\tif (bestD < 2) { return; }
+\tnodes.forEach(function(n){ if (n.depth >= bestD) { n.collapsed = canCollapse(n); } });
+}
+function relayoutFit(){ render(); fit(); }
+document.getElementById("zoomIn").onclick = function(){ zoomBy(1 / 1.4); };
+document.getElementById("zoomOut").onclick = function(){ zoomBy(1.4); };
+document.getElementById("fit").onclick = fit;
+document.getElementById("expandAll").onclick = function(){ nodes.forEach(function(n){ n.collapsed = false; }); relayoutFit(); };
+document.getElementById("collapseAll").onclick = function(){ nodes.forEach(function(n){ if (n.depth >= 1) { n.collapsed = canCollapse(n); } }); relayoutFit(); };
+document.getElementById("onlyCalled").onchange = function(){ onlyCalled = this.checked; relayoutFit(); };
+document.getElementById("showLabels").onchange = function(){ labels = this.checked; render(); };
+var labels = true;
+var treeDiv = document.getElementById("tree");
+var suppressClick = false;
+treeDiv.addEventListener("click", function(e){
+\tif (suppressClick) { return; }
+\tvar t = e.target;
+\tif (t.tagName !== "circle" || !t.hasAttribute("data-id")) { return; }
+\tvar n = nodes[+t.getAttribute("data-id")];
+\tif (n.collapsed || canCollapse(n)) { n.collapsed = !n.collapsed; relayoutFit(); }
+});
+treeDiv.addEventListener("dblclick", function(e){ if (e.target.tagName !== "circle") { fit(); } });
+treeDiv.addEventListener("wheel", function(e){
+\te.preventDefault();
+\tif (!svgEl) { return; }
+\tvar r = svgEl.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+\tvar f = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+\tvar px = vb.x + vb.w * fx, py = vb.y + vb.h * fy;
+\tvb.w *= f; vb.h *= f;
+\tvb.x = px - vb.w * fx; vb.y = py - vb.h * fy;
+\tapply();
+}, {passive: false});
+var drag = null, moved = 0;
+treeDiv.addEventListener("mousedown", function(e){ drag = {x: e.clientX, y: e.clientY}; moved = 0; suppressClick = false; });
+window.addEventListener("mousemove", function(e){
+\tif (!drag || !svgEl) { return; }
+\tvar r = svgEl.getBoundingClientRect();
+\tvar dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+\tmoved += Math.abs(dx) + Math.abs(dy);
+\tvb.x -= dx * vb.w / r.width; vb.y -= dy * vb.h / r.height;
+\tdrag = {x: e.clientX, y: e.clientY};
+\tapply();
+});
+window.addEventListener("mouseup", function(){
+\tif (drag && moved > 5) { suppressClick = true; }
+\tdrag = null;
+});
+var overviewState = null;
+document.getElementById("overview").onclick = function(){
+\tif (!overviewState) { return; }
+\tnodes.forEach(function(n){ n.collapsed = overviewState[n.id]; });
+\trelayoutFit();
+};
+autoCollapse();
+overviewState = nodes.map(function(n){ return n.collapsed; });
+render();
+fit();
+</script>
+</body>
+</html>
+'''
 
 class NewickNode(object):
 	"""The NewickNode class stores the information of a taxonomy node
@@ -128,7 +341,7 @@ class NewickTree(object):
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
-		self.tree_file = "{outdir}/{name}_tree.pdf".format(outdir=outdir.rstrip("/"),name=name) ## output file
+		self.tree_file = "{outdir}/{name}_tree.html".format(outdir=outdir.rstrip("/"),name=name) ## output file
 		self.min_required_hits = min_required_hits
 		self.strictness = strictness
 		## Build the newick tree
@@ -227,17 +440,34 @@ class NewickTree(object):
 				continue
 			self.new_node(child,nodes,parent)
 		## The newickTree is the same as the master parent (containing the full tree, the root node is defined on row 135)
+		self.root = newickTree ## kept as an object so draw_tree can walk the tree without re-parsing the string
 		logger.debug("Tree complete, return newickTree")
 		#logger.debug(newickTree)
 		return newickTree
 
-	def CanSNPer_tree_layout(self,node):
-		'''Layout function for ETE3 trees.'''
-		# Adds the name face to the image at the top side of the branch
-		if not node.is_root():
-			faces.add_face_to_node(AttrFace("name"), node, column=0, position="branch-top")
+	def _tree_entries(self):
+		'''Flatten the NewickNode tree into a list of dicts in preorder, shaped exactly like the
+			ete3 tree used to be parsed from the newick string: a "ROOT" wrapper above the
+			database root (NewickNode.__str__ renders the root as ")ROOT;"), every entry carrying
+			id, name, parent id and depth. Children are walked in name order as in __str__, so the
+			first entry of a name is the node search_nodes(name)[0] used to match (issue #78).'''
+		entries = []
+		def add(name, parent):
+			entry = {"id": len(entries),
+					 "name": name,
+					 "parent": parent,
+					 "depth": 0 if parent is None else entries[parent]["depth"] + 1}
+			entries.append(entry)
+			return entry["id"]
+		def walk(node, parent):
+			entry_id = add(node.name, parent)
+			for child in sorted(node.children, key=lambda child: child.name):
+				walk(child, entry_id)
+		root_id = add("ROOT", None)
+		walk(self.root, root_id)
+		return entries
 
-	def _confirm_path(self,node,called_snps,snplist):
+	def _confirm_path(self,entry,entries,called_snps,snplist):
 		'''Confirm that the ACTUAL ancestor chain of the node, from the root of the tree down to
 			the node itself, is entirely made up of called SNPs (issue #25).
 			Returns (confirmed, number_of_snps_on_the_chain).
@@ -245,106 +475,83 @@ class NewickTree(object):
 			the tree should have left the branch at that point, so no node below it can be final-called.
 			The quota of a complete chain is always 1, only min_required_hits gates the call now;
 			competing complete paths are handled by the caller (policy of issue #47).'''
-		logger.debug("Confirm path of {node}".format(node=node.name))
+		logger.debug("Confirm path of {node}".format(node=entry["name"]))
 		count = 0
-		while node.name != "ROOT":
-			if node.name in called_snps and snplist.get(node.name,0) != 2:
+		while entry["name"] != "ROOT":
+			if entry["name"] in called_snps and snplist.get(entry["name"],0) != 2:
 				count +=1
 			else:
 				'''not called (or missing from the alignments) here, or confirmed ancestral:
 					the chain to this node is incomplete, the branch was left at this SNP'''
-				logger.debug("Chain broken at {node}, {count} called SNPs below it".format(node=node.name,count=count))
+				logger.debug("Chain broken at {node}, {count} called SNPs below it".format(node=entry["name"],count=count))
 				return False,count
-			node = node.up
+			entry = entries[entry["parent"]]
 		if count >= self.min_required_hits:
 			logger.info("Confirm complete path of {count} SNPs (min required hits: {minhit})".format(count=count,minhit=self.min_required_hits))
 			return True,count
 		logger.debug("Complete chain too short: {count} < {minhit}".format(count=count,minhit=self.min_required_hits))
 		return False,count
 
-	def draw_ete3_tree(self,snplist,called_snps=False,save_tree=True,summary=False):
-		'''Draws a phylogenetic tree using ETE3
+	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False):
+		'''Colors the SNP tree with the states found in the query alignments and writes the
+			self-contained html viewer described in the module header.
 		Keyword arguments:
-		snplist -- a list of the SNP names, positions and state
+		snplist -- a dict of the SNP names and their state
 		'''
 		logger.debug("Draw tree from snplist")
-		if not ETENEWICK_OK:
-			raise ImportError("ete3 has no drawing classes (NodeStyle, TreeStyle, AttrFace), no tree can be drawn: {why}. Install a Qt binding for ete3: pip install PyQt5, or in conda conda install pyqt - an ete3 from the etetoolkit channel needs pyqt on its own (issues #19, #122)".format(why=ETE_TREEVIEW_ERROR))
-		try:
-			tree = ete3.Tree(self.newickTree, format=1)
-		except Exception as e:
-			logger.debug(self.newickTree)
-			raise ValueError("The newick tree in the database could not be parsed by ete3, cannot draw the tree: {err}".format(err=e))
-		farthest_leaf, tree_depth = tree.get_farthest_leaf()
+		entries = self._tree_entries()
 		'''nodes of the tree that no alignment carried any base for: they have to be reported,
-			not left out of the pdf and out of both result files (issue #27)'''
+			not left out of the viewer and out of both result files (issue #27)'''
 		no_data_nodes = set()
-		for n in tree.traverse():
-			# The ancestral node is set to have a red colour
-			nstyle = NodeStyle()
-			# If the SNP is missing due to a gap, make it grey
-			nstyle["fgcolor"] = self.snp_colors["non_aligned"]
-			nstyle["size"] = 10
-			nstyle["vt_line_color"] = "#DDDDDD"
-			nstyle["hz_line_color"] = "#DDDDDD"
-			nstyle["vt_line_type"] = 1
-			nstyle["hz_line_type"] = 1
-			nstyle["vt_line_width"] = 2
-			nstyle["hz_line_width"] = 2
+		for entry in entries:
+			n = entry["name"]
+			# The ancestral node is set to have a red colour, a node missing due to a gap is grey
+			entry["fill"] = self.snp_colors["non_aligned"]
+			entry["r"] = 5           ## ete3 "size" was a diameter: 10 drew as r=5, keep that scale
+			entry["line"] = "#DDDDDD"
+			entry["dash"] = True
+			entry["dot"] = True
+			entry["called"] = bool(called_snps) and n in set(called_snps)
+			if n == "ROOT" or (n.startswith("-") and n.endswith("-")):
+				'''ROOT and the "-name-" labels that get_nodes gives to nodes without any
+					snp_annotation (the root of a database like that) are not SNPs: they are only
+					meant to be line junctions and a label node must not be drawn as a grey SNP
+					dot (issue #52, with #32 and #34)'''
+				entry["dot"] = False
+				continue
 			if len(snplist) > 0:
-				try:
-					snpvalue = snplist[n.name]
-				except KeyError:
-					if n.name == "ROOT" or (n.name.startswith("-") and n.name.endswith("-")):
-						'''ROOT and the "-name-" labels that get_nodes gives to nodes without any
-							snp_annotation (the root of a database like that) are not SNPs: they keep
-							no style, the root is only meant to be a line and a label node must not be
-							drawn as a grey SNP dot (issue #52, with #32 and #34)'''
-						continue
-					'''SNP not in list: no alignment covered this position at all, keep the grey
-						"non aligned" style that was set above. The node used to be skipped with a
-						continue, which also skipped set_style below and left the node at the ete3
-						default size, so it was invisible in the pdf (issue #27)'''
-					no_data_nodes.add(n.name)
-				else:
+				if n in snplist:
+					snpvalue = snplist[n]
 					if snpvalue == 2:
-						nstyle["fgcolor"] = self.snp_colors["ancestral"]
-						nstyle["size"] = 10
-						nstyle["vt_line_color"] = "#000000"
-						nstyle["hz_line_color"] = "#000000"
-						nstyle["vt_line_type"] = 0
-						nstyle["hz_line_type"] = 0
-						nstyle["vt_line_width"] = 2
-						nstyle["hz_line_width"] = 2
+						## Ancestral: purple
+						entry["fill"] = self.snp_colors["ancestral"]
+						entry["line"] = "#000000"
+						entry["dash"] = False
 					elif snpvalue == 1:
 						## If the SNP was derived make it green
-						nstyle["fgcolor"] = self.snp_colors["derived"]
-						nstyle["size"] = 15
-						nstyle["vt_line_color"] = "#000000"
-						nstyle["hz_line_color"] = "#000000"
-						nstyle["vt_line_type"] = 0
-						nstyle["hz_line_type"] = 0
+						entry["fill"] = self.snp_colors["derived"]
+						entry["r"] = 7.5
+						entry["line"] = "#000000"
+						entry["dash"] = False
 					elif snpvalue == 3:
 						## If the SNP was neither of ancestral or derived make it blue
-						nstyle["fgcolor"] = self.snp_colors["other_base"]
-						nstyle["size"] = 15
-						nstyle["vt_line_color"] = "#000000"
-						nstyle["hz_line_color"] = "#000000"
-						nstyle["vt_line_type"] = 0
-						nstyle["hz_line_type"] = 0
-
+						entry["fill"] = self.snp_colors["other_base"]
+						entry["r"] = 7.5
+						entry["line"] = "#000000"
+						entry["dash"] = False
+				else:
+					'''SNP not in list: no alignment covered this position at all, keep the grey
+						"non aligned" style set above. The node used to be skipped with a continue,
+						which also skipped the style and left it at the ete default size, invisible
+						in the pdf (issue #27)'''
+					no_data_nodes.add(n)
 			elif called_snps:
-				if set([n.name]) & set(called_snps):
-					### Only care about called SNPs and color all green
-					nstyle["fgcolor"] = self.snp_colors["derived"]
-					nstyle["size"] = 15
-				nstyle["vt_line_color"] = "#000000"
-				nstyle["hz_line_color"] = "#000000"
-				nstyle["vt_line_type"] = 0
-				nstyle["hz_line_type"] = 0
-
-			if n.name != "ROOT": ## Root should be just a line not a false "ancenstral node"
-				n.set_style(nstyle)
+				### Only care about called SNPs and color all green
+				if entry["called"]:
+					entry["fill"] = self.snp_colors["derived"]
+					entry["r"] = 7.5
+				entry["line"] = "#000000"
+				entry["dash"] = False
 		'''the nodes without data are drawn grey now, and their database annotation is returned as
 			well, so the per sample files can list them instead of hiding that they were never
 			compared at all (issue #27)'''
@@ -353,33 +560,27 @@ class NewickTree(object):
 			logger.warning("{n} SNP positions in the tree had no alignment data at all, no reference block covered them or --mask dropped them: {ids}".format(
 					n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])))
 			no_data_info = self.get_no_data_info(no_data_nodes)
-		ts = TreeStyle()
-		ts.show_leaf_name = False  						# Do not print(leaf names, they are added in layout)
-		ts.show_scale = False  							# Do not show the scale
-		ts.layout_fn = self.CanSNPer_tree_layout  		# Use the custom layout
-		ts.optimal_scale_level = 'full' 			 	# Fully expand the branches of the tree
-		scale_factor = 500								# Tree scale factor, increases depth of tree to allow a higher resolution tree
-
-		## Render tree and save to pdf
+		## Write the tree viewer
 		if save_tree:
-			tree.render(self.tree_file, tree_style=ts, w=tree_depth * scale_factor)
+			self.write_tree_html(entries)
 			if summary:
 				return
 		dlist = []
 		logger.info("Called snps: {called}".format(called=called_snps))
 		if called_snps:
 			try:
-				troot = tree.get_tree_root()
-				'''Calculate the distance from all nodes to the root'''
+				node_index = {} ## first entry of every name, preorder, like search_nodes()[0]
+				for entry in entries:
+					node_index.setdefault(entry["name"], entry["id"])
+				'''Calculate the distance from all nodes to the root: every branch has unit length,
+					so the ete distance to the root is just the depth of the node'''
 				for tsnp in called_snps:
-					try:
-						dist = tree.get_distance(tsnp,troot)
-						dlist.append([dist,tsnp])
-					except ValueError:
-						if tsnp == "T/N.1":
-							dlist.append([0,tsnp])
-						else:
-							logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
+					if tsnp in node_index:
+						dlist.append([entries[node_index[tsnp]]["depth"],tsnp])
+					elif tsnp == "T/N.1":
+						dlist.append([0,tsnp])
+					else:
+						logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
 				## Sort the list of distances from deepest
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
 				if len(dlist) < self.min_required_hits: ## the number of SNPs found is too small to be valid,
@@ -397,11 +598,10 @@ class NewickTree(object):
 				candidates = [] ## complete called paths, all at the greatest confirmed depth
 				deepest = None ## deepest called SNP found in the tree, kept for the "not confirmed" report
 				for dist,tsnp in dlist: ## loop the called SNPs from deepest
-					matches = tree.search_nodes(name=tsnp)
-					if not matches: ## the node name from the db is not in the ete3 tree, cannot call (issue #78)
+					if tsnp not in node_index: ## the node name from the db is not in the tree, cannot call (issue #78)
 						logger.debug("Called SNP {snp} was not found in the tree, cannot confirm it".format(snp=tsnp))
 						continue
-					ok,count = self._confirm_path(matches[0],called_snps,snplist)
+					ok,count = self._confirm_path(entries[node_index[tsnp]],entries,called_snps,snplist)
 					if not deepest:
 						deepest = [dist,tsnp,(False,count)]
 					if not ok:
@@ -420,7 +620,7 @@ class NewickTree(object):
 					logger.info(msg)
 				elif len(candidates) > 1:
 					paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1],n=c[2]) for c in candidates])
-					msg = "Two or more complete SNP paths compete at the same depth: {paths}, no path is auto-picked, check {pdf}".format(paths=paths,pdf=self.tree_file)
+					msg = "Two or more complete SNP paths compete at the same depth: {paths}, no path is auto-picked, check {tree}".format(paths=paths,tree=self.tree_file)
 					logger.warning(msg)
 					called = deepest
 				elif deepest:
@@ -441,6 +641,16 @@ class NewickTree(object):
 			logger.debug(msg)
 			return False,msg,[],no_data_info
 		return called,msg,dlist,no_data_info
+
+	def write_tree_html(self,entries):
+		'''Write the self-contained viewer: the colored tree and its data are embedded in a single
+			html file, no server, no javascript downloads, opens in any browser on any OS'''
+		payload = json.dumps({"colors": self.snp_colors, "nodes": entries}, separators=(",", ":"))
+		page = (TREE_HTML_TEMPLATE
+				.replace("__TITLE__", str(os.path.basename(self.tree_file)))
+				.replace("__PAYLOAD__", payload))
+		with open(self.tree_file, "w") as out:
+			out.write(page)
 
 	def get_no_data_info(self,snp_ids):
 		'''Look up the database annotation of the SNP nodes that no alignment carried a base for, in the

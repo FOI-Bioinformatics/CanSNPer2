@@ -214,11 +214,11 @@ cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inp
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
 expect "query_snps.txt lines" "19" "$(wc -l < "$OUT/res_query/query_snps.txt")"
 expect "query_not_called.txt lines" "313" "$(wc -l < "$OUT/res_query/query_not_called.txt")"
-if [ -s "$OUT/res_query/query_tree.pdf" ]; then
-    printf '  ok    %-52s %s bytes\n' "query_tree.pdf written" "$(wc -c < "$OUT/res_query/query_tree.pdf" | tr -d ' ')"
+if [ -s "$OUT/res_query/query_tree.html" ]; then
+    printf '  ok    %-52s %s bytes\n' "query_tree.html written" "$(wc -c < "$OUT/res_query/query_tree.html" | tr -d ' ')"
     PASSED=$((PASSED+1))
 else
-    printf '  FAIL  %-52s missing or empty\n' "query_tree.pdf written"; FAILED=$((FAILED+1))
+    printf '  FAIL  %-52s missing or empty\n' "query_tree.html written"; FAILED=$((FAILED+1))
 fi
 
 mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT/tmp_skip/CanSNPer2/"
@@ -229,7 +229,7 @@ expect "same not-called through --skip_mauve" "313" "$(wc -l < "$OUT/res_skip/qu
 
 # every SNP of the database tree has to show up in one of the two files: a position that no
 # alignment carried a base for used to be missing from both, so the only way to see it was the
-# pdf and the log (#27). The wide mask pushes those positions in artificially.
+# tree html and the log (#27). The wide mask pushes those positions in artificially.
 cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_mask" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/mask" --skip_mauve --mask 20000
 NODATA=$(awk -F'\t' 'NR>1 && $6=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
