@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 
 reference_genomes = ["FSC200","SCHUS4.1","SCHUS4.2","OSU18","LVS","FTNF002-00"]
 
+'''SNPs closer to either edge of an alignment block than this many reference bases are
+	flagged in the output: assembly ends and read ends are the most likely place for
+	alignment errors, and a SNP sitting there should be reviewed by the user instead of
+	silently trusted or silently dropped (--mask, issue #48)'''
+EDGE_MARGIN = 25
+
 class ParseXMFA(object):
 	"""docstring for ParseXMFA."""
 	def __init__(self, verbose=False, **kwargs):
@@ -45,11 +51,13 @@ class ParseXMFA(object):
 			this option allows masking of SNPs placed within n bases of the edge of an alignment'''
 		self.mask = int(kwargs.get("mask",0) or 0) ## the option was advertised but never read (issue #175)
 		self.masked = {} ## how many positions each reference lost to the mask
+		self.edge_snps = set() ## SNPs within EDGE_MARGIN bases of an alignment edge, flagged not dropped (issue #48)
 		kwargs["verbose"] = True
-		if "database" in kwargs:
-			self.database = XMFAFunctions(kwargs["database"],verbose=self.verbose)
-		else:
-			self.database = False
+		'''the database is only connected in run(), by whichever process uses this object:
+			the SNP calling workers are forked from the parent and used to inherit its open
+			sqlite connection and cursor, so several processes read through one cursor (issue #49)'''
+		self.database_path = kwargs.get("database",False)
+		self.database = False
 
 	def get_snp_info(self):
 		'''Return SNP_info'''
@@ -112,9 +120,15 @@ class ParseXMFA(object):
 				if head["sign"] == "-":
 					'''If the sequence sign is "-" the complement base needs to be retrieved'''
 					_snp = self.rcDict.get(_snp,"N") ## unknown base characters become N (issue #96)
-				'''Fetch information about snp to allow print to file'''
+				'''Fetch information about snp to allow print to file; a SNP this close to either
+					edge of the alignment block is still evaluated but carries the "edge" flag in
+					the output, so the user can review the positions that sit on the ends of the
+					assembly or of an alignment, where errors are most likely (issue #48)'''
 				orig_snp_pos = str(self.snplist[self.current_snp][0])
-				snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp]
+				edge_flag = "edge" if (snppos <= EDGE_MARGIN or block_len - snppos < EDGE_MARGIN) else ""
+				snpinfo = [snp_id,self.reference,orig_snp_pos,rbase,tbase,_snp,edge_flag]
+				if edge_flag:
+					self.edge_snps.add(snp_id)
 				self.SNP_info.append(snpinfo)
 
 				if tbase == _snp:           ## SNP is confirmed to be Derived
@@ -163,8 +177,11 @@ class ParseXMFA(object):
 					break
 				#/
 
-			if refHead["start"] < self.current_snp and refHead["end"] > self.current_snp:
-				'''Check if current snp is within this mapped region else skip'''
+			if refHead["start"] <= self.current_snp and refHead["end"] >= self.current_snp:
+				'''Check if current snp is within this mapped region else skip; the block
+					covers start..end inclusive (block_len counts both ends, issue #175), so a
+					SNP exactly at the first or last position is inside too and the whole block
+					must not be skipped for it (issue #39)'''
 				ref = "".join(refSeq)				 ## Make reference sequence one string
 				target = "".join(targetSeq)			 ## Make target sequence one string
 				'''For each snp within this region find it and merge with all others'''
@@ -193,11 +210,15 @@ class ParseXMFA(object):
 	def run(self, xmfa, reference=False,database=False):
 		'''Parse XMFA file and return SNPS matching the given database'''
 		self.SNPS = {}  ## For each run SNPs has to be emtpy
-		'''Create connection to SNP database if it is not connected'''
+		self.edge_snps = set() ## one reporting set per parsed alignment (issue #48)
+		'''Create the connection to the SNP database here, in the process that parses the
+			alignment, so a forked worker never reads through a cursor opened by its parent
+			(issue #49)'''
 		if not self.database:
+			database = self.database_path or database
 			if not database:
 				raise ValueError("No database was provided to ParseXMFA, cannot retrieve snps from the database!")
-			self.database = XMFAFunctions(database)
+			self.database = XMFAFunctions(database,verbose=self.verbose)
 		''' retrieve registered SNPs'''
 		if not reference:
 			reference = os.path.basename(xmfa).split("_")[0]
@@ -212,7 +233,12 @@ class ParseXMFA(object):
 		snps = self.read_xmfa(xmfa)
 		if self.mask and self.masked.get(self.reference):
 			logger.info("{n} SNP positions against {reference} were within {mask} bases of an alignment edge and were not evaluated".format(
-					n=self.masked[self.reference], reference=self.reference, mask=self.mask))
+					n=self.masked[self.reference], reference=reference, mask=self.mask))
+		'''the mask drops those positions when asked, but without it a SNP at an assembly or read
+			end must still be seen and reviewed, so it is reported loudly and flagged per row (issue #48)'''
+		if self.edge_snps:
+			logger.warning("{n} SNP positions within {m} bases of an alignment edge were found against {reference} and are flagged 'edge' in the result files: {ids}".format(
+					n=len(self.edge_snps), m=EDGE_MARGIN, reference=reference, ids=", ".join(sorted(self.edge_snps)[:20])))
 		return snps
 
 if __name__=="__main__":

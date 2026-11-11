@@ -8,7 +8,13 @@ from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 
 import argparse,os
-from multiprocessing import Process, Queue
+import multiprocessing
+from multiprocessing import Queue
+'''python 3.14 made forkserver the default start method on linux, where the worker target has
+	to be picklable and the bound self.download (with the whole DownloadGenomes state) is not,
+	so the fork context is requested explicitly, as in modules/CanSNPer2.py (issue #186).
+	Queues must come from the same context as the processes.'''
+_MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.LogSetup import setup_logging
 import logging
@@ -124,13 +130,13 @@ class DownloadGenomes(object):
 		for genome_id in keys:
 			assembly = self.genomes[genome_id]
 			targets.append((genome_id, assembly, self.genomes[assembly]))
-		results = Queue()
+		results = _MP_CTX.Queue()
 		threads = []
 		logging.info("Downloading {n} references from {source} into {directory}".format(
 				n=len(targets), source=self.source, directory=self.directory))
 		for genome_id, assembly, refid in targets:
 			kwargs = {"source":self.source, "directory":self.directory, "results":results}
-			p = Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
+			p = _MP_CTX.Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
 			p.start()
 			threads.append(p)
 		for p in threads:

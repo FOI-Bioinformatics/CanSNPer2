@@ -51,7 +51,7 @@ CanSNPer2-download --database downloaded_database.db
 CanSNPer2 --database downloaded_database.db fastadir/*.fasta --summary
 ```
 
-The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree pdf with all SNPs from set colored.
+The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree (self-contained html, opens in any browser) with all SNPs from set colored.
 
 For more options CanSNPer2 --help
 
@@ -206,7 +206,7 @@ Run options:
   --keep_temp           keep temporary files
 
 Logging and debug options:
-  --tmpdir              Specify reference directory
+  --tmpdir              Specify tmp directory default (/tmp/CanSNPer2)
   --logdir              Specify log directory
   --verbose             Verbose output
   --debug               Debug output

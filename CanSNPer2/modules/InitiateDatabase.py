@@ -157,12 +157,25 @@ class CanSNPDatabase(DatabaseFunctions):
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
+			'''a trailing free-text comment column is allowed in the snp annotation input, and a row
+				may leave that column out; only trailing columns named like a comment are optional,
+				so a row that is short in a real column is still a bad row (issue #22)'''
+			trailing_optional = 0
+			for head in reversed(headers):
+				if head.strip().lower().lstrip("#") in ("comment","comments","note","notes","free text","free_text"):
+					trailing_optional += 1
+				else:
+					break
 			dataArr = []
 			for row in af:
-				data = row.strip().split("\t")
-				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #88)
+				if row.strip() == "" or row.strip().startswith("#"):
+					'''# lines are comments in the annotation file (issue #22)'''
+					continue
+				data = row.rstrip("\r\n").split("\t")
+				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
 					continue
+				data += [""] * (len(headers)-len(data)) ## rows may omit the optional trailing comment column (issue #22)
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]

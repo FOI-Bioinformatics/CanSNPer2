@@ -99,15 +99,22 @@ cmd build-db ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --crea
     --references "$SRC/francisella_tularensis_references.txt" --source_type CanSNPer \
     --logs "$OUT/logs/db"
 COUNTS=$("$PY" -c "import sqlite3;c=sqlite3.connect('$DB');print(' '.join(str(c.execute('SELECT COUNT(*) FROM '+t).fetchone()[0]) for t in ('nodes','tree','rank','snp_annotation','snp_references')))")
-expect "row counts nodes/tree/rank/annotation/references" "329 329 2 328 5" "$COUNTS"
+# the databases built from source have exactly one root now: ReadTaxonomyCanSNPer no longer adds an
+# extra node named "root" above the tree's own root (issues #32, #34), so the node and link counts
+# are one lower than before that fix
+expect "row counts nodes/tree/rank/annotation/references" "328 328 2 328 5" "$COUNTS"
 cmd export-tab ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --export \
     --export_format tab -o "$OUT/export_tab" --logs "$OUT/logs/export"
-expect "tab export annotation.dmp" "329" "$(wc -l < "$OUT/export_tab/annotation.dmp")"
-expect "tab export snptree.dmp" "330" "$(wc -l < "$OUT/export_tab/snptree.dmp")"
+expect "tab export annotation.dmp" "328" "$(wc -l < "$OUT/export_tab/annotation.dmp")"
+expect "tab export snptree.dmp" "329" "$(wc -l < "$OUT/export_tab/snptree.dmp")"
 cmd export-newick ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --export \
     --export_format newick -o "$OUT/export_nwk" --logs "$OUT/logs/export"
 NW=$(ls "$OUT/export_nwk"/*.nwk 2>/dev/null | head -1)
-expect "newick starts with the root ($(basename "${NW:-none}"))" "((((M.1," "$(cut -c1-8 "${NW:-/dev/null}")"
+# the check is structural now: the child order in a newick string is arbitrary and the exported
+# tree used to change with the python hash seed, which made the old prefix comparison flaky.
+# The export must contain the database root (T/N.1) rendered as the ROOT node, exactly once
+ROOTHIT=$(grep -o "T/N.1)ROOT;" "$NW" 2>/dev/null | head -1)
+expect "newick contains the database root as ROOT ($(basename "${NW:-none}"))" "T/N.1)ROOT;" "$ROOTHIT"
 
 say "== the id 0 regression (issues #202, #222)"
 cat > "$OUT/id0_check.py" <<'PYEOF'
@@ -146,7 +153,22 @@ mkdir -p "$OUT/refs"
 for r in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do cp "$PKG/references/$r.fna" "$OUT/refs/"; done
 mkdir -p "$OUT/inputs" && cp "$PKG/references/FSC200.fna" "$OUT/inputs/query.fna"
 
-say "== the failure paths must be loud (issues #176, #177, #179, #181, #190, #191)"
+say "== a reference folder may hold more genomes than the database uses (issue #33)"
+mkdir -p "$OUT/refs_extra"
+for r in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do cp "$PKG/references/$r.fna" "$OUT/refs_extra/"; done
+cp "$PKG/references/FSC200.fna" "$OUT/refs_extra/NOTINTHEDATABASE.fna"
+EXTRA=$("$PY" - "$PKG" "$DB" "$OUT/refs_extra" "$OUT/extra_refs_work" <<'PYEOF' 2>/dev/null
+import sys, os, logging
+logging.disable(logging.CRITICAL)
+sys.path.insert(0, sys.argv[1])
+from CanSNPer2.modules.CanSNPer2 import CanSNPer2
+obj = CanSNPer2([], database=sys.argv[2], refdir=sys.argv[3], workdir=sys.argv[4])
+print(len(obj.get_references()))
+PYEOF
+)
+expect "extra reference files are filtered out, the 5 database references stay" "5" "$EXTRA"
+
+say "== the failure paths must be loud (issues #43, #176, #177, #179, #181, #190, #191)"
 mkdir -p "$OUT/empty_refs"
 cmd no-references fail "No reference genomes" "$PY" -m CanSNPer2.modules.runMauve \
     "$PKG/references/FSC200.fna" --refdir "$OUT/empty_refs" --tmpdir "$OUT/t_norefs" \
@@ -157,6 +179,12 @@ cmd missing-query-file fail "was not found" "$PY" -m CanSNPer2.modules.runMauve 
 cmd skip-mauve-without-alignments fail "No alignments were produced" "$PY" -m CanSNPer2.modules.runMauve \
     "$OUT/inputs/query.fna" --refdir "$OUT/refs" --tmpdir "$OUT/t_empty" \
     --logs "$OUT/logs/empty" --outdir "$OUT/r_empty" --skip_mauve
+# --keep_going must stay loud when every sample failed: the 2.0.6 run typed nothing,
+# wrote no files and still exited 0, which is why the reporter saw "no output at all" (#43)
+cmd keep-going-no-output fail "No sample was typed" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
+    "$OUT/no_such_file.fna" -db "$DB" --refdir "$OUT/refs" -o "$OUT/r_keepgoing" \
+    --tmpdir "$OUT/t_keepgoing" --logdir "$OUT/logs/keepgoing" --keep_going --skip_mauve
+expect "keep_going left no result files behind" "0" "$(ls "$OUT/r_keepgoing" 2>/dev/null | wc -l | tr -d ' ')"
 
 say "== download failure is reported and fails the command (issue #218)"
 DLLOG=$OUT/logs/download
@@ -186,11 +214,11 @@ cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inp
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
 expect "query_snps.txt lines" "19" "$(wc -l < "$OUT/res_query/query_snps.txt")"
 expect "query_not_called.txt lines" "313" "$(wc -l < "$OUT/res_query/query_not_called.txt")"
-if [ -s "$OUT/res_query/query_tree.pdf" ]; then
-    printf '  ok    %-52s %s bytes\n' "query_tree.pdf written" "$(wc -c < "$OUT/res_query/query_tree.pdf" | tr -d ' ')"
+if [ -s "$OUT/res_query/query_tree.html" ]; then
+    printf '  ok    %-52s %s bytes\n' "query_tree.html written" "$(wc -c < "$OUT/res_query/query_tree.html" | tr -d ' ')"
     PASSED=$((PASSED+1))
 else
-    printf '  FAIL  %-52s missing or empty\n' "query_tree.pdf written"; FAILED=$((FAILED+1))
+    printf '  FAIL  %-52s missing or empty\n' "query_tree.html written"; FAILED=$((FAILED+1))
 fi
 
 mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT/tmp_skip/CanSNPer2/"
@@ -198,6 +226,47 @@ cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$O
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
 expect "same snps through --skip_mauve" "19" "$(wc -l < "$OUT/res_skip/query_snps.txt")"
 expect "same not-called through --skip_mauve" "313" "$(wc -l < "$OUT/res_skip/query_not_called.txt")"
+
+# every SNP of the database tree has to show up in one of the two files: a position that no
+# alignment carried a base for used to be missing from both, so the only way to see it was the
+# tree html and the log (#27). The wide mask pushes those positions in artificially.
+cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
+    --refdir "$OUT/refs" -o "$OUT/res_mask" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/mask" --skip_mauve --mask 20000
+NODATA=$(awk -F'\t' 'NR>1 && $6=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
+COVERED=$("$PY" -c "
+nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_not_called.txt')) if i)
+sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('SNP path', 'Final SNP')))
+print(nc + sc)")
+if [ "$NODATA" -gt 0 ] && [ "$COVERED" = 328 ] && grep -q "no alignment data" "$LASTLOG"; then
+    printf '  ok    %-52s %s positions listed, the two files cover all 328 SNPs\n' "SNPs without any alignment data are listed (#27)" "$NODATA"
+    PASSED=$((PASSED+1))
+else
+    printf '  FAIL  %-52s %s N/A rows, %s of 328 SNPs listed, see %s\n' "SNPs without any alignment data are listed (#27)" "$NODATA" "$COVERED" "$(basename "$LASTLOG")"
+    FAILED=$((FAILED+1))
+fi
+
+# an NA sample must still carry the SNPs that WERE called on the way to the failing point:
+# a min_required_hits no sample can reach fails the call, but every derived SNP found is
+# real information and belongs in the snps file (issue #35)
+cmd na-min-hits any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
+    --refdir "$OUT/refs" -o "$OUT/res_na" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/na" \
+    --skip_mauve --min_required_hits 999
+NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(SNP path|Final SNP)/' "$OUT/res_na/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$NA_ROWS" -gt 0 ] && grep -q "^SNP path: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null && grep -q "^Final SNP: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null; then
+    printf '  ok    %-52s %s called SNPs listed although the call is NA\n' "NA sample keeps its called SNPs (#35)" "$NA_ROWS"
+    PASSED=$((PASSED+1))
+else
+    printf '  FAIL  %-52s %s SNP rows in query_snps.txt, see %s\n' "NA sample keeps its called SNPs (#35)" "$NA_ROWS" "$(basename "$LASTLOG")"
+    FAILED=$((FAILED+1))
+fi
+
+# the other half of #43: with --keep_going a failing sample must not take the output of
+# the samples that did work along with it
+cmd keep-going-mixed ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
+    "$OUT/no_such_file.fna" "$OUT/inputs/query.fna" -db "$DB" --refdir "$OUT/refs" \
+    -o "$OUT/res_keepgoing" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/keepgoing_ok" \
+    --keep_going --skip_mauve
+expect "keep_going kept the working sample's output" "19" "$(wc -l < "$OUT/res_keepgoing/query_snps.txt" 2>/dev/null || echo 0)"
 
 if ls "$ROOT"/test_data/*.fasta >/dev/null 2>&1; then
     ls "$ROOT"/test_data/*.fasta > "$OUT/real_list.txt"

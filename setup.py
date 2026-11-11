@@ -24,34 +24,31 @@ setup(
     author='David Sundell',
     author_email='david.sundell@foi.se',
 
-    license=' GNU GENERAL PUBLIC LICENSE version 3',
+    # setuptools >=77 wants the license as an SPDX expression and deprecates the
+    # "License ::" classifier; the file in the package folder stays the license text
+    license='GPL-3.0-or-later',
 
     classifiers=[
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
-        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         "Operating System :: OS Independent"
     ],
-    # ete3 3.1.3 imports cgi (ete3/webplugin/webapp.py), which was removed in Python 3.13,
-    # so importing ete3 - and therefore CanSNPer2 - is impossible on 3.13 and newer; the
-    # upper bound makes pip refuse such an environment with a clear Requires-Python error
-    # instead of failing at import time (issue #184). The pinned numpy==1.24.4 in
-    # requirements.txt only has wheels up to 3.11, so a built conda package should target
-    # 3.8-3.11 and needs numpy>=1.26 before 3.12 can be supported.
-    python_requires='>=3.8,<3.13',
+    # the ete3 3.1.3 import of cgi (removed in python 3.13) capped CanSNPer2 below 3.13 for
+    # years (issue #184); the package no longer imports ete3/ete4 at all, it writes a
+    # self-contained html tree viewer instead, and runs on 3.14
+    python_requires='>=3.11',
 
     keywords="Bioinformatics SNP-typing sequence-data",
 
-    # ete3 is the only third party module the package imports directly, but ete3 itself
-    # imports six and numpy at import time, and "pip install -e CanSNPer2" does not read
-    # requirements.txt. Environments whose ete3 was installed without its dependencies
-    # therefore died with "No module named 'six'" and then "No module named 'numpy'" on
-    # the first CanSNPer2 call (issue #180, #182)
-    install_requires=['ete3','PyQt5','six','numpy'],
+    # no third party runtime imports any more: ete3, PyQt5, six and numpy were all tree
+    # drawing dependencies (issues #180/#182: "pip install -e CanSNPer2" had to pull ete3 and
+    # its imports in, and environments whose ete3 lacked them died at import time). With the
+    # html viewer in modules/NewickTree.py the whole class of failures is gone; pytest is
+    # development only and stays in requirements.txt instead
+    install_requires=[],
     packages=find_packages(exclude=['contrib', 'docs', 'test*']),
     #py_modules=['CanSNPer2.modules.ParseXMFA',"CanSNPer2.modules.DatabaseConnection","CanSNPer2.modules.CanSNPer2","CanSNPer2.modules.NewickTree"],
     entry_points={'console_scripts': [

@@ -3,7 +3,7 @@
 CanSNPer2: A toolkit for SNP-typing NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
-VERSION 2.1.0 release of CanSNPer2
+VERSION 2.2.0 release of CanSNPer2
 
 The second release of CanSNPer (CanSNPer2) is exclusively written for python3
 CanSNPer2 is simplified from CanSNPer1 stripped to only perform
@@ -11,7 +11,7 @@ required tasks. It is also written in a modular form with separate
 classes for each task which allows future extentions such as a sequence read
 input option planned during 2020.
 
-Requires progressiveMauve and ete3
+Requires progressiveMauve
 
 This program is free software: you can redistribute and/or modify
 the code under the terms of the GNU General Public License as published by
@@ -79,7 +79,7 @@ def main():
 
 
 	debugopts = parser.add_argument_group("Logging and debug options")
-	debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify reference directory")
+	debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify tmp directory default (/tmp/CanSNPer2)")
 	debugopts.add_argument('--logdir', 			metavar='', default="logs/", 								help="Specify log directory")
 	debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,					help="Verbose output")
 	debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")

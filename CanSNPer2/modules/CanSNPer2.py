@@ -18,16 +18,22 @@ from CanSNPer2 import __version__
 ## import standard python libraries for subprocess and multiprocess
 from subprocess import Popen,PIPE,STDOUT
 import multiprocessing
+from queue import Empty
 from time import sleep,time
 import signal
 
-# the workers inherit the parent's memory and share the sqlite connection on self, which
-# is what the fork start method gives. Python 3.14 made forkserver the default on linux,
-# where the worker target has to be pickled and "cannot pickle sqlite3.Connection" killed
-# every run, so the context is requested explicitly (issue #186). Queues must come from
-# the same context as the processes. The cleaner long term fix is to hand the workers the
-# database path and let each of them open its own connection.
+# the workers are forked and inherit the parent's memory, which is what the fork start method
+# gives. Python 3.14 made forkserver the default on linux, where the worker target has to be
+# pickled and "cannot pickle sqlite3.Connection" killed every run, so the context is requested
+# explicitly (issue #186). Queues must come from the same context as the processes. The database
+# connection is opened inside the worker now, from the path ParseXMFA carries, so no cursor is
+# shared between processes (issue #49).
 _MP_CTX = multiprocessing.get_context("fork")
+
+'''column header of the per sample SNP tables, both <sample>_snps.txt and
+	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
+	near an alignment edge (issue #48)'''
+SNP_FILE_COLUMNS = ["Name","Reference","Pos","Ancestral base","Derived base","Target base","Edge flag"]
 
 class Error(Exception):
 	"""docstring for Error"""
@@ -64,9 +70,15 @@ class CanSNPer2(object):
 		self.typed = {}
 		self.not_typed = {}
 		self.skipped = {}
+		'''the SNP path per sample, so the summary can print it for every sample (issue #24)'''
+		self.result_paths = {}
 		'''how long the queue loop may sit without a single item before it calls the run
 			stuck; a worker that keeps delivering is never cut off (issue #190)'''
 		self.queue_idle_timeout = kwargs.get("queue_idle_timeout", 5*60)
+		'''how long a worker may stay alive after the collection loop ended before it is
+			stopped: joining forever is what turned a stalled worker into a run that never
+			returned (issue #41)'''
+		self.worker_join_timeout = kwargs.get("worker_join_timeout", 2*60)
 		'''SNPs closer to an alignment edge than this are not evaluated (issue #175)'''
 		self.mask = int(kwargs.get("mask",0) or 0)
 
@@ -102,8 +114,6 @@ class CanSNPer2(object):
 		self.keep_going = keep_going
 
 		if kwargs.get("summary",False):
-			self.summary_set = set()
-			self.called_genome = {}
 			self.summary = True
 		else:
 			self.summary = False
@@ -164,7 +174,26 @@ class CanSNPer2(object):
 		processes = []  #process container
 		logfiles = []   #open log file container, parallel to processes
 		error = 0   #Variable for errors
+		def alignment_names(idx):
+			'''the mauve commands are [program, --output, xmfa, ref_file, query_file] and the
+				staged input names carry their "ref_"/"query_" prefixes: a warning that only says
+				"exitcode: 11" five times over never told which genome failed against which
+				reference (issue #12)'''
+			try:
+				def staged_name(arg,kind):
+					'''staged inputs are named "ref_"/"query_" + file, and a pre-cleaned copy
+						(issues #26, #28) adds a "cleaned_<kind>_" layer in between'''
+					base = os.path.basename(arg).rsplit(".",1)[0]
+					for prefix in ("{0}_".format(kind), "cleaned_", "{0}_".format(kind)):
+						if base.startswith(prefix):
+							base = base[len(prefix):]
+					return base
+				return staged_name(commands[idx][3],"ref"), staged_name(commands[idx][4],"query")
+			except IndexError:
+				return "unknown genome", "unknown reference"
 		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
+		names = []      #query/reference name of each running alignment, parallel to processes
+		logpaths = []   #log path of each running alignment, parallel to processes
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
 			logger.debug(command)			## In verbose mode print the actual mauve command
@@ -174,6 +203,8 @@ class CanSNPer2(object):
 			p = Popen(command,  stdout=log, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
 			logfiles.append(log)
 			processes.append(p)
+			names.append(alignment_names(i))
+			logpaths.append(logs[i])
 		## SIGTERM (timeout, cluster schedulers, kill) ends the process at once and would leave every
 		## progressiveMauve child running unattended, so route it through the cleanup below (issue #151)
 		def stop_on_sigterm(signum,frame):
@@ -193,22 +224,28 @@ class CanSNPer2(object):
 						finished = True
 						## When a process is finished close its log file
 						logfiles[idx].close()
+						## the containers are popped as processes finish, so the running position
+						## in these containers is the index for the names and logs, not the one
+						## in the original commands list (issue #12)
+						ref_name, query_name = names[idx]
 						### IF the exitcode is not 0 print a warning and ask user to read potential error messages
 						if exitcode == 11:
-							logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode}".format(exitcode=exitcode))
-							logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes".format(exitcode=exitcode))
+							logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode} for genome {query} against reference {ref}".format(exitcode=exitcode,query=query_name,ref=ref_name))
+							logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes ({query} vs {ref})".format(query=query_name,ref=ref_name))
 							retvalue=11
 						elif exitcode == -6:
-							logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!!")
+							logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!! ({query} vs {ref})".format(query=query_name,ref=ref_name))
 							retvalue=6
 						elif exitcode != 0:
 							if not self.keep_going:
-								logger.error("progressiveMauve failed with exitcode {exitcode} for {log}".format(exitcode=exitcode,log=logs[idx]))
+								logger.error("progressiveMauve failed with exitcode {exitcode} for {log}".format(exitcode=exitcode,log=logpaths[idx]))
 							error += 1
-							logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logs[idx],exitcode=exitcode))
+							logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode} for genome {query} against reference {ref}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logpaths[idx],exitcode=exitcode,query=query_name,ref=ref_name))
 						## Remove process from container
 						processes.pop(idx)
 						logfiles.pop(idx)
+						names.pop(idx)
+						logpaths.pop(idx)
 				if not finished: ## the poll loop would otherwise run flat out while mauve works (issue #152)
 					sleep(0.5)
 		except KeyboardInterrupt:
@@ -259,17 +296,49 @@ class CanSNPer2(object):
 				shutil.copyfile(source,staged)
 		return staged
 
+	def clean_input_fasta(self,path,kind):
+		'''Replace every sequence character that is not A/C/G/T (or their lowercase) with N before
+			anything is aligned: gaps ('-', '.', '*') made progressiveMauve fail with exitcode 6/11
+			(the gap retry used to replace dashes only after a failure, and could not see dashes it
+			could not "see", issue #28), and the ambiguous IUPAC codes (R,Y,M,K,S,W,B,D,H,V) can never
+			match the target base of a SNP, so replacing them with N is the honest call (issue #26).
+			Every replacement keeps the exact position of the base, so database SNP positions still
+			match, and an already clean file is returned unchanged.
+		'''
+		keep = set("ACGTacgtn")
+		dirty = False
+		lines = []
+		with open(path) as seq_in:
+			for line in seq_in:
+				if line.startswith(">"):
+					lines.append(line)
+					continue
+				body = line.rstrip("\n")
+				cleaned = "".join(ch if ch in keep or ch in "Nn" else "N" for ch in body)
+				'''whitespace-only lines are kept as they are; a line ending in a bare \r or a
+					stray space inside the sequence is not clean sequence either'''
+				if cleaned != body:
+					dirty = True
+				lines.append(cleaned + "\n")
+		if not dirty:
+			return path
+		cleaned_path = os.path.join(self.tmpdir, "cleaned_{kind}_{name}".format(kind=kind,name=os.path.basename(path)))
+		with open(cleaned_path,"w") as seq_out:
+			seq_out.write("".join(lines))
+		logger.info("Replaced characters that are not ACGT with N in {name} before alignment (gaps and ambiguous nucleotides, issues #26, #28)".format(name=os.path.basename(path)))
+		return cleaned_path
+
 	def create_mauve_command(self,query,references=[]):
 		'''Mauve commands'''
 		commands =[]	# store execute command
 		logs = []	   # store log filepath
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
-		query_file = self.stage_for_mauve(query,"query")
+		query_file = self.stage_for_mauve(self.clean_input_fasta(query,"query"),"query")
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			xmfa_output = "{tmpdir}/{ref}_{target}.xmfa".format(tmpdir=self.tmpdir.rstrip("/"),ref=ref_name,target=self.query_name)
-			ref_file = self.stage_for_mauve("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref")
+			ref_file = self.stage_for_mauve(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
 			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #3)'''
@@ -314,12 +383,12 @@ class CanSNPer2(object):
 	'''Functions'''
 
 	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False):
-		'''This function uses ETE3 to color the SNP tree in the database with SNPS found in the reference database
-			and outputs a pdf file
+		'''This function colors the SNP tree of the database with the SNPS found in the query and
+			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
-		final_snp = newickTree.draw_ete3_tree(SNPS,called_snps,save_tree,summary=summary)
-		logger.info("{outdir}/{name}_tree.pdf".format(outdir =self.outdir, name=name))
+		final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary)
+		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
 		return final_snp
 
 	def read_query_textfile_input(self,query_file):
@@ -356,11 +425,18 @@ class CanSNPer2(object):
 		# execute snp calling
 		'''a worker that dies here never sends its finish signal, so the queue loop waited
 			for the five minute time out and the sample was typed from whatever had
-			arrived; the failure is reported and the finish signals are still sent (issue #179)'''
+			arrived; the failure is reported and signalled at once (issue #179).
+			Nothing of the half-read alignment is passed on and the failure is sent as its
+			own signal, because the sample must not be typed from a parse that stopped
+			midway (issue #50)'''
 		try:
 			XMFA_obj.run(xmfa_file)
 		except Exception as e:
+			reference = getattr(XMFA_obj,"reference",os.path.basename(xmfa_file).split("_")[0])
 			logger.error("SNP calling failed for {alignment}: {error}".format(alignment=xmfa_file,error=e))
+			for queue in (results,export_results,called_snps):
+				queue.put('XMFA_obj_failed_worker_{reference}: {error}'.format(reference=reference,error=e))
+			return
 		#/
 		# stream output into Queues (if the complete job output is put in then the queue gets filled when having "large" outputs. It has to be streamed to the queue so that the queue can simultanously be cleared)
 		for result in XMFA_obj.get_snps().items(): # returns dictionary
@@ -399,6 +475,8 @@ class CanSNPer2(object):
 		
 		## Parse output queues from jobs continuously
 		finish_signals = {'SNPS':0,'SNP_info':0,'called_snps':0} # how many workers sent their finish signal per queue
+		failed_reports = [] ## workers that reported a failed SNP calling, they never count as finished (issue #50)
+		idle_timeout_hit = False ## the loop ended because the queues went silent, see the join below (issue #51)
 		'''the timeout used to be total wall clock time: a run with more alignments than can
 			be parsed in five minutes stopped collecting on its own and typed the sample from
 			partial data. It is an idle timeout now, a working worker may take as long as it
@@ -406,33 +484,48 @@ class CanSNPer2(object):
 			(the loop also used to spin at full core between the empty queue checks)'''
 		max_idle_seconds = self.queue_idle_timeout ## 5 minutes without a single queue item, by default
 		last_activity = time() # "tic-toc" clock-sound
+		def drain(queue, batch=1000):
+			'''take everything the queue holds right now instead of one item per round: a
+				custom database with thousands of SNPs per reference sends tens of thousands of
+				items per alignment through these queues, and picking a single item per check
+				let the queue pipes fill up until the workers blocked in put() (issue #41)'''
+			items = []
+			while len(items) < batch:
+				try:
+					items.append(queue.get_nowait())
+				except Empty:
+					break
+			return items
 		while True:
 			queues_had_data = False
 			# check SNP queue
-			if not result_queue.empty():
+			for tmp_data in drain(result_queue):
 				queues_had_data = True
-				tmp_data = result_queue.get()
-				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_failed_worker_') != -1:
+					failed_reports.append(tmp_data)
+				elif type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
 					finish_signals['SNPS'] += 1
 					logger.info("Output queue for 'SNPS' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					SNPS[tmp_data[0]] = tmp_data[1]
 			#/
 			# check SNP info queue
-			if not export_queue.empty():
+			for tmp_data in drain(export_queue):
 				queues_had_data = True
-				tmp_data = export_queue.get()
-				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_failed_worker_') != -1:
+					failed_reports.append(tmp_data)
+				elif type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
 					finish_signals['SNP_info'] += 1
 					logger.info("Output queue for 'SNP_info' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
 					SNP_info.append(tmp_data)
 			#/
 			# check called snps queue
-			if not called_queue.empty():
+			for tmp_data in drain(called_queue):
 				queues_had_data = True
-				tmp_data = called_queue.get()
-				if type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
+				if type(tmp_data) == str and tmp_data.find('XMFA_obj_failed_worker_') != -1:
+					failed_reports.append(tmp_data)
+				elif type(tmp_data) == str and tmp_data.find('XMFA_obj_finish_worker_') != -1:
 					finish_signals['called_snps'] += 1
 					logger.info("Output queue for 'called_snps' finished for reference {reference}".format(reference=tmp_data.split('_')[-1]))
 				else:
@@ -458,13 +551,40 @@ class CanSNPer2(object):
 				break
 			if time() - last_activity > max_idle_seconds:
 				logger.error("No queue output for {seconds} seconds while {n} SNP calling process(es) were still running".format(seconds=max_idle_seconds,n=len(alive)))
+				idle_timeout_hit = True
 				break
 			sleep(0.1)
 			#/
 		##/
-		## Wait until processes terminated (their output should already have been processed in the queue's)
+		## Wait until processes terminated (their output should already have been processed in the queue's).
+		## The wait is bounded: joining forever is what made the whole command hang when one SNP calling
+		## worker stalled, which is what "software hang with a large custom SNP database" looked like
+		## (issue #41). Stuck workers are stopped here, and the incomplete result check below turns the
+		## run into a reported failure instead of a silent freeze.
+		## Once the idle timeout had already called the run stuck, waiting the full join timeout on top
+		## of the idle wait only made one stalled sample cost seven minutes before --keep_going moved on,
+		## so the grace period after a silent queue is short (issue #51).
+		join_grace = 10 if idle_timeout_hit else self.worker_join_timeout
 		for job in jobs:
-			job.join()
+			job.join(timeout=join_grace)
+		stalled = [job for job in jobs if job.is_alive()]
+		if stalled:
+			logger.error("Stopping {n} SNP calling process(es) that were still running {seconds} seconds after the queues went silent".format(
+					n=len(stalled), seconds=join_grace))
+			for job in stalled:
+				job.terminate()
+			for job in stalled:
+				job.join(timeout=10)
+				if job.is_alive():
+					job.kill()
+		##/
+		'''a worker whose parse failed mid-alignment used to send normal finish signals, so the
+			sample was typed from a half-read alignment; the failure signal is its own report now
+			and the run refuses the sample instead (issue #50)'''
+		if failed_reports:
+			reports = sorted(set(failed_reports))
+			raise CanSNPer2Error("{n} of {m} alignments failed during SNP calling ({reports}), refusing to type from a half-read alignment".format(
+					n=len(reports), m=len(xmfa_files), reports="; ".join(reports)))
 		##/
 		'''a worker that died before sending its finish signals used to leave the sample typed
 			from whatever had arrived; an incomplete alignment set is an error now (issue #190)'''
@@ -474,31 +594,47 @@ class CanSNPer2(object):
 					n=answered, m=len(xmfa_files), files=", ".join([os.path.basename(xmfa) for xmfa in xmfa_files[:3]])))
 		return SNPS,SNP_info,called_snps
 
-	def read_result_dir(self):
-		'''Fetch all final SNPs from result file after run to produce summary'''
-		snplist = set()
-		for root, dirs, files in os.walk(self.outdir, topdown=False):
-			for f in files:
-				if f.endswith("_snps.txt"):
-					with open(os.path.join(root,f)) as snpfile:
-						for row in snpfile:
-							if row.startswith("SNP path:"):
-								snp = row.split(";")[-1].strip()
-								snplist.add(snp)
-								'''the result files are named {query}_snps.txt, strip that suffix to get the query name (issue #123)'''
-								self.called_genome[snp] = f[:-len("_snps.txt")]
-		return snplist
+	def read_result_file(self,resultfile):
+		'''Read the final SNP and the SNP path from a sample's result file, used for samples
+			skipped because their result file already exists. The final SNP is read from the
+			"Final SNP:" line, not from the last SNP of the path: that last SNP is exactly the
+			one that can have failed its check, which made the summary disagree with the
+			per-sample file (issue #36). An empty or missing file reads as NA/NA (issue #35
+			makes empty NA files possible)'''
+		final_snp = "NA"
+		snp_path = "NA"
+		if os.path.isfile(resultfile):
+			with open(resultfile) as handle:
+				for row in handle:
+					if row.startswith("SNP path:"):
+						path = row.split(":",1)[1].strip()
+						if path and path != "NA":
+							snp_path = path
+					elif row.startswith("Final SNP:"):
+						final_snp = row.split(":",1)[1].strip().split()[0]
+		return final_snp,snp_path
 
 	def print_summary(self):
-		'''Create summary file and tree'''
+		'''Create summary file and tree. Every sample of the run is listed, NA included, as
+			three tab separated columns "ID final_snp snp_path" matching what the run reported
+			on stdout: the old summary only contained samples that had a final SNP, silently
+			omitting the rest of the run (issue #24)'''
 		summarypath = "{outdir}/snps_summary.txt".format(outdir=self.outdir)
-		SNPS = self.read_result_dir()
+		final_snps = set()
 		with open(summarypath,"w") as summaryout:
-			for snp in SNPS:
-				print("{query}: {SNP}".format(query=self.called_genome[snp], SNP=snp),file=summaryout)
+			for q in self.query:
+				name = os.path.basename(q).rsplit(".",1)[0]
+				if name in self.skipped:
+					final_snp,snp_path = self.read_result_file("{outdir}/{name}_snps.txt".format(outdir=self.outdir,name=name))
+				else:
+					final_snp = self.typed.get(name,"NA")
+					snp_path = self.result_paths.get(name,"NA")
+				print("{name}\t{final_snp}\t{snp_path}".format(name=name,final_snp=final_snp,snp_path=snp_path),file=summaryout)
+				if final_snp != "NA":
+					final_snps.add(final_snp)
 
 		'''Print summary tree showing all unique SNPs in the final tree'''
-		self.create_tree([],"summary",SNPS,True,min_required_hits=self.min_required_hits,summary=True)
+		self.create_tree([],"summary",final_snps,True,min_required_hits=self.min_required_hits,summary=True)
 
 	def run(self,database):
 		'''Run CanSNPer2'''
@@ -573,7 +709,7 @@ class CanSNPer2(object):
 						self.csnpdict = {}
 						'''Print SNPs to tab separated file'''
 						with open(outputfile,"w") as snplist_out:
-							print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=snplist_out)
+							print("\t".join(SNP_FILE_COLUMNS),file=snplist_out)
 							for snp in SNP_info:
 								if snp[0] in called_snps:
 									self.csnpdict[snp[0]] = snp
@@ -584,8 +720,9 @@ class CanSNPer2(object):
 					SNP = "NA" ## Default message if SNP cannot be confirmed
 					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
-						tree_result = (False,"No SNP call was produced.",[])
-					final_snp,message,called = tree_result
+						tree_result = (False,"No SNP call was produced.",[],[])
+					final_snp,message,called,no_data_snps = tree_result
+					self.result_paths[self.query_name] = ";".join([snp[1] for snp in called]) if called else "NA"
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
@@ -593,7 +730,7 @@ class CanSNPer2(object):
 						if self.export:
 							with open(outputfile2, "w") as called_out:
 								if called:
-									print("\t".join(["Name","Reference","Pos","Ancestral base","Derived base", "Target base"]),file=called_out)
+									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 									for snp in called:
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
@@ -601,12 +738,28 @@ class CanSNPer2(object):
 						logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 					else:
 						if self.export:
-							with open(outputfile2, "a") as called_out:
+							'''an NA sample used to write a snps file with nothing but the final
+								line: the SNPs that WERE called on the way to the failing point are
+								real information, and with them in this file the two result files
+								together list every evaluated position of the tree (issue #35)'''
+							with open(outputfile2, "w") as called_out:
+								called_ids = set(called_snps)
+								called_rows = [row for row in SNP_info if row[0] in called_ids]
+								if called_rows:
+									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
+									for row in called_rows:
+										print("\t".join(row),file=called_out)
+								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
-						logger.info(message)
-					if self.summary and SNP != "NA":
-						self.summary_set |= set([SNP])
-						self.called_genome[SNP] = self.query_name
+							logger.info(message)
+					'''SNP positions of the tree that no alignment carried a base for had no data at all,
+						and were missing from both result files, so the only place they showed up was the
+						log; they are listed in the not called file with an N/A target base (issue #27)'''
+					if self.export and no_data_snps:
+						logger.info("Listing {n} SNP positions without any alignment data in {file}".format(n=len(no_data_snps),file=outputfile))
+						with open(outputfile,"a") as nodata_out:
+							for snp in no_data_snps:
+								print("\t".join(snp),file=nodata_out)
 					'''remember the outcome per sample: the exit code is decided from this
 						(issue #191)'''
 					if SNP != "NA":
