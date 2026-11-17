@@ -31,6 +31,7 @@ python setup.py install
 ## Requirements (for manual install conda will install all dependencies)
 
 * progressiveMauve (the default aligner, see [Aligners](#aligners))
+* minimap2 (optional, `--aligner minimap2`)
 
 Read input (not yet implemeted)
 * BWA
@@ -205,7 +206,7 @@ Run options:
   --rerun               Rerun already processed files (else skip if result
                         file exists)
   --aligner             Program that aligns the query against each reference:
-                        progressiveMauve (default progressiveMauve)
+                        minimap2, progressiveMauve (default progressiveMauve)
   --aligner_path        The aligner program, or the folder that holds it
                         (default: found in PATH)
   --skip_alignment, --skip_mauve
@@ -231,9 +232,27 @@ with `--skip_alignment --tmpdir <that directory>`.
 ## Aligners
 
 CanSNPer2 aligns each query genome against every reference genome of the database
-and reads the query base at each SNP position from the alignment. progressiveMauve
-is the default and currently the only aligner; the step is written so that other
-pairwise aligners can be added.
+and reads the query base at each SNP position from the alignment. Two aligners are
+available:
+
+* `progressiveMauve` (default), which writes xmfa alignments.
+* `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k -N 50 -p 0.1` and
+  written as PAF. Only primary alignments with a mapping quality of at least 20 are
+  read: a secondary alignment, or a primary one with a lower mapping quality, can carry
+  the base of another copy of a repeated region. The long-join bandwidth (`-r`) and the
+  secondary chain settings (`-N`, `-p`) differ from the preset so that the short
+  stretches between IS elements and rearrangements, which separate Francisella genomes
+  of different subspecies, are aligned as well. The reference sequence table
+  (`<alignment>.sequences`) is written next to each alignment, so `--skip_alignment`
+  can read it again.
+
+On 937 F. tularensis genomes typed with the Francisella scheme, minimap2 and
+progressiveMauve gave the same final call for every genome and no SNP position with
+different bases (305,453 positions with the same base); each aligner had data at a few
+hundred positions the other had none for. minimap2 does not align genomes of other
+Francisellaceae genera, where progressiveMauve aligns part of the sequence with a
+higher share of third bases. minimap2 typed the 937 genomes in 12.5 minutes on three
+parallel runs.
 
 Each aligner is a class in `CanSNPer2/modules/Aligners.py` that gives the command line,
 the alignment file ending, how its exit codes are judged and the reader of its output.
