@@ -13,11 +13,13 @@ in file order).
 '''
 
 import os
+import shlex
 import shutil
 import logging
 
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 from CanSNPer2.modules.ParsePAF import ParsePAF, SEQUENCES_SUFFIX, write_sequence_table
+from CanSNPer2.modules.ParseDelta import ParseDelta
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +166,41 @@ class Minimap2(Aligner):
 
 
 '''the aligners that can be selected, by name'''
-ALIGNERS = {aligner.name: aligner for aligner in (ProgressiveMauve, Minimap2)}
+class Mummer4(Aligner):
+	'''MUMmer4 nucmer (Marcais et al. 2018) followed by delta-filter -1, writes delta. The
+		1-to-1 filter keeps, for every reference and query position, only the best alignment,
+		allowing rearrangements; it is the filter MUMmer recommends for SNP finding and plays
+		the part of the primary alignment and mapping quality rule of minimap2. nucmer runs with
+		its default settings. The two programs run as one shell command, so a failure of either
+		fails the alignment; delta-filter is taken from the folder of nucmer when a path is given.'''
+	name = "mummer4"
+	program = "nucmer"
+	suffix = "delta"
+	log_tag = "mummer4"
+	options = []
+
+	def filter_program(self):
+		folder = os.path.dirname(self.executable())
+		return os.path.join(folder, "delta-filter") if folder else "delta-filter"
+
+	def available(self):
+		return shutil.which(self.executable()) is not None and shutil.which(self.filter_program()) is not None
+
+	def command(self, reference_file, query_file, output):
+		'''the delta file names its input files, which the reader opens, so they are given as
+			absolute paths: the alignment can then be read from any folder (--skip_alignment)'''
+		raw = output + ".unfiltered"
+		nucmer = [self.executable()] + list(self.options) + ["--delta=" + raw, os.path.abspath(reference_file), os.path.abspath(query_file)]
+		script = "{nucmer} && {filt} -1 {raw} > {out} && rm -f {raw}".format(
+				nucmer=" ".join(shlex.quote(a) for a in nucmer), filt=shlex.quote(self.filter_program()),
+				raw=shlex.quote(raw), out=shlex.quote(output))
+		return ["sh", "-c", script]
+
+	def reader(self, **kwargs):
+		return ParseDelta(**kwargs)
+
+
+ALIGNERS = {aligner.name: aligner for aligner in (ProgressiveMauve, Minimap2, Mummer4)}
 DEFAULT_ALIGNER = ProgressiveMauve.name
 
 

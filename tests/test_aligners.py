@@ -39,7 +39,7 @@ def test_progressivemauve_is_the_default_aligner():
 	assert DEFAULT_ALIGNER == "progressiveMauve"
 	assert isinstance(get_aligner(), ProgressiveMauve)
 	assert isinstance(get_aligner("progressivemauve"), ProgressiveMauve), "names are matched without case"
-	assert set(ALIGNERS) == {"progressiveMauve", "minimap2"}
+	assert set(ALIGNERS) == {"progressiveMauve", "minimap2", "mummer4"}
 	with pytest.raises(ValueError, match="Unknown aligner"):
 		get_aligner("nosuchaligner")
 
