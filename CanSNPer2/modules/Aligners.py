@@ -110,7 +110,10 @@ class ProgressiveMauve(Aligner):
 
 	def retry_message(self, exitcode):
 		if exitcode == 6:
-			return "Input sequence is not free of gaps, replace gaps with N and retry!!"
+			'''progressiveMauve aborts (signal 6) on gaps in the sequence, but also when it cannot
+				write its .sslist files next to the inputs (an unwritable folder) or runs out of
+				memory; the message used to blame gaps only, also for files without any'''
+			return "progressiveMauve was aborted (signal 6: gaps in the sequence, an unwritable folder for its .sslist files or too little memory), retrying once with gaps replaced by N"
 		return "WARNING progressiveMauve finished with a exitcode: {code} (seen for genomes with short repetitive contigs or dashes in the sequence)".format(code=exitcode)
 
 	def prepare_retry(self, query, tmpdir):

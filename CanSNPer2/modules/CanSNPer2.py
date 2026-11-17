@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.Aligners import Aligner, get_aligner
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions
 from CanSNPer2 import __version__
 
 
@@ -98,6 +99,11 @@ class CanSNPer2(object):
 		self.worker_join_timeout = kwargs.get("worker_join_timeout", 2*60)
 		'''SNPs closer to an alignment edge than this are not evaluated (issue #175)'''
 		self.mask = int(kwargs.get("mask",0) or 0)
+		'''how long one round of alignments (the query against all references, in parallel) may
+			take before the aligners are stopped, in minutes; 0 means no limit. progressiveMauve
+			never returns on some inputs, which used to hang the run'''
+		self.alignment_timeout = float(kwargs.get("alignment_timeout",60) or 0)*60
+		self.checked_references = {} ## reference file -> problem or None, checked once per run
 
 		'''Create log and tmpdir if they do not exist'''
 		self.workdir = kwargs.get("workdir","./")
@@ -246,8 +252,25 @@ class CanSNPer2(object):
 			old_sigterm = signal.signal(signal.SIGTERM, stop_on_sigterm)
 		except ValueError:
 			logger.debug("SIGTERM handling is only possible in the main thread, no child cleanup installed")
+		started = time()
 		try:
 			while processes:
+				if self.alignment_timeout and time() - started > self.alignment_timeout:
+					'''an aligner that never returns used to hang the whole run'''
+					for idx in range(len(processes)):
+						ref_name, query_name = running_names[idx]
+						logger.error("{program} did not finish within {minutes:g} minutes for genome {query} against reference {ref}, it was stopped (--alignment_timeout)".format(
+								program=program, minutes=self.alignment_timeout/60, query=query_name, ref=ref_name))
+						processes[idx].terminate()
+					for idx, p in enumerate(processes):
+						try:
+							p.wait(timeout=10)
+						except Exception:
+							p.kill()
+						logfiles[idx].close()
+					error += len(processes)
+					processes, logfiles, running_names, logpaths = [], [], [], []
+					break
 				finished = False
 				for idx in range(len(processes)-1, -1, -1): ## Loop through processes, walking backwards so removals are safe
 					p = processes[idx]
@@ -353,6 +376,9 @@ class CanSNPer2(object):
 			match the target base of a SNP, so replacing them with N is the honest call (issue #26).
 			Every replacement keeps the exact position of the base, so database SNP positions still
 			match, and an already clean file is returned unchanged.
+			Whitespace is not sequence: blank lines are dropped (progressiveMauve never returns on a
+			file that starts with one) and spaces or tabs inside a sequence line are removed. They
+			used to become N, which added bases and shifted every position after them.
 		'''
 		keep = set("ACGTacgtn")
 		dirty = False
@@ -363,10 +389,13 @@ class CanSNPer2(object):
 					lines.append(line)
 					continue
 				body = line.rstrip("\n")
-				cleaned = "".join(ch if ch in keep or ch in "Nn" else "N" for ch in body)
-				'''whitespace-only lines are kept as they are; a line ending in a bare \r or a
-					stray space inside the sequence is not clean sequence either'''
-				if cleaned != body:
+				bases = "".join(body.split())
+				if bases != body or not bases: ## an empty line is unchanged by the split but is dropped
+					dirty = True
+				if not bases:
+					continue
+				cleaned = "".join(ch if ch in keep or ch in "Nn" else "N" for ch in bases)
+				if cleaned != bases:
 					dirty = True
 				lines.append(cleaned + "\n")
 		if not dirty:
@@ -374,8 +403,23 @@ class CanSNPer2(object):
 		cleaned_path = os.path.join(self.tmpdir, "cleaned_{kind}_{name}".format(kind=kind,name=os.path.basename(path)))
 		with open(cleaned_path,"w") as seq_out:
 			seq_out.write("".join(lines))
-		logger.info("Replaced characters that are not ACGT with N in {name} before alignment (gaps and ambiguous nucleotides, issues #26, #28)".format(name=os.path.basename(path)))
+		logger.info("Replaced characters that are not ACGT with N and removed whitespace in {name} before alignment (gaps, ambiguous nucleotides and blank lines, issues #26, #28)".format(name=os.path.basename(path)))
 		return cleaned_path
+
+	def check_reference_file(self,path,name):
+		'''A reference shorter than the last SNP position the database places on it is truncated
+			or the wrong genome: its SNPs beyond the end had no data, which counts against a call,
+			so the run gave missing or wrong genotypes without an error. Checked once per run.'''
+		if path not in self.checked_references:
+			if not hasattr(self, "last_positions"):
+				try:
+					self.last_positions = last_snp_positions(CanSNPdbFunctions(self.database,verbose=self.verbose))
+				except Exception as e:
+					logger.warning("Could not read the SNP positions from the database, the reference files are not checked for length: {e}".format(e=e))
+					self.last_positions = {}
+			self.checked_references[path] = check_reference(path, name, self.last_positions.get(name))
+		if self.checked_references[path]:
+			raise CanSNPer2Error(self.checked_references[path])
 
 	def create_alignment_commands(self,query,references=[]):
 		'''One alignment command per reference. Returns the commands, their log files and
@@ -390,6 +434,8 @@ class CanSNPer2(object):
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
+			if not self.skip_alignment:
+				self.check_reference_file("{refdir}/{ref}".format(refdir=self.refdir, ref=ref), ref_name)
 			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
 			commands.append(self.aligner.command(ref_file, query_file, output))
 			if not self.skip_alignment:

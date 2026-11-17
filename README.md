@@ -168,7 +168,8 @@ usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
                [--summary] [--refdir] [--workdir] [--read_input]
                [--min_required_hits MIN_REQUIRED_HITS]
                [--strictness STRICTNESS] [--mask MASK] [--keep_going]
-               [--rerun] [--aligner] [--aligner_path] [--skip_alignment]
+               [--rerun] [--aligner] [--alignment_timeout MINUTES]
+               [--aligner_path] [--skip_alignment]
                [--keep_temp] [--tmpdir]
                [--logdir] [--verbose] [--debug] [--supress]
                [query [query ...]]
@@ -207,6 +208,9 @@ Run options:
                         file exists)
   --aligner             Program that aligns the query against each reference:
                         minimap2, progressiveMauve (default progressiveMauve)
+  --alignment_timeout MINUTES
+                        Stop the alignments of a query that take longer than
+                        this, in minutes (0 for no limit, default 60)
   --aligner_path        The aligner program, or the folder that holds it
                         (default: found in PATH)
   --skip_alignment, --skip_mauve
