@@ -2,6 +2,8 @@
 import sys, os
 import textwrap
 import gzip
+import zlib
+import queue
 import shutil
 import tempfile
 from urllib.request import urlopen
@@ -9,13 +11,13 @@ from urllib.error import HTTPError, URLError
 
 import argparse,os
 import multiprocessing
-from multiprocessing import Queue
 '''python 3.14 made forkserver the default start method on linux, where the worker target has
 	to be picklable and the bound self.download (with the whole DownloadGenomes state) is not,
 	so the fork context is requested explicitly, as in modules/CanSNPer2.py (issue #186).
 	Queues must come from the same context as the processes.'''
 _MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions
 from CanSNPer2.modules.LogSetup import setup_logging
 import logging
 logger = logging.getLogger(__name__)
@@ -60,12 +62,14 @@ class DownloadGenomes(object):
 		with urlopen(link, timeout=timeout) as response, open(target,"wb") as out:
 			shutil.copyfileobj(response, out)
 
-	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None):
+	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, last_position=None):
 		'''Download genomes from refseq or genbank on request
 			https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/00x/xxx/GCF_00000xxxx.x_ASMxxxv1/GCF_00000xxxx.x_ASMxxxv1_genomic.fna.gz
 			(the ftp:// protocol was retired by NCBI in 2021, the same tree is served over https (issue #120))
 			Each genome runs in its own process, so it reports (refid, ok, reason) back through
 			results: an exception in a child never reaches the log or the exit code otherwise (issue #218)
+			last_position: the largest SNP position the database has on this reference; a genome
+			shorter than that is reported as failed
 		'''
 		def report(success, reason=""):
 			if results is not None:
@@ -77,7 +81,7 @@ class DownloadGenomes(object):
 			logger.error("Could not download {refid}: {genome_id} is not a valid accession".format(refid=refid,genome_id=genome_id))
 			report(False, "{genome_id} is not a valid accession".format(genome_id=genome_id))
 			return
-		link = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GC{source}/{n1}/{n2}/{n3}/{genome_id}_{assembly}/{genome_id}_{assembly}_genomic.fna.gz".format(
+		link_url = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GC{source}/{n1}/{n2}/{n3}/{genome_id}_{assembly}/{genome_id}_{assembly}_genomic.fna.gz".format(
 						source=sourceD[source],
 						n1=n1,
 						n2=n2,
@@ -87,38 +91,59 @@ class DownloadGenomes(object):
 						)
 		retrieved_file = "{directory}/source/{genome_id}_{assembly}_genomic.fna.gz".format(genome_id=genome_id,assembly=assembly,directory=directory)
 		ungzipped = retrieved_file[:-3] if retrieved_file.endswith(".gz") else retrieved_file ## strip(".gz") also eats letters of the name, cut the suffix instead (issue #73)
-		if not os.path.exists(ungzipped) or os.path.exists(retrieved_file):
-			logging.debug("Downloading: "+ link +" <-> "+ retrieved_file)
-			'''downloaded into a temp file first, so a failed or interrupted fetch leaves no half
-				files and no empty source folder behind (issue #218)'''
-			tmpfile = tempfile.mkstemp(suffix=".fna.gz")[1]
-			unpacking = False
-			try:
-				self.retrieve(link, tmpfile)
-				os.makedirs("{directory}/source".format(directory=directory), exist_ok=True)
-				### unzip file (mauve cant handle zipped sources) with the gzip module, no external gunzip needed (issue #74)
-				with gzip.open(tmpfile, "rb") as f_in, open(ungzipped, "wb") as f_out:
-					unpacking = True
-					shutil.copyfileobj(f_in, f_out)
-			except (HTTPError,URLError,OSError) as e:
-				logger.error("Could not download {refid} from {link}: {error}".format(refid=refid,link=link,error=e))
-				if unpacking and os.path.exists(ungzipped):
-					os.remove(ungzipped) ## a half unpacked genome would look complete to the next run (issue #218)
-				report(False, str(e))
+		link = os.path.join(directory, "{refid}.fna".format(refid=refid))
+		if os.path.exists(ungzipped) and not os.path.exists(retrieved_file):
+			'''a genome downloaded before is used again, but only when it is long enough for the
+				SNPs of the database: older versions could leave a half unpacked file behind and
+				took it for complete on the next run'''
+			problem = check_reference(ungzipped, refid, last_position)
+			if problem is None:
+				logger.debug("Reference file for {refid} already exists!".format(refid=refid))
+				self.link_reference(ungzipped, link, refid)
+				report(True)
 				return
-			finally:
-				os.remove(tmpfile)
-			bname = os.path.basename(ungzipped)
-			try:
-				### symlink target is relative to the link location, so no chdir needed (issue #8)
-				os.symlink("source/{bname}".format(bname=bname), os.path.join(directory, "{refid}.fna".format(refid=refid)))
-			except FileExistsError:
-				logger.debug("symlink already exists, skip!")
-			report(True)
-		else:
-			logger.debug("Reference file for {f} already exists!".format(f=retrieved_file.split("/")[-1].strip("_genomic.fna.gz")))
-			report(True)
-		return
+			logger.warning("Downloading {refid} again: {problem}".format(refid=refid, problem=problem))
+			os.remove(ungzipped)
+		logging.debug("Downloading: "+ link_url +" <-> "+ retrieved_file)
+		'''downloaded into a temp file first, so a failed or interrupted fetch leaves no half
+			files and no empty source folder behind (issue #218). The genome is unpacked into a
+			temp file next to its final name and only renamed once gzip has read the whole stream:
+			the gzip trailer carries the CRC and the length of the data, so a transfer that was cut
+			short fails here (EOFError) instead of leaving a shorter genome behind'''
+		tmpfile = tempfile.mkstemp(suffix=".fna.gz")[1]
+		partial = ungzipped + ".part"
+		try:
+			self.retrieve(link_url, tmpfile)
+			os.makedirs("{directory}/source".format(directory=directory), exist_ok=True)
+			### unzip file (mauve cant handle zipped sources) with the gzip module, no external gunzip needed (issue #74)
+			with gzip.open(tmpfile, "rb") as f_in, open(partial, "wb") as f_out:
+				shutil.copyfileobj(f_in, f_out)
+			os.replace(partial, ungzipped)
+		except (HTTPError,URLError,OSError,EOFError,zlib.error) as e:
+			reason = "the download was incomplete ({error})".format(error=e) if isinstance(e, (EOFError, zlib.error)) else str(e)
+			logger.error("Could not download {refid} from {link}: {reason}".format(refid=refid,link=link_url,reason=reason))
+			report(False, reason)
+			return
+		finally:
+			os.remove(tmpfile)
+			if os.path.exists(partial):
+				os.remove(partial) ## a half unpacked genome would look complete to the next run (issue #218)
+		problem = check_reference(ungzipped, refid, last_position)
+		if problem is not None:
+			logger.error("Downloaded {refid}, but {problem}".format(refid=refid, problem=problem))
+			report(False, problem)
+			return
+		self.link_reference(ungzipped, link, refid)
+		report(True)
+
+	def link_reference(self, ungzipped, link, refid):
+		'''the <refid>.fna link CanSNPer2 reads; a run that found the genome already unpacked
+			used to report success without making it'''
+		if os.path.lexists(link):
+			logger.debug("{link} already exists, skip!".format(link=link))
+			return
+		### symlink target is relative to the link location, so no chdir needed (issue #8)
+		os.symlink("source/{bname}".format(bname=os.path.basename(ungzipped)), link)
 
 	def run(self):
 		'''Start download and collect what each worker actually managed to fetch (issue #218)'''
@@ -130,12 +155,18 @@ class DownloadGenomes(object):
 		for genome_id in keys:
 			assembly = self.genomes[genome_id]
 			targets.append((genome_id, assembly, self.genomes[assembly]))
+		'''the length every reference must have, from the SNP positions of the database'''
+		try:
+			last_positions = last_snp_positions(self.database)
+		except Exception as e:
+			logger.warning("Could not read the SNP positions from the database, the downloaded references are not checked for length: {e}".format(e=e))
+			last_positions = {}
 		results = _MP_CTX.Queue()
 		threads = []
 		logging.info("Downloading {n} references from {source} into {directory}".format(
 				n=len(targets), source=self.source, directory=self.directory))
 		for genome_id, assembly, refid in targets:
-			kwargs = {"source":self.source, "directory":self.directory, "results":results}
+			kwargs = {"source":self.source, "directory":self.directory, "results":results, "last_position":last_positions.get(refid)}
 			p = _MP_CTX.Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
 			p.start()
 			threads.append(p)
@@ -147,7 +178,7 @@ class DownloadGenomes(object):
 		for _ in range(len(targets)):
 			try:
 				refid, success, reason = results.get(timeout=5)
-			except Queue.Empty:
+			except queue.Empty: ## Queue from multiprocessing is a function and has no Empty, the worker that died without reporting crashed the whole command
 				break
 			reports[refid] = (success, reason)
 		failed = []

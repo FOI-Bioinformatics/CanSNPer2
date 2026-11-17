@@ -3,7 +3,7 @@
 CanSNPer2: A toolkit for SNP-typing NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
-VERSION 2.2.0 release of CanSNPer2
+VERSION 2.2.2 release of CanSNPer2
 
 The second release of CanSNPer (CanSNPer2) is exclusively written for python3
 CanSNPer2 is simplified from CanSNPer1 stripped to only perform
@@ -97,6 +97,7 @@ def main():
 	run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 	run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
 	run_options.add_argument('--aligner',			metavar='', default=DEFAULT_ALIGNER, choices=sorted(ALIGNERS),	help="Program that aligns the query against each reference: {names} (default {default})".format(names=", ".join(sorted(ALIGNERS)),default=DEFAULT_ALIGNER))
+	run_options.add_argument('--alignment_timeout',	type=float, default=60,	metavar='MINUTES',	help="Stop the alignments of a query that take longer than this, in minutes (0 for no limit, default 60)")
 	run_options.add_argument('--aligner_path',		metavar='', default="",				help="The aligner program, or the folder that holds it (default: found in PATH)")
 
 	'''Remove the two below when script is complete, possibly keep as hidden for debug'''
@@ -178,6 +179,7 @@ def main():
 									skip_alignment=args.skip_alignment,
 									aligner=args.aligner,
 									aligner_path=args.aligner_path,
+									alignment_timeout=args.alignment_timeout,
 									save_tree=args.save_tree,
 									keep_temp= args.keep_temp,
 									workdir=args.workdir,
