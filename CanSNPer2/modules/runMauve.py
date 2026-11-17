@@ -19,6 +19,7 @@ __status__ = "Production"
 __partof__ = "CanSNPer2"
 
 from subprocess import Popen,STDOUT
+from CanSNPer2.modules.Aligners import ProgressiveMauve
 
 class MauveError(Exception):
 	"""docstring for MauveE"""
@@ -150,11 +151,9 @@ class RunMauve(object):
 			ref_file = self.stage_for_mauve("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref")
 			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
 
-			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #85)'''
-			command = ["{mauve_path}progressiveMauve".format(mauve_path=self.mauve_path),
-							"--output", xmfa_output,
-							ref_file,
-							query_file]
+			'''the command is built by the aligner definition CanSNPer2 uses as well, as an argument
+				list, so paths with spaces stay single arguments (issue #85)'''
+			command = ProgressiveMauve(self.mauve_path).command(ref_file, query_file, xmfa_output)
 			commands.append(command)			## Mauve command
 			logs.append(log_file)				## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output)	## Store the path to xmfa files as they will be used later

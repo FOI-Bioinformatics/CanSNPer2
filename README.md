@@ -30,8 +30,8 @@ python setup.py install
 
 ## Requirements (for manual install conda will install all dependencies)
 
-* ETE3
-* progressiveMauve
+* progressiveMauve (the default aligner, see [Aligners](#aligners))
+* minimap2 (optional, `--aligner minimap2`)
 
 Read input (not yet implemeted)
 * BWA
@@ -168,7 +168,8 @@ usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
                [--summary] [--refdir] [--workdir] [--read_input]
                [--min_required_hits MIN_REQUIRED_HITS]
                [--strictness STRICTNESS] [--mask MASK] [--keep_going]
-               [--rerun] [--skip_mauve] [--keep_temp] [--tmpdir]
+               [--rerun] [--aligner] [--aligner_path] [--skip_alignment]
+               [--keep_temp] [--tmpdir]
                [--logdir] [--verbose] [--debug] [--supress]
                [query [query ...]]
 
@@ -204,7 +205,13 @@ Run options:
   --keep_going          If Error occurs, continue with the rest of samples
   --rerun               Rerun already processed files (else skip if result
                         file exists)
-  --skip_mauve          If xmfa files already exists skip step
+  --aligner             Program that aligns the query against each reference:
+                        minimap2, progressiveMauve (default progressiveMauve)
+  --aligner_path        The aligner program, or the folder that holds it
+                        (default: found in PATH)
+  --skip_alignment, --skip_mauve
+                        Do not align, read the alignments already in --tmpdir
+                        (--skip_mauve is the old name)
   --keep_temp           keep temporary files
 
 Logging and debug options:
@@ -214,13 +221,49 @@ Each run that aligns writes its temporary files to its own directory,
 `<tmpdir>/CanSNPer2/run_<random>`, and removes only that directory when it
 finishes, so several runs can share the same `--tmpdir`. With `--keep_temp` the
 directory is kept and its path is logged; the alignments in it can be reused
-with `--skip_mauve --tmpdir <that directory>`.
+with `--skip_alignment --tmpdir <that directory>`.
   --logdir              Specify log directory
   --verbose             Verbose output
   --debug               Debug output
   --supress             Supress warnings
 ```
 
+
+## Aligners
+
+CanSNPer2 aligns each query genome against every reference genome of the database
+and reads the query base at each SNP position from the alignment. Two aligners are
+available:
+
+* `progressiveMauve` (default), which writes xmfa alignments.
+* `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k -N 50 -p 0.1` and
+  written as PAF. Only primary alignments with a mapping quality of at least 20 are
+  read: a secondary alignment, or a primary one with a lower mapping quality, can carry
+  the base of another copy of a repeated region. The long-join bandwidth (`-r`) and the
+  secondary chain settings (`-N`, `-p`) differ from the preset so that the short
+  stretches between IS elements and rearrangements, which separate Francisella genomes
+  of different subspecies, are aligned as well. The reference sequence table
+  (`<alignment>.sequences`) is written next to each alignment, so `--skip_alignment`
+  can read it again.
+
+On 937 F. tularensis genomes typed with the Francisella scheme, minimap2 and
+progressiveMauve gave the same final call for every genome and no SNP position with
+different bases (305,453 positions with the same base); each aligner had data at a few
+hundred positions the other had none for. minimap2 does not align genomes of other
+Francisellaceae genera, where progressiveMauve aligns part of the sequence with a
+higher share of third bases. minimap2 typed the 937 genomes in 12.5 minutes on three
+parallel runs.
+
+Each aligner is a class in `CanSNPer2/modules/Aligners.py` that gives the command line,
+the alignment file ending, how its exit codes are judged and the reader of its output.
+A reader is a subclass of `AlignmentReader` (`CanSNPer2/modules/AlignmentReader.py`)
+that walks the alignment file and reports, for each SNP position it covers, the query
+base on the forward strand of the reference (`observe()`); the classification into
+derived, ancestral, other base and no data, `--mask`, the edge flag and the result
+rows are shared by all readers. SNP positions are the reference coordinates of the
+database: for a reference with several sequences (chromosomes, plasmids) the sequences
+are joined end to end in the order of the reference fasta file, as progressiveMauve
+does. A new aligner is registered in `ALIGNERS` and can then be selected with `--aligner`.
 
 Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki).
 

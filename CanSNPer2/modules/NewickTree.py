@@ -702,10 +702,11 @@ class NewickTree(object):
 
 	def get_no_data_info(self,snp_ids):
 		'''Look up the database annotation of the SNP nodes that no alignment carried a base for, in the
-			same columns as the SNP_info rows (Name, Reference, Pos, Ancestral base, Derived base, Target
-			base), so the per sample output can list the positions that were never compared instead of
-			leaving them out of both result files (issue #27). The target base is "N/A": there is no base
-			there at all, which is different from a base that was read and did not confirm the SNP.'''
+			same columns as the SNP_info rows (Name, Reference, Pos, QuerySeq, QueryPosition, Ancestral
+			base, Derived base, Target base, Edge flag), so the per sample output can list the positions
+			that were never compared instead of leaving them out of both result files (issue #27). The
+			target base is "N/A": there is no base there at all, which is different from a base that was
+			read and did not confirm the SNP; the query columns are N/A for the same reason (issue #23).'''
 		names = sorted(set(snp_ids))
 		if not names:
 			return []
@@ -720,12 +721,13 @@ class NewickTree(object):
 						WHERE snp_annotation.snp_id IN ({marks})'''.format(marks=",".join(["?"]*len(chunk)))
 			for snp_id,genome,position,ancestral,derived in self.database.query(QUERY,insert_val=tuple(chunk),getres=True).fetchall():
 				'''the empty last column keeps the rows in the shape of SNP_FILE_COLUMNS, whose
-					edge flag cannot be computed for a position that no alignment carried'''
-				rows.append([str(snp_id),str(genome),str(position),str(ancestral),str(derived),"N/A",""])
+					edge flag cannot be computed for a position that no alignment carried; the
+					query columns are N/A for the same reason (issue #23)'''
+				rows.append([str(snp_id),str(genome),str(position),"N/A","N/A",str(ancestral),str(derived),"N/A",""])
 		found = set([row[0] for row in rows])
 		for name in names:
 			if name not in found:
 				'''a tree node without any annotation row: still a node the alignments never covered,
 					list it rather than hide it again'''
-				rows.append([name,"-","-","-","-","N/A",""])
+				rows.append([name,"-","-","N/A","N/A","-","-","N/A",""])
 		return sorted(rows, key=lambda row: row[0])

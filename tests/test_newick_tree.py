@@ -107,8 +107,8 @@ def test_no_data_rows_carry_the_database_annotation(tmp_path):
 	# base being N/A because there is no base at that position at all (#27)
 	newick_tree = tree(tmp_path)
 	rows = newick_tree.get_no_data_info({"B.2", "C.1"})
-	assert rows == [["B.2", "REF", "30", "C", "T", "N/A", ""], ["C.1", "REF", "40", "C", "T", "N/A", ""]], \
-		"the empty seventh column keeps the shape of the SNP_FILE_COLUMNS tables (edge flag, issue #48)"
+	assert rows == [["B.2", "REF", "30", "N/A", "N/A", "C", "T", "N/A", ""], ["C.1", "REF", "40", "N/A", "N/A", "C", "T", "N/A", ""]], \
+		"the empty columns keep the shape of the SNP_FILE_COLUMNS tables (query columns N/A without an alignment, issue #23; edge flag, issue #48)"
 	assert newick_tree.get_no_data_info([]) == []
 
 

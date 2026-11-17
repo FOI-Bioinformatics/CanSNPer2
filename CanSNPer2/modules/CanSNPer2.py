@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
-from CanSNPer2.modules.ParseXMFA import ParseXMFA
+from CanSNPer2.modules.Aligners import Aligner, get_aligner
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2 import __version__
@@ -34,11 +34,11 @@ _MP_CTX = multiprocessing.get_context("fork")
 '''column header of the per sample SNP tables, both <sample>_snps.txt and
 	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
 	near an alignment edge (issue #48)'''
-SNP_FILE_COLUMNS = ["Name","Reference","Pos","Ancestral base","Derived base","Target base","Edge flag"]
+SNP_FILE_COLUMNS = ["Name","Reference","Pos","QuerySeq","QueryPosition","Ancestral base","Derived base","Target base","Edge flag"]
 
 '''file that marks a private run directory created by CanSNPer2 below --tmpdir; cleanup()
 	only removes a directory it created itself, and the command line uses a marked
-	directory as it is so a kept run can be reused with --skip_mauve'''
+	directory as it is so a kept run can be reused with --skip_alignment'''
 RUN_MARKER = ".cansnper2_run"
 
 class Error(Exception):
@@ -48,12 +48,15 @@ class Error(Exception):
 	def __str__(self):
 		return repr(self.value)
 
-class MauveError(Error):
-	"""docstring for MauveE"""
+class AlignmentError(Error):
+	"""an alignment process failed"""
 	pass
 
+'''the name from the time progressiveMauve was the only aligner'''
+MauveError = AlignmentError
+
 class CanSNPer2Error(Error):
-	"""docstring for MauveE"""
+	"""docstring for CanSNPer2Error"""
 	pass
 
 class CanSNPer2(object):
@@ -63,8 +66,16 @@ class CanSNPer2(object):
 		self.query = query
 		self.verbose = verbose
 		self.refdir = refdir
+		'''the aligner is a name from Aligners.ALIGNERS or an Aligner object; aligner_path is
+			the program or the folder that holds it (mauve_path is its old name)'''
+		aligner = kwargs.get("aligner")
+		if isinstance(aligner, Aligner):
+			self.aligner = aligner
+		else:
+			self.aligner = get_aligner(aligner, kwargs.get("aligner_path") or mauve_path)
 		self.mauve_path = mauve_path
-		self.xmfa_files = []
+		self.alignment_files = []      ## alignment of the current query against each reference
+		self.alignment_references = [] ## reference genome name of each file in alignment_files
 		self.export = kwargs.get("export", False)  ## export is optional, defaults to False (issue #51)
 		self.database = database
 		self.min_required_hits = kwargs.get("min_required_hits",3)
@@ -103,10 +114,12 @@ class CanSNPer2(object):
 		'''An aligning run works in its own run_* directory below the shared tmpdir. All runs
 			used to write their staged genomes and alignments straight into the shared folder
 			(by default /tmp/CanSNPer2), and cleanup() removed every file in it, so two runs on
-			the same machine deleted each other's files. With --skip_mauve the given folder is
+			the same machine deleted each other's files. With --skip_alignment the given folder is
 			where existing alignments are read from, it is used as it is and never removed.'''
 		self.own_tmpdir = False
-		if not kwargs.get("skip_mauve",False):
+		'''skip_mauve is the old name of skip_alignment'''
+		self.skip_alignment = bool(kwargs.get("skip_alignment",False) or kwargs.get("skip_mauve",False))
+		if not self.skip_alignment:
 			self.tmpdir = tempfile.mkdtemp(prefix="run_", dir=self.tmpdir)
 			with open(os.path.join(self.tmpdir, RUN_MARKER), "w"):
 				pass
@@ -126,7 +139,6 @@ class CanSNPer2(object):
 		self.refdir = os.path.join(self.workdir, self.refdir)
 
 		'''Fetch other key word arguments'''
-		self.skip_mauve = kwargs.get("skip_mauve",False)
 		self.save_tree = kwargs.get("save_tree",False)
 		self.keep_temp = kwargs.get("keep_temp",False)
 		self.keep_going = keep_going
@@ -136,11 +148,26 @@ class CanSNPer2(object):
 		else:
 			self.summary = False
 
+	'''old attribute names, from the time progressiveMauve was the only aligner'''
+	@property
+	def skip_mauve(self):
+		return self.skip_alignment
+
+	@property
+	def xmfa_files(self):
+		return self.alignment_files
+
+	@xmfa_files.setter
+	def xmfa_files(self, files):
+		self.alignment_files = files
+
 	'''CanSNPer2 get functions'''
 
-	def get_xmfa(self):
-		'''Return references to aligned files'''
-		return self.xmfa_files
+	def get_alignments(self):
+		'''Return the paths of the alignment files of the current query'''
+		return self.alignment_files
+
+	get_xmfa = get_alignments
 
 	def get_references(self,selected=False):
 		'''references must be available in the refdir, and only the references listed in the
@@ -173,58 +200,45 @@ class CanSNPer2(object):
 		'''List all files in the tmp directory'''
 		return [ref for ref in os.listdir(self.tmpdir)]
 
-	'''ProgressiveMauve alignment functions'''
+	'''Alignment functions'''
 
-	def run_mauve(self, commands,logs):
-		'''Run mauve
-			ProgressiveMauve is an alignment program for small genomes
-			this function will execute mauve commands as paralell subprocesses
+	def run_alignments(self, commands, logs, names=None):
+		'''Run the alignment commands as parallel subprocesses
 
-			To run subprocesses securely this functino uses the Popen command includint standard pipes
-			stderr will be passed to the stdout pipe to reduce the number of log files required
+			To run subprocesses securely this function uses Popen with an argument list; stderr
+			is passed to the stdout of the process, which goes to one log file per alignment.
 
-			This function currently does not support any limitation of number of processes spawned,
-			modern OS will however mostly distribute subprocesses efficiently, it will also be limited by the
-			number of references supplied. A warning message will be given if the number of input references
-			exceeds the number of references in the database
+			The number of processes is the number of references in the database; there is no
+			further limit, the OS distributes the processes.
+
+			names holds (reference, query) for each command, used in the messages. Returns 0
+			when every process succeeded, a code of self.aligner.retry_codes when a process
+			failed in a way the aligner retries, and 1 when a process failed with --keep_going;
+			without --keep_going a failure raises AlignmentError.
 		'''
+		program = self.aligner.name
+		if names is None:
+			names = [self._names_from_command(command) for command in commands]
 		retvalue=0
 		processes = []  #process container
 		logfiles = []   #open log file container, parallel to processes
 		error = 0   #Variable for errors
-		def alignment_names(idx):
-			'''the mauve commands are [program, --output, xmfa, ref_file, query_file] and the
-				staged input names carry their "ref_"/"query_" prefixes: a warning that only says
-				"exitcode: 11" five times over never told which genome failed against which
-				reference (issue #12)'''
-			try:
-				def staged_name(arg,kind):
-					'''staged inputs are named "ref_"/"query_" + file, and a pre-cleaned copy
-						(issues #26, #28) adds a "cleaned_<kind>_" layer in between'''
-					base = os.path.basename(arg).rsplit(".",1)[0]
-					for prefix in ("{0}_".format(kind), "cleaned_", "{0}_".format(kind)):
-						if base.startswith(prefix):
-							base = base[len(prefix):]
-					return base
-				return staged_name(commands[idx][3],"ref"), staged_name(commands[idx][4],"query")
-			except IndexError:
-				return "unknown genome", "unknown reference"
-		logger.info("Starting progressiveMauve on {n} references".format(n=len(commands)))
-		names = []      #query/reference name of each running alignment, parallel to processes
+		logger.info("Starting {program} on {n} references".format(program=program,n=len(commands)))
+		running_names = []      #reference/query name of each running alignment, parallel to processes
 		logpaths = []   #log path of each running alignment, parallel to processes
 		for i in range(len(commands)): #Loop through commands,
 			command = commands[i]
-			logger.debug(command)			## In verbose mode print the actual mauve command
+			logger.debug(command)			## In verbose mode print the actual command
 			## stdout/stderr go straight to the log file: a pipe buffer would fill up and
-			## block mauve while this loop only polls for exitcodes, hanging the run (issue #68)
+			## block the aligner while this loop only polls for exitcodes, hanging the run (issue #68)
 			log = open(logs[i], "w")
 			p = Popen(command,  stdout=log, stderr=STDOUT)  ##command is an argument list, no shell and no fragile splitting (issue #3)
 			logfiles.append(log)
 			processes.append(p)
-			names.append(alignment_names(i))
+			running_names.append(names[i])
 			logpaths.append(logs[i])
 		## SIGTERM (timeout, cluster schedulers, kill) ends the process at once and would leave every
-		## progressiveMauve child running unattended, so route it through the cleanup below (issue #151)
+		## aligner child running unattended, so route it through the cleanup below (issue #151)
 		def stop_on_sigterm(signum,frame):
 			raise KeyboardInterrupt()
 		old_sigterm = None
@@ -245,31 +259,27 @@ class CanSNPer2(object):
 						## the containers are popped as processes finish, so the running position
 						## in these containers is the index for the names and logs, not the one
 						## in the original commands list (issue #12)
-						ref_name, query_name = names[idx]
-						### IF the exitcode is not 0 print a warning and ask user to read potential error messages
-						if exitcode == 11:
-							logger.warning("WARNING progressiveMauve finished with a exitcode: {exitcode} for genome {query} against reference {ref}".format(exitcode=exitcode,query=query_name,ref=ref_name))
-							logger.debug("This progressiveMauve error is showing up for bad genomes containing short repetative contigs or sequence contains dashes ({query} vs {ref})".format(query=query_name,ref=ref_name))
-							retvalue=11
-						elif exitcode == -6:
-							logger.warning("Input sequence is not free of gaps, replace gaps with N and retry!! ({query} vs {ref})".format(query=query_name,ref=ref_name))
-							retvalue=6
-						elif exitcode != 0:
+						ref_name, query_name = running_names[idx]
+						status, code = self.aligner.exit_status(exitcode)
+						if status == "retry":
+							logger.warning("{message} for genome {query} against reference {ref}".format(message=self.aligner.retry_message(code),query=query_name,ref=ref_name))
+							retvalue=code
+						elif status == "error":
 							if not self.keep_going:
-								logger.error("progressiveMauve failed with exitcode {exitcode} for {log}".format(exitcode=exitcode,log=logpaths[idx]))
+								logger.error("{program} failed with exitcode {exitcode} for {log}".format(program=program,exitcode=exitcode,log=logpaths[idx]))
 							error += 1
-							logger.warning("WARNING progressiveMauve finished with a non zero exitcode: {exitcode} for genome {query} against reference {ref}\nThe script will terminate when all processes are finished read {log} for more info".format(log=logpaths[idx],exitcode=exitcode,query=query_name,ref=ref_name))
+							logger.warning("WARNING {program} finished with a non zero exitcode: {exitcode} for genome {query} against reference {ref}\nThe script will terminate when all processes are finished read {log} for more info".format(program=program,log=logpaths[idx],exitcode=exitcode,query=query_name,ref=ref_name))
 						## Remove process from container
 						processes.pop(idx)
 						logfiles.pop(idx)
-						names.pop(idx)
+						running_names.pop(idx)
 						logpaths.pop(idx)
-				if not finished: ## the poll loop would otherwise run flat out while mauve works (issue #152)
+				if not finished: ## the poll loop would otherwise run flat out while the aligner works (issue #152)
 					sleep(0.5)
 		except KeyboardInterrupt:
-			'''a cancelled CanSNPer2 left every progressiveMauve child running unattended, one of them
+			'''a cancelled CanSNPer2 left every aligner child running unattended, one of them
 				was still aligning sixteen hours after its parent had been stopped (issue #151)'''
-			logger.warning("CanSNPer2 was interrupted, stopping {n} running progressiveMauve processes".format(n=len(processes)))
+			logger.warning("CanSNPer2 was interrupted, stopping {n} running {program} processes".format(n=len(processes),program=program))
 			for p in processes:
 				if p.poll() is None:
 					p.terminate()
@@ -285,24 +295,43 @@ class CanSNPer2(object):
 			'''the SIGTERM handler belongs to this alignment round only, put the previous one back'''
 			if old_sigterm is not None:
 				signal.signal(signal.SIGTERM, old_sigterm)
-		if retvalue == 6 or retvalue == 11: ## This is done if sequence is not free of gaps
+		if retvalue in self.aligner.retry_codes:
 			return retvalue
 		elif not self.keep_going:
-			if error:  ## Error handling regarding mauve subprocesses, stop script if any of them fails
-				logger.error("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
-				raise MauveError("Error: {errors} progressiveMauve processes did not run correctly check log files for more information".format(errors=error))
+			if error:  ## stop the run if any of the alignments failed
+				logger.error("Error: {errors} {program} processes did not run correctly check log files for more information".format(errors=error,program=program))
+				raise AlignmentError("Error: {errors} {program} processes did not run correctly check log files for more information".format(errors=error,program=program))
 		elif error:
 			'''keep_going only means that a failing sample is skipped instead of stopping the run,
 				a run where every process succeeded must still report success (issue #126)'''
 			retvalue=1
 		return retvalue
 
-	def stage_for_mauve(self,path,prefix):
-		'''progressiveMauve writes a multi megabyte "<input>.sslist" progress file next to every input
-			genome, which polluted the reference and query folders and made them required to be writable.
-			There is no mauve option that turns this off, so the sequences are symlinked into the tmpdir
-			instead and the progress files land there and are removed by cleanup() (issue #148)
-		'''
+	def _names_from_command(self, command):
+		'''(reference, query) from a progressiveMauve command [program, --output, xmfa, ref_file,
+			query_file]: the staged input names carry "ref_"/"query_" prefixes, and a pre-cleaned
+			copy (issues #26, #28) adds a "cleaned_<kind>_" layer in between. Only used when the
+			caller gives no names (issue #12)'''
+		def staged_name(arg,kind):
+			base = os.path.basename(arg).rsplit(".",1)[0]
+			for prefix in ("{0}_".format(kind), "cleaned_", "{0}_".format(kind)):
+				if base.startswith(prefix):
+					base = base[len(prefix):]
+			return base
+		try:
+			return staged_name(command[3],"ref"), staged_name(command[4],"query")
+		except IndexError:
+			return "unknown reference", "unknown genome"
+
+	def run_mauve(self, commands, logs):
+		'''the name from the time progressiveMauve was the only aligner'''
+		return self.run_alignments(commands, logs)
+
+	def stage_input(self,path,prefix):
+		'''link an input genome into the run directory, for aligners that write files next to
+			their inputs (progressiveMauve, issue #148); other aligners read the file where it is'''
+		if not self.aligner.stage_inputs:
+			return path
 		source = os.path.abspath(path)
 		staged = os.path.join(self.tmpdir, "{prefix}_{name}".format(prefix=prefix,name=os.path.basename(source)))
 		if not os.path.lexists(staged):
@@ -313,6 +342,8 @@ class CanSNPer2(object):
 				logger.debug("Could not symlink {source} into {tmpdir}, copying the genome instead".format(source=source,tmpdir=self.tmpdir))
 				shutil.copyfile(source,staged)
 		return staged
+
+	stage_for_mauve = stage_input
 
 	def clean_input_fasta(self,path,kind):
 		'''Replace every sequence character that is not A/C/G/T (or their lowercase) with N before
@@ -346,57 +377,58 @@ class CanSNPer2(object):
 		logger.info("Replaced characters that are not ACGT with N in {name} before alignment (gaps and ambiguous nucleotides, issues #26, #28)".format(name=os.path.basename(path)))
 		return cleaned_path
 
-	def create_mauve_command(self,query,references=[]):
-		'''Mauve commands'''
+	def create_alignment_commands(self,query,references=[]):
+		'''One alignment command per reference. Returns the commands, their log files and
+			(reference, query) names; the alignment file and reference name of each command
+			are stored in alignment_files and alignment_references.'''
 		commands =[]	# store execute command
 		logs = []	   # store log filepath
+		names = []     # (reference, query) of each command
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
-		query_file = self.stage_for_mauve(self.clean_input_fasta(query,"query"),"query")
+		query_file = self.stage_input(self.clean_input_fasta(query,"query"),"query")
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
-			xmfa_output = "{tmpdir}/{ref}_{target}.xmfa".format(tmpdir=self.tmpdir.rstrip("/"),ref=ref_name,target=self.query_name)
-			ref_file = self.stage_for_mauve(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
-			log_file = "{logdir}/{ref}_{target}.mauve.log".format(logdir=self.logdir,ref=ref_name,target=self.query_name)
+			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
+			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
+			commands.append(self.aligner.command(ref_file, query_file, output))
+			if not self.skip_alignment:
+				self.aligner.prepare(ref_file, query_file, output)
+			logs.append(self.aligner.log_path(self.logdir, ref_name, self.query_name))
+			names.append((ref_name, self.query_name))
+			self.alignment_files.append(output)        ## the alignment files are read later
+			self.alignment_references.append(ref_name)
+		return commands,logs,names
 
-			'''Create run command for mauve as an argument list, so paths with spaces stay single arguments (issue #3)'''
-			command = ["{mauve_path}progressiveMauve".format(mauve_path=self.mauve_path),
-							"--output", xmfa_output,
-							ref_file,
-							query_file]
-			commands.append(command)			## Mauve command
-			logs.append(log_file)			   ## Store log files for each alignment
-			self.xmfa_files.append(xmfa_output) ## Store the path to xmfa files as they will be used later
+	def create_mauve_command(self,query,references=[]):
+		'''the name from the time progressiveMauve was the only aligner'''
+		commands,logs,_names = self.create_alignment_commands(query,references)
 		return commands,logs
 
 	def align(self, query, references=[]):
-		'''Align sequences and run mauve as subprocess'''
-		'''the name is set here, from the query actually being aligned, so that create_mauve_command
-			never depends on run() having set it before and the gap retry below keeps the original
-			sample name for its xmfa files (issue #160)'''
+		'''Align the query against the references with the selected aligner and return the
+			alignment files, an empty list when the alignments failed with --keep_going'''
+		'''the name is set here, from the query actually being aligned, so that the commands
+			never depend on run() having set it before and the retry below keeps the original
+			sample name for its alignment files (issue #160)'''
 		self.query_name = os.path.basename(query).rsplit(".",1)[0]
-		commands,logs = self.create_mauve_command(query,references)
-		if not self.skip_mauve: ### If mauve command was already run before don´t run mauve return xmfa paths
-			ret = self.run_mauve(commands,logs)
-			if int(ret) in (6,11):
-				'''exitcode 11 is often mauve not handling dashes(-) in the sequence, and run_mauve already
-					reports exitcode 6 as "not free of gaps, replace gaps with N and retry", so retry the same
-					way for both instead of only for 11 (issue #127)'''
-				logger.warning("Mauve ran into an error with sequence {seq} may contain a dash, replace with N characters and retry mauve".format(seq=query))
-				query_base = os.path.basename(query)
-				new_query = os.path.join(self.tmpdir, query_base + ".tmp")
-				logger.debug("Replacing all '-' with 'N' in {query}, writing copy to {tmp}".format(query=query,tmp=new_query))
-				self.xmfa_files = []
-				with open(query, "r") as seq_in, open(new_query, "w") as seq_out:
-					for line in seq_in:
-						seq_out.write(line.replace("-", "N"))
-				logger.debug("New query: {nq}".format(nq=new_query))
-				commands,logs = self.create_mauve_command(new_query,references)
-				ret = self.run_mauve(commands,logs)
+		self.alignment_files = []
+		self.alignment_references = []
+		commands,logs,names = self.create_alignment_commands(query,references)
+		if not self.skip_alignment: ### alignments made before (--skip_alignment) are only read
+			ret = self.run_alignments(commands,logs,names)
+			if ret in self.aligner.retry_codes:
+				new_query = self.aligner.prepare_retry(query, self.tmpdir)
+				if new_query:
+					logger.warning("{program} ran into an error with sequence {seq}, retrying with a cleaned copy".format(program=self.aligner.name,seq=query))
+					self.alignment_files = []
+					self.alignment_references = []
+					commands,logs,names = self.create_alignment_commands(new_query,references)
+					ret = self.run_alignments(commands,logs,names)
 			if ret != 0:
 				return []
 			logger.info("Alignments for {query} complete!".format(query=query))
-		return self.xmfa_files
+		return self.alignment_files
 
 	'''Functions'''
 
@@ -427,7 +459,7 @@ class CanSNPer2(object):
 	def cleanup(self):
 		'''Remove the run directory of this run, and nothing else: other runs and other
 			files below the shared tmpdir are left untouched. A folder this run did not
-			create (the alignments read with --skip_mauve) is never removed.'''
+			create (the alignments read with --skip_alignment) is never removed.'''
 		if not self.own_tmpdir:
 			logger.debug("Not removing {tmpdir}, it was not created by this run".format(tmpdir=self.tmpdir))
 			return
@@ -436,8 +468,10 @@ class CanSNPer2(object):
 		logger.info("Done!")
 		return
 
-	def find_snps(self,XMFA_obj,xmfa_file,results=None,export_results=None,called_snps=None):
-		'''Align sequences to references and return SNPs'''
+	def find_snps(self,XMFA_obj,xmfa_file,results=None,export_results=None,called_snps=None,reference=None):
+		'''Read the SNPs of one alignment with the reader XMFA_obj (an AlignmentReader) and
+			stream them into the queues. reference is the reference genome name of the
+			alignment; without it the reader takes it from the file name.'''
 		# default to None instead of mutable list defaults (issue #6); fresh queues when not supplied
 		if results is None: results = _MP_CTX.Queue()
 		if export_results is None: export_results = _MP_CTX.Queue()
@@ -450,7 +484,10 @@ class CanSNPer2(object):
 			own signal, because the sample must not be typed from a parse that stopped
 			midway (issue #50)'''
 		try:
-			XMFA_obj.run(xmfa_file)
+			if reference:
+				XMFA_obj.run(xmfa_file, reference=reference)
+			else:
+				XMFA_obj.run(xmfa_file)
 		except Exception as e:
 			reference = getattr(XMFA_obj,"reference",os.path.basename(xmfa_file).split("_")[0])
 			logger.error("SNP calling failed for {alignment}: {error}".format(alignment=xmfa_file,error=e))
@@ -472,14 +509,18 @@ class CanSNPer2(object):
 		called_snps.put('XMFA_obj_finish_worker_'+XMFA_obj.reference)
 		#/
 
-	def find_snps_multiproc(self,xmfa_obj,xmfa_files,export=False):
-		'''function to run genomes in paralell'''
+	def find_snps_multiproc(self,xmfa_obj,xmfa_files,export=False,references=None):
+		'''Read the alignments in parallel, one process per alignment file. xmfa_obj is the
+			AlignmentReader of the aligner, references the reference genome name of each file
+			(parallel to xmfa_files); without it the names are taken from the file names.'''
 		'''the alignments are checked before the workers start: ParseXMFA.read_xmfa swallows a
-			FileNotFoundError and simply returns no SNPs, so --skip_mauve against a wrong tmpdir
+			FileNotFoundError and simply returns no SNPs, so --skip_alignment against a wrong tmpdir
 			(or alignments that were moved away) typed every sample NA and exited 0 (issue #176)'''
 		missing = [xmfa for xmfa in xmfa_files if not os.path.isfile(xmfa)]
 		if missing:
 			raise FileNotFoundError("{n} of {m} alignment files were not found in {tmpdir}, for example {first}".format(n=len(missing),m=len(xmfa_files),tmpdir=self.tmpdir,first=missing[0]))
+		if references is not None and len(references) != len(xmfa_files):
+			raise ValueError("{n} reference names were given for {m} alignment files".format(n=len(references),m=len(xmfa_files)))
 		jobs = []
 		SNPS = {}
 		SNP_info = []
@@ -488,7 +529,8 @@ class CanSNPer2(object):
 		export_queue = _MP_CTX.Queue()
 		called_queue = _MP_CTX.Queue()
 		for enum,xmfa_file in enumerate(xmfa_files):
-			p = _MP_CTX.Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue))
+			reference = references[enum] if references is not None else None
+			p = _MP_CTX.Process(target=self.find_snps, args=(xmfa_obj,xmfa_file ,result_queue,export_queue,called_queue,reference))
 			p.start()
 			jobs.append(p)
 			sleep(0.05) ## A short sleep to make sure all threads do not initiate access to the database file simultanously
@@ -666,21 +708,20 @@ class CanSNPer2(object):
 				self.query=self.read_query_textfile_input(self.query)
 
 			'''Main function of CanSNPer2
-					1. Align sequences with progressiveMauve
-					2. Parse XMFA files and find SNPs
+					1. Align sequences with the selected aligner (progressiveMauve by default)
+					2. Read the alignments and find SNPs
 					3. Create a tree visualising SNPs found in sequence
 					3b. If requested create a list with SNPs and their status
 					4. Clean up tmp directory
 					'''
 
-			''' Create ParseXMFA object'''
-			parse_xmfa_obj = ParseXMFA(
+			''' Create the reader of the alignment files; it connects to the database in the worker'''
+			alignment_reader = self.aligner.reader(
 						database=database,
-						export=self.export,
 						mask=self.mask,
-						verbose=self.verbose)  ## Create XMFA object and connect to database
+						verbose=self.verbose)
 			'''Walk through the list of queries supplied'''
-			if not self.skip_mauve: print("Run alignments for {queries} queries against the references in {refdir} using progressiveMauve".format(queries=len(self.query),refdir=self.refdir))
+			if not self.skip_alignment: print("Run alignments for {queries} queries against the references in {refdir} using {program}".format(queries=len(self.query),refdir=self.refdir,program=self.aligner.name))
 			for q in self.query:			## For each query file_path
 				try:
 					self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
@@ -695,30 +736,33 @@ class CanSNPer2(object):
 						self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(outputfile=outputfile)
 						continue
 					logger.info("Running CanSNPer2 on {query}".format(query=qfile))
-					if not self.skip_mauve: ### If mauve command was already run before skip step
-						logger.info("Run mauve alignments")
+					if not self.skip_alignment: ### alignments made before (--skip_alignment) are only read
+						logger.info("Run {program} alignments".format(program=self.aligner.name))
 
 					'''For each query fasta align to all CanSNP references the reference folder
-						if skip_mauve parameter is True this the align function will only format xmfa file paths
+						with --skip_alignment the align function only lists the alignment file paths
 					'''
-					xmfa_files = self.align(q)
-					logger.debug(xmfa_files)
-					if len(xmfa_files) == 0: ## if keep going is set and mauve exits with an error continue to next sequence
-						logger.debug("Mauve exited with a non zero exit status, continue with next sample!")
-						logger.warning("Mauve error skip {sample}".format(sample=q))
-						self.skipped[self.query_name] = "progressiveMauve produced no alignments"
-						self.xmfa_files = []
+					alignment_files = self.align(q)
+					logger.debug(alignment_files)
+					if len(alignment_files) == 0: ## if keep going is set and the aligner exits with an error continue to next sequence
+						logger.debug("{program} exited with a non zero exit status, continue with next sample!".format(program=self.aligner.name))
+						logger.warning("{program} error skip {sample}".format(program=self.aligner.name,sample=q))
+						self.skipped[self.query_name] = "{program} produced no alignments".format(program=self.aligner.name)
+						self.alignment_files = []
 						continue
-					'''Parse Mauve XMFA output and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
+					'''Read the alignments and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 					logger.info("Find SNPs")
+					'''the query file maps the query coordinates of the alignments to its sequences when
+						the staged copy named in the alignment header is gone (issue #23)'''
+					alignment_reader.query_file = q
 					try:
-						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=parse_xmfa_obj,xmfa_files=xmfa_files,export=True)
+						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=alignment_reader,xmfa_files=alignment_files,export=True,references=list(self.alignment_references))
 					except FileNotFoundError as e:
 						'''the message has to carry the reason: the default log level only shows
 							warnings, and the folder that was searched is what the user needs (issue #176, #177)'''
 						logger.warning("One or several xmfa files were not found for {qfile}, continue with next file: {error}".format(qfile=qfile,error=e))
 						self.skipped[self.query_name] = str(e)
-						self.xmfa_files = []
+						self.alignment_files = []
 						continue
 					'''If file export is requested print the result for each SNP location to file'''
 					if self.export:
@@ -789,7 +833,7 @@ class CanSNPer2(object):
 					if self.export:
 						print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 					'''Clean references to aligned xmfa files between queries if several was supplied'''
-					self.xmfa_files = []
+					self.alignment_files = []
 				except Exception as e:
 					'''log the real failure before wrapping it, otherwise the cause is invisible (issue #121)'''
 					logger.debug("Traceback for {file}".format(file=self.query_name),exc_info=True)
@@ -816,7 +860,7 @@ class CanSNPer2(object):
 		if not self.keep_temp and len(self.query) > 0: ## if keep temp is turned on do not remove away alignments also if no input files were given
 			self.cleanup()
 		elif self.own_tmpdir:
-			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip_mauve --tmpdir {tmpdir}".format(tmpdir=self.tmpdir))
+			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip_alignment --tmpdir {tmpdir}".format(tmpdir=self.tmpdir))
 
 		if self.typed or not self.query:
 			logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir.rstrip("/")+"/")) ## a trailing slash was already there would print dir// (issue #76)
