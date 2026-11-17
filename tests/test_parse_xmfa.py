@@ -130,3 +130,44 @@ def test_query_contig_and_position_are_reported(tmp_path):
 	_, _, parser = run(tmp_path, rows, [(10, 20, ref2, target2, "-")], name="rev")
 	info = {row[0]: row for row in parser.get_snp_info()}
 	assert info["B.1"][4] == "15", "end 20 - 5 bases from the far side of the reversed block"
+
+
+def test_blocks_out_of_reference_order_are_all_read(tmp_path):
+	# the SNP list used to be consumed as a queue while walking the blocks, so a SNP in a
+	# block that came after a block further along the reference was never evaluated and was
+	# missing from the result entirely; positions are looked up per block now
+	rows = [("B.1", 15, "C", "T"), ("C.1", 45, "G", "T")]
+	ref1, target1 = pair(11, {5: ("C", "T")})
+	ref2, target2 = pair(21, {15: ("G", "T")})
+	snps, called, parser = run(tmp_path, rows, [(30, 50, ref2, target2), (10, 20, ref1, target1)])
+	assert snps == {"B.1": 1, "C.1": 1}
+	assert called == ["B.1", "C.1"], "rows and calls come in reference position order"
+	assert [row[0] for row in parser.get_snp_info()] == ["B.1", "C.1"]
+
+
+def test_reverse_block_reports_bases_on_the_reference_strand(tmp_path):
+	# a "-" block shows the reverse complement of reference 10..20: position p sits in
+	# column 20 - p, and the query base there must be complemented before it is compared
+	rows = [("B.1", 12, "C", "T"), ("B.2", 18, "A", "G")]
+	ref, target = pair(11, {20 - 12: ("G", "A"), 20 - 18: ("T", "T")})
+	snps, called, parser = run(tmp_path, rows, [(10, 20, ref, target, "-")])
+	assert snps == {"B.1": 1, "B.2": 2}
+	info = {row[0]: row for row in parser.get_snp_info()}
+	assert info["B.1"][7] == "T" and info["B.2"][7] == "A"
+	assert [row[0] for row in parser.get_snp_info()] == ["B.1", "B.2"]
+
+
+def test_position_covered_twice_with_different_bases_is_no_data(tmp_path, caplog):
+	# progressiveMauve never covers a reference position twice, other aligners can; two
+	# different query bases at one SNP are no evidence either way
+	rows = [("B.1", 15, "C", "T")]
+	ref1, target1 = pair(11, {5: ("C", "T")})
+	ref2, target2 = pair(11, {5: ("C", "C")})
+	snps, called, parser = run(tmp_path, rows, [(10, 20, ref1, target1), (10, 20, ref2, target2)])
+	assert snps == {"B.1": 0}
+	assert called == []
+	assert [row[7] for row in parser.get_snp_info()] == ["N"]
+	assert "more than one alignment" in caplog.text
+	# the same base twice is one observation
+	snps, called, parser = run(tmp_path, rows, [(10, 20, ref1, target1), (10, 20, ref1, target1)], name="same")
+	assert snps == {"B.1": 1} and len(parser.get_snp_info()) == 1

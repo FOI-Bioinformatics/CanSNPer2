@@ -11,7 +11,7 @@ required tasks. It is also written in a modular form with separate
 classes for each task which allows future extentions such as a sequence read
 input option planned during 2020.
 
-Requires progressiveMauve
+Requires an aligner, by default progressiveMauve
 
 This program is free software: you can redistribute and/or modify
 the code under the terms of the GNU General Public License as published by
@@ -39,6 +39,7 @@ __date__ 		= "2020-04-23"
 __status__ 		= "Production"
 
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, RUN_MARKER
+from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging
 import logging
@@ -52,10 +53,10 @@ import argparse
 
 def resolve_tmpdir(path):
 	'''The working folder is a CanSNPer2 subfolder of --tmpdir. It used to be added only
-		when --tmpdir was exactly /tmp, so --skip_mauve looked in <tmpdir> for a custom tmpdir
+		when --tmpdir was exactly /tmp, so --skip_alignment looked in <tmpdir> for a custom tmpdir
 		but in <tmpdir>/CanSNPer2 for the default (issue #177). A run directory that CanSNPer2
 		created and kept (--keep_temp) carries a marker file and is used as it is, so its
-		alignments can be read again with --skip_mauve.'''
+		alignments can be read again with --skip_alignment.'''
 	tmpdir = path.rstrip("/")
 	if os.path.basename(tmpdir) == "CanSNPer2" or os.path.isfile(os.path.join(tmpdir, RUN_MARKER)):
 		return tmpdir
@@ -95,9 +96,11 @@ def main():
 	run_options.add_argument('--mask',				type=int, default=0,					help="Ignore SNPs closer than this many bases to the edge of an alignment (default 0, off)")
 	run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 	run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
+	run_options.add_argument('--aligner',			metavar='', default=DEFAULT_ALIGNER, choices=sorted(ALIGNERS),	help="Program that aligns the query against each reference: {names} (default {default})".format(names=", ".join(sorted(ALIGNERS)),default=DEFAULT_ALIGNER))
+	run_options.add_argument('--aligner_path',		metavar='', default="",				help="The aligner program, or the folder that holds it (default: found in PATH)")
 
 	'''Remove the two below when script is complete, possibly keep as hidden for debug'''
-	run_options.add_argument('--skip_mauve' ,		action='store_true', 				help="If xmfa files already exists skip step")
+	run_options.add_argument('--skip_alignment', '--skip_mauve', dest='skip_alignment',	action='store_true', 	help="Do not align, read the alignments already in --tmpdir (--skip_mauve is the old name)")
 	run_options.add_argument('--keep_temp',			action='store_true', 				help="keep temporary files")
 
 
@@ -140,7 +143,7 @@ def main():
 	elif args.verbose:
 		logval = args.verbose
 
-	if args.skip_mauve and not args.keep_temp: ## Make sure keep temp is default if --skip_mauve is used
+	if args.skip_alignment and not args.keep_temp: ## Make sure keep temp is default if --skip_alignment is used
 		args.keep_temp = True
 
 	'''Make sure log directory path exists'''
@@ -172,7 +175,9 @@ def main():
 									outdir=args.outdir,
 									tmpdir=args.tmpdir,
 									logdir=args.logdir.rstrip("/")+"/",
-									skip_mauve=args.skip_mauve,
+									skip_alignment=args.skip_alignment,
+									aligner=args.aligner,
+									aligner_path=args.aligner_path,
 									save_tree=args.save_tree,
 									keep_temp= args.keep_temp,
 									workdir=args.workdir,
@@ -191,9 +196,9 @@ def main():
 	try:
 		CanSNPer2_obj.run(database=args.database)
 	except KeyboardInterrupt:
-		'''Ctrl-C or SIGTERM: the alignment processes are already stopped in run_mauve, report it
+		'''Ctrl-C or SIGTERM: the alignment processes are already stopped in run_alignments, report it
 			plainly instead of dumping a traceback (issue #151)'''
-		logger.warning("CanSNPer2 was interrupted, the progressiveMauve processes were stopped")
+		logger.warning("CanSNPer2 was interrupted, the {program} processes were stopped".format(program=args.aligner))
 		exit(130)
 	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
 		the reason was already logged by run() (issue #191)'''

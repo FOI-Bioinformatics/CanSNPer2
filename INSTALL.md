@@ -74,6 +74,6 @@ tree or summary output can be produced. Install it with `pip install PyQt5`.
 Simple install instructions are available for this package.
 
 [progressiveMauve](http://darlinglab.org/mauve/mauve.html)  
-The progressiveMauve binary must be in the PATH or specifically set in 
-the CanSNPer2.conf file.
+The progressiveMauve binary must be in the PATH, or be given with
+`--aligner_path` (the program itself or the folder that holds it).
 

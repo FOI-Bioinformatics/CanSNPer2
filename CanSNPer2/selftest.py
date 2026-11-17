@@ -19,8 +19,14 @@ def main():
 		print("ERROR: CanSNPer2 could not be imported: {e}; install the requirements: pip install -r requirements.txt".format(e=e))
 		sys.exit(1)
 
-	if not shutil.which("progressiveMauve"):
-		failed.append("progressiveMauve was not found in PATH, it is required to align the genomes")
+	'''the default aligner must be installed; the others are optional (--aligner)'''
+	from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
+	for name, aligner in sorted(ALIGNERS.items()):
+		found = shutil.which(aligner.program)
+		if name == DEFAULT_ALIGNER and not found:
+			failed.append("{program} was not found in PATH, it is required to align the genomes".format(program=aligner.program))
+		elif name != DEFAULT_ALIGNER:
+			print("{program}: {state} (optional, --aligner {name})".format(program=aligner.program,state=found or "not found",name=name))
 
 	if failed:
 		for error in failed:
