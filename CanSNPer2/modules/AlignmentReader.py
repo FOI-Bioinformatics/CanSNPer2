@@ -47,6 +47,9 @@ class AlignmentReader(object):
 		self.database_path = kwargs.get("database",False)
 		self.database = False
 		self.reference = None
+		'''the query genome the alignments were made from, for readers that need its sequence
+			names and lengths to report query positions (set per query by CanSNPer2)'''
+		self.query_file = kwargs.get("query",None)
 		self._reset()
 
 	def _reset(self):

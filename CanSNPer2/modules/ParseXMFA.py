@@ -7,7 +7,9 @@ AlignmentReader.
 
 #__name__="ParseXMFA"
 from CanSNPer2.modules.AlignmentReader import AlignmentReader, EDGE_MARGIN  # noqa: F401 (EDGE_MARGIN is imported from here by callers)
+import os
 import logging
+from bisect import bisect_right
 logger = logging.getLogger(__name__)
 
 reference_genomes = ["FSC200","SCHUS4.1","SCHUS4.2","OSU18","LVS","FTNF002-00"]
@@ -17,6 +19,8 @@ class ParseXMFA(AlignmentReader):
 		block and the query the second."""
 	def __init__(self, verbose=False, **kwargs):
 		super(ParseXMFA, self).__init__(verbose=verbose, **kwargs)
+		'''names and start offsets of the query sequences, see load_query_map'''
+		self.query_map = None
 		### Define translation table for complement base
 		self.rcDict = {
 			 "A" : "T",
@@ -40,11 +44,10 @@ class ParseXMFA(AlignmentReader):
 		i = 0
 		'''same count for the query side, so a SNP can be traced back to a contig and a
 			position in the submitted assembly, not only to the reference coordinates (issue #23);
-			the walk goes backwards on "-" blocks, so the total is needed to convert the
-			right-to-left count into the left-to-left position the contig coordinates use'''
+			the walk goes backwards on "-" reference blocks, so the total is needed to turn the
+			count into the number of query bases left of the column'''
 		q = 0
 		q_total = len(target) - target.count("-")
-		query_name = query_head["name"] if query_head and query_head.get("name") else "-"
 		''' ii is the actual position in the sequence'''
 		base_positions = range(len(ref))
 		'''	If sign is "-" it means the reference sequence is the
@@ -73,31 +76,35 @@ class ParseXMFA(AlignmentReader):
 			if head["sign"] == "-":
 				'''If the sequence sign is "-" the complement base needs to be retrieved'''
 				_snp = self.rcDict.get(_snp,"N") ## unknown base characters become N (issue #96)
-			'''query contig and position behind the target base: the walk above counted the
-				query bases up to this column, and the block header gives the contig name and
-				the coordinate the block starts at; a target gap has no query position (issue #23)'''
-			if q_here is None or not query_head:
-				query_pos = "N/A"
-			elif query_head["sign"] == "-":
-				query_pos = str(int(query_head["end"]) - (q_total - q_here - 1))
-			else:
-				query_pos = str(int(query_head["start"]) + q_here)
+			'''query contig and position behind the target base; a target gap has no query
+				position (issue #23). q_here counts in the walking direction, which follows the
+				reference strand: the query bases left of the column in the block row are q_here
+				on a "+" reference block and the rest of the block on a "-" one. A "+" query row
+				runs from start to end, a "-" row is reverse complemented and runs from end down
+				to start. The result is a position in the query sequences joined end to end,
+				which query_location turns into a sequence name and a position in it.'''
+			query_name, query_pos = "-", "N/A"
+			if q_here is not None and query_head:
+				left = q_here if head["sign"] != "-" else q_total - q_here - 1
+				if query_head["sign"] == "-":
+					joined = int(query_head["end"]) - left
+				else:
+					joined = int(query_head["start"]) + left
+				query_name, query_pos = self.query_location(joined)
 			self.observe(start + i - 1, _snp, i, block_len, query_name=query_name, query_pos=query_pos)
 			next_snp += 1
 			if next_snp == len(wanted):
 				break
 
 	def parse_head(self,head):
-		'''This help function parses the head of an xmfa sequence line and returns info.
-			The mauve layout is "> 1:start-end sign name", the name being the contig the
-			block comes from, needed to trace calls back to the assembly (issue #23).'''
+		'''This help function parses the head of an xmfa sequence line ("> 1:start-end sign
+			file") and returns info'''
 		cols = head.split(" ") 	## Split header information into columns
 		sign = cols[1]			## Save sign of read (orientation of sequence)
 
 		'''Parse out start and end position information of sequence'''
 		start,end = list(map(int,cols[0].split(":")[-1].split("-")))
-		name = " ".join(cols[2:]).strip() if len(cols) > 2 else ""
-		return {"sign":sign,"start":start,"end":end,"name":name}
+		return {"sign":sign,"start":start,"end":end}
 
 	def read_sequence(self,seqP):
 		'''Read one block of the xmfa file; blocks with only one of the two genomes are
@@ -116,14 +123,61 @@ class ParseXMFA(AlignmentReader):
 			if self.snps_in(refHead["start"], refHead["end"]):
 				ref = "".join(refSeq)				 ## Make reference sequence one string
 				target = "".join(targetSeq)			 ## Make target sequence one string
-				'''the target head gives the query contig name for the result columns (issue #23)'''
 				self.find_snps(ref,target,head=refHead,query_head=targetHead)
+
+	def read_query_map(self,path):
+		'''names and start offsets of the sequences of a fasta file, in file order, the order
+			progressiveMauve joins them in'''
+		names, starts, total = [], [], 0
+		with open(path) as fin:
+			for line in fin:
+				if line.startswith(">"):
+					names.append(line[1:].split()[0] if line[1:].split() else "")
+					starts.append(total)
+				else:
+					total += len(line.strip())
+		return names, starts, total
+
+	def load_query_map(self,xmfa_text,xmfa_path):
+		'''The query coordinates of an xmfa file run along all query sequences joined end to
+			end. The sequence table that maps them back is read from the file the xmfa header
+			names (#Sequence2File, exactly what was aligned), otherwise from the query file the
+			caller gave (query_file); without either the query columns are N/A (issue #23)'''
+		self.query_map = None
+		candidates = []
+		for line in xmfa_text[:10000].splitlines():
+			if line.startswith("#Sequence2File"):
+				candidates.append(line.split("\t",1)[-1].strip())
+				break
+		if self.query_file:
+			candidates.append(self.query_file)
+		for path in candidates:
+			if path and os.path.isfile(path):
+				try:
+					self.query_map = self.read_query_map(path)
+					return
+				except (OSError, UnicodeDecodeError) as e:
+					logger.debug("Could not read the query sequences from {path}: {e}".format(path=path,e=e))
+		logger.warning("The query sequences of {xmfa} could not be read ({paths}), the query sequence and position columns are N/A".format(
+				xmfa=xmfa_path, paths=", ".join(candidates) or "no file given"))
+
+	def query_location(self,joined):
+		'''(sequence name, position in it) of a 1-based position in the joined query'''
+		if not self.query_map:
+			return "-", "N/A"
+		names, starts, total = self.query_map
+		if not names or not 1 <= joined <= total:
+			return "-", "N/A"
+		idx = bisect_right(starts, joined - 1) - 1
+		return names[idx], str(joined - starts[idx])
 
 	def read_xmfa(self,f):
 		'''read xmfa file; each aligned block is separated by a "=" line'''
 		with open(f) as fin:
-			for seqP in fin.read().strip().split("="):
-				self.read_sequence(seqP)
+			text = fin.read()
+		self.load_query_map(text, f)
+		for seqP in text.strip().split("="):
+			self.read_sequence(seqP)
 
 	def read_alignment(self, path):
 		self.read_xmfa(path)

@@ -752,6 +752,9 @@ class CanSNPer2(object):
 						continue
 					'''Read the alignments and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
 					logger.info("Find SNPs")
+					'''the query file maps the query coordinates of the alignments to its sequences when
+						the staged copy named in the alignment header is gone (issue #23)'''
+					alignment_reader.query_file = q
 					try:
 						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=alignment_reader,xmfa_files=alignment_files,export=True,references=list(self.alignment_references))
 					except FileNotFoundError as e:
