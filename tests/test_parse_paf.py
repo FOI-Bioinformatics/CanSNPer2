@@ -104,7 +104,7 @@ def test_missing_sequence_table_or_cs_tag_is_an_error(tmp_path):
 def test_minimap2_definition(tmp_path):
 	mm2 = get_aligner("minimap2", "/opt/bin/")
 	assert isinstance(mm2, Minimap2)
-	assert mm2.command("r.fna", "q.fna", "o.paf") == ["/opt/bin/minimap2", "-c", "--cs=long", "-x", "asm20", "-r", "1k,10k", "-o", "o.paf", "r.fna", "q.fna"]
+	assert mm2.command("r.fna", "q.fna", "o.paf") == ["/opt/bin/minimap2", "-c", "--cs=long", "-x", "asm20", "-r", "1k,10k", "-N", "50", "-p", "0.1", "-o", "o.paf", "r.fna", "q.fna"]
 	assert mm2.alignment_path("/tmp/run", "CO92", "s") == "/tmp/run/CO92_s.paf"
 	assert isinstance(mm2.reader(), ParsePAF) and mm2.reader().min_mapq == 20
 	fasta = tmp_path / "r.fna"

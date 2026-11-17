@@ -236,20 +236,23 @@ and reads the query base at each SNP position from the alignment. Two aligners a
 available:
 
 * `progressiveMauve` (default), which writes xmfa alignments.
-* `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k` and written as PAF.
-  Only primary alignments with a mapping quality of at least 20 are read: a secondary
-  alignment, or a primary one with a lower mapping quality, can carry the base of
-  another copy of a repeated region. The long-join bandwidth is lowered from the
-  preset's 100 kb to 10 kb because with 100 kb, genomes that differ by many IS element
-  insertions and rearrangements (Francisella of different subspecies) were left with
-  large unaligned parts. The reference sequence table (`<alignment>.sequences`) is
-  written next to each alignment, so `--skip_alignment` can read it again.
+* `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k -N 50 -p 0.1` and
+  written as PAF. Only primary alignments with a mapping quality of at least 20 are
+  read: a secondary alignment, or a primary one with a lower mapping quality, can carry
+  the base of another copy of a repeated region. The long-join bandwidth (`-r`) and the
+  secondary chain settings (`-N`, `-p`) differ from the preset so that the short
+  stretches between IS elements and rearrangements, which separate Francisella genomes
+  of different subspecies, are aligned as well. The reference sequence table
+  (`<alignment>.sequences`) is written next to each alignment, so `--skip_alignment`
+  can read it again.
 
-On 8 RefSeq draft assemblies (4 F. tularensis against the 5 references of the scheme,
-4 Y. pestis with 113-284 contigs against CO92) the two aligners gave the same final
-call for every genome and no SNP position with different bases; minimap2 left 6 of
-1703 positions without data that progressiveMauve had aligned, and was about 15 times
-faster (progressiveMauve run under amd64 emulation).
+On 937 F. tularensis genomes typed with the Francisella scheme, minimap2 and
+progressiveMauve gave the same final call for every genome and no SNP position with
+different bases (305,453 positions with the same base); each aligner had data at a few
+hundred positions the other had none for. minimap2 does not align genomes of other
+Francisellaceae genera, where progressiveMauve aligns part of the sequence with a
+higher share of third bases. minimap2 typed the 937 genomes in 12.5 minutes on three
+parallel runs.
 
 Each aligner is a class in `CanSNPer2/modules/Aligners.py` that gives the command line,
 the alignment file ending, how its exit codes are judged and the reader of its output.

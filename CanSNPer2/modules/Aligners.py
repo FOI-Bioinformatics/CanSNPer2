@@ -127,18 +127,25 @@ class ProgressiveMauve(Aligner):
 class Minimap2(Aligner):
 	'''minimap2 (Li 2018, 2021) with an assembly preset, writes PAF with the long cs tag.
 		asm20 allows for up to about 5 % sequence divergence between query and reference.
-		The long-join bandwidth is lowered from the preset's 100 kb to 10 kb (-r 1k,10k): with
-		100 kb, alignments of Francisella genomes of different subspecies, which differ by many
-		IS element insertions and rearrangements, covered only about 72 % of the reference and
-		left 153 of 1703 canSNP positions without data that progressiveMauve aligned, against 6
-		with 10 kb. Only primary alignments with a mapping quality of at least min_mapq are
-		read, see ParsePAF.'''
+		Two settings differ from the preset, both to align the short stretches between the
+		IS elements and rearrangements that separate Francisella genomes of different
+		subspecies:
+		- the long-join bandwidth is lowered from 100 kb to 10 kb (-r 1k,10k): with 100 kb
+		  about 28 % of a reference stayed unaligned and 153 of 1703 canSNP positions in
+		  8 genomes were left without data that progressiveMauve aligned, against 6 with 10 kb;
+		- secondary chains are kept down to 10 % of the best score (-N 50 -p 0.1, from 5 and
+		  0.8): a short block at a rearrangement breakpoint that overlaps a longer chain on the
+		  query was otherwise dropped before it could become a primary alignment. In 208
+		  F. tularensis genomes this recovered 60 of the 351 positions only progressiveMauve
+		  had aligned, with no position changing its base.
+		Only primary alignments with a mapping quality of at least min_mapq are read, see
+		ParsePAF, so the extra secondary alignments are written but not used.'''
 	name = "minimap2"
 	program = "minimap2"
 	suffix = "paf"
 	log_tag = "minimap2"
 	preset = "asm20"
-	options = ["-r", "1k,10k"]
+	options = ["-r", "1k,10k", "-N", "50", "-p", "0.1"]
 	min_mapq = 20
 
 	def command(self, reference_file, query_file, output):
