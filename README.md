@@ -31,6 +31,7 @@ python setup.py install
 ## Requirements (for manual install conda will install all dependencies)
 
 * progressiveMauve (the default aligner, see [Aligners](#aligners))
+* minimap2 (optional, `--aligner minimap2`)
 
 Read input (not yet implemeted)
 * BWA
@@ -205,7 +206,7 @@ Run options:
   --rerun               Rerun already processed files (else skip if result
                         file exists)
   --aligner             Program that aligns the query against each reference:
-                        progressiveMauve (default progressiveMauve)
+                        minimap2, progressiveMauve (default progressiveMauve)
   --aligner_path        The aligner program, or the folder that holds it
                         (default: found in PATH)
   --skip_alignment, --skip_mauve
@@ -231,9 +232,24 @@ with `--skip_alignment --tmpdir <that directory>`.
 ## Aligners
 
 CanSNPer2 aligns each query genome against every reference genome of the database
-and reads the query base at each SNP position from the alignment. progressiveMauve
-is the default and currently the only aligner; the step is written so that other
-pairwise aligners can be added.
+and reads the query base at each SNP position from the alignment. Two aligners are
+available:
+
+* `progressiveMauve` (default), which writes xmfa alignments.
+* `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k` and written as PAF.
+  Only primary alignments with a mapping quality of at least 20 are read: a secondary
+  alignment, or a primary one with a lower mapping quality, can carry the base of
+  another copy of a repeated region. The long-join bandwidth is lowered from the
+  preset's 100 kb to 10 kb because with 100 kb, genomes that differ by many IS element
+  insertions and rearrangements (Francisella of different subspecies) were left with
+  large unaligned parts. The reference sequence table (`<alignment>.sequences`) is
+  written next to each alignment, so `--skip_alignment` can read it again.
+
+On 8 RefSeq draft assemblies (4 F. tularensis against the 5 references of the scheme,
+4 Y. pestis with 113-284 contigs against CO92) the two aligners gave the same final
+call for every genome and no SNP position with different bases; minimap2 left 6 of
+1703 positions without data that progressiveMauve had aligned, and was about 15 times
+faster (progressiveMauve run under amd64 emulation).
 
 Each aligner is a class in `CanSNPer2/modules/Aligners.py` that gives the command line,
 the alignment file ending, how its exit codes are judged and the reader of its output.

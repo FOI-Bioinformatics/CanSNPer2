@@ -17,6 +17,7 @@ import shutil
 import logging
 
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
+from CanSNPer2.modules.ParsePAF import ParsePAF, SEQUENCES_SUFFIX, write_sequence_table
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,11 @@ class Aligner(object):
 	def command(self, reference_file, query_file, output):
 		'''the command as an argument list, so paths with spaces stay single arguments (issue #3)'''
 		raise NotImplementedError
+
+	def prepare(self, reference_file, query_file, output):
+		'''called before an alignment is run (not with --skip_alignment), to write what the
+			reader needs next to the alignment besides the alignment itself'''
+		return None
 
 	def reader(self, **kwargs):
 		'''an AlignmentReader for the alignment files of this aligner'''
@@ -118,8 +124,37 @@ class ProgressiveMauve(Aligner):
 		return new_query
 
 
+class Minimap2(Aligner):
+	'''minimap2 (Li 2018, 2021) with an assembly preset, writes PAF with the long cs tag.
+		asm20 allows for up to about 5 % sequence divergence between query and reference.
+		The long-join bandwidth is lowered from the preset's 100 kb to 10 kb (-r 1k,10k): with
+		100 kb, alignments of Francisella genomes of different subspecies, which differ by many
+		IS element insertions and rearrangements, covered only about 72 % of the reference and
+		left 153 of 1703 canSNP positions without data that progressiveMauve aligned, against 6
+		with 10 kb. Only primary alignments with a mapping quality of at least min_mapq are
+		read, see ParsePAF.'''
+	name = "minimap2"
+	program = "minimap2"
+	suffix = "paf"
+	log_tag = "minimap2"
+	preset = "asm20"
+	options = ["-r", "1k,10k"]
+	min_mapq = 20
+
+	def command(self, reference_file, query_file, output):
+		return [self.executable(), "-c", "--cs=long", "-x", self.preset] + list(self.options) + ["-o", output, reference_file, query_file]
+
+	def prepare(self, reference_file, query_file, output):
+		'''the reference sequence table that maps PAF positions to the joined reference'''
+		write_sequence_table(reference_file, output + SEQUENCES_SUFFIX)
+
+	def reader(self, **kwargs):
+		kwargs.setdefault("min_mapq", self.min_mapq)
+		return ParsePAF(**kwargs)
+
+
 '''the aligners that can be selected, by name'''
-ALIGNERS = {aligner.name: aligner for aligner in (ProgressiveMauve,)}
+ALIGNERS = {aligner.name: aligner for aligner in (ProgressiveMauve, Minimap2)}
 DEFAULT_ALIGNER = ProgressiveMauve.name
 
 

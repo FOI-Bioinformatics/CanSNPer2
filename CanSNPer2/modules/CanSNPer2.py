@@ -392,6 +392,8 @@ class CanSNPer2(object):
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
 			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
 			commands.append(self.aligner.command(ref_file, query_file, output))
+			if not self.skip_alignment:
+				self.aligner.prepare(ref_file, query_file, output)
 			logs.append(self.aligner.log_path(self.logdir, ref_name, self.query_name))
 			names.append((ref_name, self.query_name))
 			self.alignment_files.append(output)        ## the alignment files are read later
