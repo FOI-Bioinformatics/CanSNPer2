@@ -232,6 +232,23 @@ with `--skip_alignment --tmpdir <that directory>`.
   --supress             Supress warnings
 ```
 
+### Sample and sequence names
+
+A sample is named after its file name without the extension (`a/x.fasta` gives `x`), and
+its results are written as `<outdir>/x_snps.txt` and `<outdir>/x_not_called.txt`. Two
+different files with the same name in one run stop the run before anything is aligned;
+rename one or type them into separate `--outdir`. The same file given twice is typed once.
+
+`x_snps.txt` ends with a `Query file:` line that gives the input it was made from and the
+SHA-256 of that file. A later run uses an existing result again (without `--rerun`) only
+when the input has the same SHA-256; a different input with the same name is not typed and
+the reason is reported. Result files from versions before this line was added are used
+again as before.
+
+Sequences are identified by the first word of their header line, in references and in
+queries; these names must be set and unique, otherwise the run (reference) or the sample
+(query) stops with a message naming the file.
+
 
 ## Aligners
 

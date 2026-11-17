@@ -5,6 +5,7 @@ Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 
 import os
 import shutil
+import hashlib
 import tempfile
 import logging
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.Aligners import Aligner, get_aligner
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions
+from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions, duplicate_names
 from CanSNPer2 import __version__
 
 
@@ -90,6 +91,11 @@ class CanSNPer2(object):
 		self.skipped = {}
 		'''the SNP path per sample, so the summary can print it for every sample (issue #24)'''
 		self.result_paths = {}
+		'''samples whose result file from an earlier run was used again; only these are read
+			back for the summary: a sample skipped because its alignment failed used to show
+			the call of whatever result file an earlier run had left under its name'''
+		self.reused = set()
+		self.query_sha256 = None
 		'''how long the queue loop may sit without a single item before it calls the run
 			stuck; a worker that keeps delivering is never cut off (issue #190)'''
 		self.queue_idle_timeout = kwargs.get("queue_idle_timeout", 5*60)
@@ -383,10 +389,13 @@ class CanSNPer2(object):
 		keep = set("ACGTacgtn")
 		dirty = False
 		lines = []
+		names = []
 		with open(path) as seq_in:
 			for line in seq_in:
 				if line.startswith(">"):
 					lines.append(line)
+					words = line[1:].split()
+					names.append(words[0] if words else "")
 					continue
 				body = line.rstrip("\n")
 				bases = "".join(body.split())
@@ -398,6 +407,13 @@ class CanSNPer2(object):
 				if cleaned != bases:
 					dirty = True
 				lines.append(cleaned + "\n")
+		'''sequences are identified by the first word of their header (aligners, result files);
+			a query with two sequences of the same name gave bases and positions of the wrong
+			contig. References are checked once per run in check_reference_file.'''
+		if kind == "query":
+			problem = duplicate_names(names)
+			if problem:
+				raise CanSNPer2Error("query {path} has {problem}; rename them, for example with seqkit rename".format(path=path, problem=problem))
 		if not dirty:
 			return path
 		cleaned_path = os.path.join(self.tmpdir, "cleaned_{kind}_{name}".format(kind=kind,name=os.path.basename(path)))
@@ -702,6 +718,56 @@ class CanSNPer2(object):
 					n=answered, m=len(xmfa_files), files=", ".join([os.path.basename(xmfa) for xmfa in xmfa_files[:3]])))
 		return SNPS,SNP_info,called_snps
 
+	def sample_name(self, path):
+		'''the sample name of a query file: its file name without the last extension'''
+		return os.path.basename(path).rsplit(".",1)[0]
+
+	def check_sample_names(self, queries):
+		'''Every result file, alignment and summary row is named after the sample, so two
+			different query files with the same file name (a/x.fasta and b/x.fasta) were typed as
+			one sample: the second was skipped as already done and reported with the call of the
+			first. Different files with the same name stop the run before anything is aligned;
+			the same file given twice is typed once.'''
+		unique, seen, clashes = [], {}, {}
+		for q in queries:
+			name = self.sample_name(q)
+			real = os.path.realpath(q)
+			if name in seen:
+				if seen[name] == real:
+					logger.warning("{q} is given more than once, it is typed once".format(q=q))
+					continue
+				clashes.setdefault(name, [seen[name]]).append(real)
+				continue
+			seen[name] = real
+			unique.append(q)
+		if clashes:
+			raise CanSNPer2Error("Samples are named after their file name, which must be unique: {clashes}; rename one or type them into separate --outdir".format(
+					clashes="; ".join("{name} = {files}".format(name=name, files=", ".join(files)) for name, files in clashes.items())))
+		return unique
+
+	def file_sha256(self, path):
+		digest = hashlib.sha256()
+		with open(path, "rb") as fin:
+			for block in iter(lambda: fin.read(1 << 20), b""):
+				digest.update(block)
+		return digest.hexdigest()
+
+	def read_result_source(self, resultfile):
+		'''(path, sha256) of the query a result file was made from, (None, None) for result
+			files from versions that did not record it'''
+		with open(resultfile) as handle:
+			for row in handle:
+				if row.startswith("Query file:"):
+					words = row.split(":",1)[1].split()
+					sha = next((w.split(":",1)[1] for w in words if w.startswith("sha256:")), None)
+					path = " ".join(w for w in words if not w.startswith("sha256:")) or None
+					return path, sha
+		return None, None
+
+	def query_source_line(self, query):
+		'''the trailer line that records which input a result file was made from'''
+		return "Query file: {path} sha256:{sha}".format(path=os.path.abspath(query), sha=self.query_sha256)
+
 	def read_result_file(self,resultfile):
 		'''Read the final SNP and the SNP path from a sample's result file, used for samples
 			skipped because their result file already exists. The final SNP is read from the
@@ -731,8 +797,8 @@ class CanSNPer2(object):
 		final_snps = set()
 		with open(summarypath,"w") as summaryout:
 			for q in self.query:
-				name = os.path.basename(q).rsplit(".",1)[0]
-				if name in self.skipped:
+				name = self.sample_name(q)
+				if name in self.reused:
 					final_snp,snp_path = self.read_result_file("{outdir}/{name}_snps.txt".format(outdir=self.outdir,name=name))
 				else:
 					final_snp = self.typed.get(name,"NA")
@@ -752,6 +818,7 @@ class CanSNPer2(object):
 			if self.query[0].endswith(".txt"):
 				logger.info("Textfile input was found, parsing filepaths in {q} file".format(q=self.query[0]))
 				self.query=self.read_query_textfile_input(self.query)
+			self.query = self.check_sample_names(self.query)
 
 			'''Main function of CanSNPer2
 					1. Align sequences with the selected aligner (progressiveMauve by default)
@@ -770,16 +837,27 @@ class CanSNPer2(object):
 			if not self.skip_alignment: print("Run alignments for {queries} queries against the references in {refdir} using {program}".format(queries=len(self.query),refdir=self.refdir,program=self.aligner.name))
 			for q in self.query:			## For each query file_path
 				try:
-					self.query_name = os.path.basename(q).rsplit(".",1)[0]  ## get name of file and remove ending
+					self.query_name = self.sample_name(q)  ## get name of file and remove ending
 
 					qfile = q.rsplit("/")[-1]   ## Remove path from query name
 					if not os.path.exists(q):
 						raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
 
 					outputfile = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
+					self.query_sha256 = self.file_sha256(q)
 					if os.path.exists(outputfile) and not self.rerun:
+						'''a result is only used again when it was made from the same input: the
+							name alone used to let a different genome with the same file name be
+							reported with the old call'''
+						old_path, old_sha = self.read_result_source(outputfile)
+						if old_sha is not None and old_sha != self.query_sha256:
+							raise CanSNPer2Error("{outputfile} exists for a different input ({old}); use --rerun to replace it or choose another --outdir".format(
+									outputfile=outputfile, old=old_path or "unknown file"))
+						if old_sha is None:
+							logger.info("{outputfile} does not record its input (older version), it is used again as it is".format(outputfile=outputfile))
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
 						self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(outputfile=outputfile)
+						self.reused.add(self.query_name)
 						continue
 					logger.info("Running CanSNPer2 on {query}".format(query=qfile))
 					if not self.skip_alignment: ### alignments made before (--skip_alignment) are only read
@@ -845,6 +923,7 @@ class CanSNPer2(object):
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
 								print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
+								print(self.query_source_line(q),file=called_out)
 						logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 					else:
 						if self.export:
@@ -861,6 +940,7 @@ class CanSNPer2(object):
 										print("\t".join(row),file=called_out)
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
+								print(self.query_source_line(q),file=called_out)
 							logger.info(message)
 					'''SNP positions of the tree that no alignment carried a base for had no data at all,
 						and were missing from both result files, so the only place they showed up was the
@@ -894,7 +974,7 @@ class CanSNPer2(object):
 		if len(self.query) > 0:
 			logger.info("{typed} of {n} samples were typed, {na} were not called, {skipped} were skipped".format(
 					typed=len(self.typed), n=len(self.query), na=len(self.not_typed), skipped=len(self.skipped)))
-			if not self.typed:
+			if not self.typed and not self.reused:
 				reasons = ["{sample}: {why}".format(sample=sample,why=why) for sample,why in list(self.not_typed.items())+list(self.skipped.items())]
 				logger.error("No sample was typed - {reasons}".format(reasons="; ".join(reasons)))
 		else:
@@ -908,5 +988,5 @@ class CanSNPer2(object):
 		elif self.own_tmpdir:
 			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip_alignment --tmpdir {tmpdir}".format(tmpdir=self.tmpdir))
 
-		if self.typed or not self.query:
+		if self.typed or self.reused or not self.query:
 			logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir.rstrip("/")+"/")) ## a trailing slash was already there would print dir// (issue #76)

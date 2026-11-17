@@ -143,10 +143,10 @@ def test_whitespace_is_removed_from_the_inputs(tmp_path):
 	# become N and shift every position after them
 	obj = CanSNPer2([], workdir=str(tmp_path))
 	src = tmp_path / "genome.fna"
-	src.write_text("\n>seq one\nACGT ACGT\n   \nAC\tGT\n\n>seq two\nACGT\n")
+	src.write_text("\n>seq1 one\nACGT ACGT\n   \nAC\tGT\n\n>seq2 two\nACGT\n")
 	cleaned = obj.clean_input_fasta(str(src), "query")
 	assert cleaned != str(src)
-	assert open(cleaned).read() == ">seq one\nACGTACGT\nACGT\n>seq two\nACGT\n"
+	assert open(cleaned).read() == ">seq1 one\nACGTACGT\nACGT\n>seq2 two\nACGT\n"
 	assert sequence_length(str(src)) == sequence_length(cleaned) == 16
 	# a file whose only fault is a blank first line must be cleaned as well
 	src2 = tmp_path / "lead.fna"

@@ -38,7 +38,7 @@ __email__ 		= ["bioinformatics@foi.se", "david.sundell@foi.se"]
 __date__ 		= "2020-04-23"
 __status__ 		= "Production"
 
-from CanSNPer2.modules.CanSNPer2 import CanSNPer2, RUN_MARKER
+from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging
@@ -202,9 +202,17 @@ def main():
 			plainly instead of dumping a traceback (issue #151)'''
 		logger.warning("CanSNPer2 was interrupted, the {program} processes were stopped".format(program=args.aligner))
 		exit(130)
+	except CanSNPer2Error as e:
+		'''a refused run (for example two samples with the same name) is reported as a message,
+			not as a traceback, and leaves no run directory behind'''
+		logger.error(e.value)
+		if not args.keep_temp:
+			CanSNPer2_obj.cleanup()
+		exit(1)
 	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
-		the reason was already logged by run() (issue #191)'''
-	if not CanSNPer2_obj.typed and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
+		the reason was already logged by run() (issue #191); a sample whose earlier result
+		was used again, made from the same input, counts as typed'''
+	if not CanSNPer2_obj.typed and not CanSNPer2_obj.reused and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
 		exit(1)
 
 if oname=="__main__":
