@@ -38,6 +38,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y progressivemauve minimap2
 
+      - name: Install MUMmer4 from bioconda
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: mummer4
+          create-args: mummer4
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+          init-shell: none
+
+      - name: Put nucmer and delta-filter in PATH
+        # wrappers for the two programs only, so the perl, ruby and openssl of the
+        # environment do not shadow the system ones
+        run: |
+          mkdir -p "$RUNNER_TEMP/mummer4-bin"
+          for p in nucmer delta-filter; do
+            printf '#!/bin/sh\nexec "%s" "$@"\n' "$MAMBA_ROOT_PREFIX/envs/mummer4/bin/$p" > "$RUNNER_TEMP/mummer4-bin/$p"
+            chmod +x "$RUNNER_TEMP/mummer4-bin/$p"
+          done
+          echo "$RUNNER_TEMP/mummer4-bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/mummer4-bin/nucmer" --version
+
       - name: Install CanSNPer2
         run: |
           python -m pip install --upgrade pip
@@ -85,3 +108,9 @@ jobs:
         run: |
           CanSNPer2 --database ba.db --refdir references -o results_minimap2 query_Ames.fna --summary --aligner minimap2
           diff results/snps_summary.txt results_minimap2/snps_summary.txt
+
+      - name: Type the reference genome with MUMmer4, same call as progressiveMauve
+        working-directory: ${{ runner.temp }}
+        run: |
+          CanSNPer2 --database ba.db --refdir references -o results_mummer4 query_Ames.fna --summary --aligner mummer4
+          diff results/snps_summary.txt results_mummer4/snps_summary.txt

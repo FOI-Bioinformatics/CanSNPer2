@@ -207,7 +207,8 @@ Run options:
   --rerun               Rerun already processed files (else skip if result
                         file exists)
   --aligner             Program that aligns the query against each reference:
-                        minimap2, progressiveMauve (default progressiveMauve)
+                        minimap2, mummer4, progressiveMauve (default
+                        progressiveMauve)
   --alignment_timeout MINUTES
                         Stop the alignments of a query that take longer than
                         this, in minutes (0 for no limit, default 60)
@@ -236,7 +237,7 @@ with `--skip_alignment --tmpdir <that directory>`.
 ## Aligners
 
 CanSNPer2 aligns each query genome against every reference genome of the database
-and reads the query base at each SNP position from the alignment. Two aligners are
+and reads the query base at each SNP position from the alignment. Three aligners are
 available:
 
 * `progressiveMauve` (default), which writes xmfa alignments.
@@ -249,14 +250,29 @@ available:
   of different subspecies, are aligned as well. The reference sequence table
   (`<alignment>.sequences`) is written next to each alignment, so `--skip_alignment`
   can read it again.
+* `mummer4`, MUMmer4 `nucmer` with its default settings followed by `delta-filter -1`,
+  written as delta. The 1-to-1 filter keeps, for every reference and query position,
+  only the best alignment, allowing rearrangements. The delta file names the reference
+  and query fasta files it was made from; the reader takes the query bases and the
+  reference sequence order from them, so those files must still be in place when the
+  alignment is read again with `--skip_alignment`. `nucmer` and `delta-filter` must
+  both be installed (bioconda package `mummer4`).
 
-On 937 F. tularensis genomes typed with the Francisella scheme, minimap2 and
-progressiveMauve gave the same final call for every genome and no SNP position with
-different bases (305,453 positions with the same base); each aligner had data at a few
-hundred positions the other had none for. minimap2 does not align genomes of other
-Francisellaceae genera, where progressiveMauve aligns part of the sequence with a
-higher share of third bases. minimap2 typed the 937 genomes in 12.5 minutes on three
-parallel runs.
+On 937 F. tularensis genomes typed with the Francisella scheme, both minimap2 and
+MUMmer4 gave the same final call as progressiveMauve for every genome, and neither
+had a SNP position with a different base:
+
+| | minimap2 | MUMmer4 |
+|---|---|---|
+| positions with the same base as progressiveMauve | 305,513 | 305,693 |
+| positions with data only from progressiveMauve | 291 | 111 |
+| positions with data only from this aligner | 169 | 177 |
+| time for the 937 genomes, three parallel runs | 12.9 min | 15.0 min |
+
+On 268 genomes of other Francisellaceae species and genera, neither gave a final call.
+progressiveMauve, run on a subset of 77 of them, called 5 genomes of other genera
+F. tularensis. minimap2 does not align genomes of other genera; MUMmer4 does, at about
+43 s per genome against under 4 s for minimap2.
 
 Each aligner is a class in `CanSNPer2/modules/Aligners.py` that gives the command line,
 the alignment file ending, how its exit codes are judged and the reader of its output.
