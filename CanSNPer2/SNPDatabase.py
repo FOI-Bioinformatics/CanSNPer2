@@ -13,7 +13,7 @@ from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.ModifyTree import InputError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError
-from CanSNPer2.modules.WriteTaxonomy import WriteTaxonomy
+from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__  ## used by the --version flag (issue #119)
@@ -31,7 +31,9 @@ def get_read_modules():
 	return read_modules
 
 supported_input = set(get_read_modules())
-supported_output = set(["tab", "newick"])# set(["cansnper","ncbi","tab","newick"])
+## "source" writes the tree, SNP and reference files that --create reads; "tab" is its old name,
+## which wrote node and link tables that could not rebuild the database
+supported_output = ["source", "newick", "tab"]
 
 
 import argparse
@@ -64,8 +66,8 @@ def get_arguments():
 
 
 	export_database = parser.add_argument_group("Export database")
-	export_database.add_argument('--export',  action='store_true',					help="Export database to text format (exports tree and annotation file)")
-	export_database.add_argument('--export_format', metavar='', default='tab',  				choices=supported_output, help="Select output format [{format}]".format(format=", ".join(supported_output)))
+	export_database.add_argument('--export',  action='store_true',					help="Export the database to text files")
+	export_database.add_argument('--export_format', metavar='', default='source',  			choices=supported_output, help="source: the tree, SNP and reference files that --create reads; newick: the tree; tab is the old name of source (default source)")
 	export_database.add_argument('-o', '--outdir', metavar='',									help="outdir for database export!")
 
 
@@ -153,11 +155,13 @@ def main():
 			else:
 				NT.print()
 		else:
-			logger.info("Export CanSNPer2 database")
-			WriteObj = WriteTaxonomy( outdir,database=args.database, minimal=True, separator="\t", prefix="annotation,snptree",desc=True)
-			WriteObj.set_order(True)
-			WriteObj.names()
-			WriteObj.nodes()
+			try:
+				files = export_source(args.database, outdir)
+			except ExportError as e:
+				logger.error("The database cannot be exported: {error}".format(error=e))
+				exit(1)
+			print("Exported to {files}".format(files=", ".join(files.values())))
+			print("Rebuild with: CanSNPer2-database --create --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
 		'''This should be reprogrammed so that one can add annotations without supplying a mod file!'''

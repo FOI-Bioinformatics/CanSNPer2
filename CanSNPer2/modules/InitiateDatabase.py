@@ -128,7 +128,11 @@ class CanSNPDatabase(DatabaseFunctions):
 			logging.debug(headers)
 			check_source_headers(headers,GENOME_SOURCE_COLUMNS,annotation_file)
 			for row in f:
-				data = row.strip().split("\t")
+				if row.strip() == "":
+					continue
+				## only the line end is removed: strip() also removed empty trailing fields, so a
+				## reference without an assembly name was skipped as a short row
+				data = row.rstrip("\r\n").split("\t")
 				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
 					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
 					continue
