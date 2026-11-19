@@ -196,7 +196,12 @@ cmd skip-mauve-without-alignments fail "No alignments were produced" "$PY" -m Ca
 cmd keep-going-no-output fail "No sample was typed" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
     "$OUT/no_such_file.fna" -db "$DB" --refdir "$OUT/refs" -o "$OUT/r_keepgoing" \
     --tmpdir "$OUT/t_keepgoing" --logdir "$OUT/logs/keepgoing" --keep_going --skip_mauve
-expect "keep_going left no result files behind" "0" "$(ls "$OUT/r_keepgoing" 2>/dev/null | wc -l | tr -d ' ')"
+expect "keep_going wrote nothing but the results overview" "1" "$(ls "$OUT/r_keepgoing" 2>/dev/null | wc -l | tr -d ' ')"
+if grep -q "no_such_file" "$OUT/r_keepgoing/summary.html" 2>/dev/null; then
+    printf '  ok    %-52s the overview lists the failed sample\n' "keep_going overview names the failed sample"; PASSED=$((PASSED+1))
+else
+    printf '  FAIL  %-52s summary.html does not list the failed sample\n' "keep_going overview names the failed sample"; FAILED=$((FAILED+1))
+fi
 
 say "== download failure is reported and fails the command (issue #218)"
 DLLOG=$OUT/logs/download
@@ -224,13 +229,13 @@ expect "five alignments" "5" "$(ls "$OUT/align" | wc -l | tr -d ' ')"
 expect "mauve left no sslist in the input folders" "0" "$(find "$OUT/refs" "$OUT/inputs" -name '*.sslist' | wc -l | tr -d ' ')"
 cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
-expect "query_snps.txt lines" "19" "$(wc -l < "$OUT/res_query/query_snps.txt")"
+expect "query_snps.txt lines" "20" "$(wc -l < "$OUT/res_query/query_snps.txt")"
 expect "query_not_called.txt lines" "313" "$(wc -l < "$OUT/res_query/query_not_called.txt")"
 # issue #23: both tables carry the query trace columns (Name, Reference, Pos, QuerySeq,
 # QueryPosition, Ancestral base, Derived base, Target base, Edge flag)
 expect "snps table columns (#23)" "9" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
 expect "not_called table columns (#23)" "9" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
-BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP)/ && ($4=="" || $5=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($4=="" || $5=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 expect "query trace columns filled in every SNP row" "0" "$BADQ"
 QPNUM=$(awk -F'\t' 'NR>1 && $5 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 if [ "$QPNUM" -gt 0 ]; then
@@ -249,7 +254,7 @@ fi
 mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT/tmp_skip/CanSNPer2/"
 cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
-expect "same snps through --skip_mauve" "19" "$(wc -l < "$OUT/res_skip/query_snps.txt")"
+expect "same snps through --skip_mauve" "20" "$(wc -l < "$OUT/res_skip/query_snps.txt")"
 expect "same not-called through --skip_mauve" "313" "$(wc -l < "$OUT/res_skip/query_not_called.txt")"
 
 # every SNP of the database tree has to show up in one of the two files: a position that no
@@ -260,7 +265,7 @@ cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/quer
 NODATA=$(awk -F'\t' 'NR>1 && $8=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
 COVERED=$("$PY" -c "
 nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_not_called.txt')) if i)
-sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('SNP path', 'Final SNP')))
+sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('SNP path', 'Final SNP', 'Query file')))
 print(nc + sc)")
 if [ "$NODATA" -gt 0 ] && [ "$COVERED" = 328 ] && grep -q "no alignment data" "$LASTLOG"; then
     printf '  ok    %-52s %s positions listed, the two files cover all 328 SNPs\n' "SNPs without any alignment data are listed (#27)" "$NODATA"
@@ -276,7 +281,7 @@ fi
 cmd na-min-hits any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_na" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/na" \
     --skip_mauve --min_required_hits 999
-NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(SNP path|Final SNP)/' "$OUT/res_na/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
+NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(SNP path|Final SNP|Query file)/' "$OUT/res_na/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$NA_ROWS" -gt 0 ] && grep -q "^SNP path: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null && grep -q "^Final SNP: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null; then
     printf '  ok    %-52s %s called SNPs listed although the call is NA\n' "NA sample keeps its called SNPs (#35)" "$NA_ROWS"
     PASSED=$((PASSED+1))
@@ -291,13 +296,13 @@ cmd keep-going-mixed ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
     "$OUT/no_such_file.fna" "$OUT/inputs/query.fna" -db "$DB" --refdir "$OUT/refs" \
     -o "$OUT/res_keepgoing" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/keepgoing_ok" \
     --keep_going --skip_mauve
-expect "keep_going kept the working sample's output" "19" "$(wc -l < "$OUT/res_keepgoing/query_snps.txt" 2>/dev/null || echo 0)"
+expect "keep_going kept the working sample's output" "20" "$(wc -l < "$OUT/res_keepgoing/query_snps.txt" 2>/dev/null || echo 0)"
 
 if ls "$ROOT"/test_data/*.fasta >/dev/null 2>&1; then
     ls "$ROOT"/test_data/*.fasta > "$OUT/real_list.txt"
     cmd real-data-batch ok "B.75" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/real_list.txt" -db "$DB" \
         --refdir "$OUT/refs" -o "$OUT/res_real" --tmpdir "$OUT/tmp_real" --logdir "$OUT/logs/real" --save_tree
-    for pair in "A271_1_FDC408_complete.fasta B.75 20 312" "FSC458.fasta B.77 17 315"; do
+    for pair in "A271_1_FDC408_complete.fasta B.75 21 312" "FSC458.fasta B.77 18 315"; do
         set -- $pair
         LABEL=$(grep -h "^$(basename $1 .fasta):" "$LASTLOG" | tail -1 | sed 's/.*: //')
         expect "known answer $1" "$2" "$LABEL"

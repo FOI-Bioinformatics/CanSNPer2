@@ -20,6 +20,43 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def load_annotations(path):
+	'''Read a tree annotation file: one annotation per line, tab separated
+		<snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]
+		"node" draws a colored badge under the SNP dot, "clade" draws a dashed box around the
+		whole subtree below it (a feature that one branch of the tree separates, like an
+		antibiotic resistance marker at the split of two lineages).
+		The rank is a free-text level carried by the annotation itself and is NEVER derived
+		from the depth in the tree: the database tree has uneven resolution, so B.1 and B.16
+		can both sit at subspecies level while standing at different depths.
+		Empty lines and lines starting with # are skipped; rank, label and color of the
+		header line ("snp", "snp_id", "node", "kind"...) are recognized and skipped.'''
+	annotations = []
+	first = True
+	with open(path) as handle:
+		for number, row in enumerate(handle, start=1):
+			row = row.strip()
+			if not row or row.startswith("#"):
+				continue
+			fields = row.split("\t")
+			if first and fields[0].lower() in ("snp", "snp_id", "node", "name") and len(fields) > 1:
+				first = False
+				continue
+			first = False
+			if len(fields) < 4:
+				raise ValueError("{path} line {n}: need <snp name>\\t<node|clade>\\t<rank>\\t<label>, found: {row}".format(
+						path=path, n=number, row=row))
+			kind = fields[1].strip().lower()
+			if kind not in ("node", "clade"):
+				raise ValueError("{path} line {n}: kind must be node or clade, found {kind}".format(
+						path=path, n=number, kind=fields[1]))
+			annotation = {"node": fields[0].strip(), "kind": kind, "rank": fields[2].strip(), "label": fields[3].strip()}
+			if len(fields) > 4 and fields[4].strip():
+				annotation["color"] = fields[4].strip()
+			annotations.append(annotation)
+	return annotations
+
+
 __version__ = "2.0.1"
 __author__ = "David Sundell"
 __credits__ = ["David Sundell"]
@@ -66,6 +103,7 @@ input[type="checkbox"] { width: 14px; height: 14px; accent-color: #3a7d5c; }
 #legend { display: flex; gap: 14px; align-items: center; font-size: 12px; color: #4b5563; margin-left: auto; }
 #legend .key { display: flex; align-items: center; gap: 5px; }
 .dot { width: 11px; height: 11px; border-radius: 50%; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; color: #fff; }
 #tree { position: fixed; top: 52px; bottom: 0; left: 0; right: 0; }
 svg { width: 100%; height: 100%; display: block; cursor: grab; }
 circle.node { cursor: pointer; }
@@ -99,6 +137,14 @@ text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
 var DATA = __PAYLOAD__;
 var COL = 130, ROW = 22, MARGIN = 24, OVERVIEW_LEAVES = 60;
 var nodes = DATA.nodes;
+var ANN = DATA.annotations || [];
+var annByNode = {};
+ANN.forEach(function(a){ (annByNode[a.node] = annByNode[a.node] || []).push(a); });
+var nodeByName = {};
+nodes.forEach(function(n){ if (!(n.name in nodeByName)) { nodeByName[n.name] = n; } });
+var RANKCOLOR = {};
+var RANKPALETTE = ["#8e44ad", "#2e8b57", "#d35400", "#2471a3", "#c0392b", "#16a085", "#7d6608"];
+function annColor(a){ if (a.color) { return a.color; } var r = a.rank || a.label; if (!RANKCOLOR[r]) { RANKCOLOR[r] = RANKPALETTE[Object.keys(RANKCOLOR).length % RANKPALETTE.length]; } return RANKCOLOR[r]; }
 var children = {};
 nodes.forEach(function(n){ if (n.parent !== null) { (children[n.parent] = children[n.parent] || []).push(n); } });
 nodes.forEach(function(n){ n.collapsed = false; });
@@ -121,6 +167,7 @@ function layout(){
 \treturn nextY;
 }
 function esc(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+(function(){ var seen = {}, html = ""; ANN.forEach(function(a){ var key = (a.rank || a.label) + "|" + a.kind; if (seen[key]) { return; } seen[key] = 1; var col = annColor(a); if (a.kind === "clade") { html += '<span class="key"><span class="pill" style="background:transparent;border:1.5px dashed ' + col + ';color:' + col + '">' + esc(a.rank || a.label) + "</span>clade</span>"; } else { html += '<span class="key"><span class="pill" style="background:' + col + '">' + esc(a.rank || a.label) + "</span></span>"; } }); document.getElementById("legend").insertAdjacentHTML("beforeend", html); })();
 function render(){
 \tlayout();
 \tvar maxX = 0, maxY = 0;
@@ -134,6 +181,16 @@ function render(){
 \t\tvar dash = n.dash ? ' stroke-dasharray="4,3"' : "";
 \t\tparts.push('<line x1="' + p.x + '" y1="' + p.y + '" x2="' + p.x + '" y2="' + n.y + '" stroke="' + n.line + '" stroke-width="2"' + dash + "/>");
 \t\tparts.push('<line x1="' + p.x + '" y1="' + n.y + '" x2="' + n.x + '" y2="' + n.y + '" stroke="' + n.line + '" stroke-width="2"' + dash + "/>");
+\t});
+\tANN.forEach(function(a){
+\t\tif (a.kind !== "clade") { return; }
+\t\tvar n = nodeByName[a.node];
+\t\tif (!n || n.y === undefined || !keep(n)) { return; }
+\t\tvar col = annColor(a);
+\t\tvar cx0 = n.x, cx1 = n.x, cy0 = n.y, cy1 = n.y;
+\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); })(n);
+\t\tparts.push('<rect x="' + (cx0 - 16) + '" y="' + (cy0 - ROW) + '" width="' + (cx1 - cx0 + 32) + '" height="' + (cy1 - cy0 + 2 * ROW) + '" rx="12" fill="' + col + '" fill-opacity="0.08" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="6,4" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
+\t\tparts.push('<text x="' + (cx0 - 12) + '" y="' + (cy0 - ROW + 2) + '" fill="' + col + '" font-weight="700" font-size="12">' + esc(a.label) + "</text>");
 \t});
 \tnodes.forEach(function(n){
 \t\tif (n.y === undefined || !keep(n)) { return; }
@@ -152,6 +209,19 @@ function render(){
 \t\tif (labels && n.name !== "ROOT") {
 \t\t\tvar extra = n.collapsed ? " [" + subtreeSize(n) + "]" : "";
 \t\t\tparts.push('<text x="' + (n.x + 6 + triW) + '" y="' + (n.y - 5) + '">' + esc(n.name) + extra + "</text>");
+\t\t}
+\t\tvar anns = annByNode[n.name];
+\t\tif (anns) {
+\t\t\tvar shown = 0;
+\t\t\tanns.forEach(function(a){
+\t\t\t\tif (a.kind === "clade") { return; }
+\t\t\t\tvar acol = annColor(a);
+\t\t\t\tvar w = a.label.length * 6.6 + 14;
+\t\t\t\tvar by = n.y + 8 + shown * 20;
+\t\t\t\tshown += 1;
+\t\t\t\tparts.push('<rect x="' + (n.x - w / 2) + '" y="' + by + '" width="' + w + '" height="17" rx="8" fill="' + acol + '" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
+\t\t\t\tparts.push('<text x="' + n.x + '" y="' + (by + 12.5) + '" text-anchor="middle" fill="#ffffff" font-size="11">' + esc(a.label) + "</text>");
+\t\t\t});
 \t\t}
 \t});
 \tparts.push("</svg>");
@@ -255,6 +325,357 @@ autoCollapse();
 overviewState = nodes.map(function(n){ return n.collapsed; });
 render();
 fit();
+</script>
+</body>
+</html>
+'''
+
+
+'''The results overview written by NewickTree.write_dashboard: one row per sample of the run
+	in a side table, and the database tree embedded once next to it. The topology is the same
+	for every sample, so the file stores only the per-sample SNP states and clicking a row
+	repaints the tree with them. Samples that need a manual look (failed, not called, calls
+	leaning on the strictness tolerance over positions without data, paths over SNPs flagged
+	at an alignment edge) sort to the top and the worst one is selected on open. Self-contained
+	like the tree viewer: plain javascript, no server, no downloads'''
+DASHBOARD_HTML_TEMPLATE = '''<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+html, body { height: 100%; margin: 0; background: #fff; }
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1f2937; }
+#bar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center;
+       gap: 8px; flex-wrap: wrap; padding: 8px 14px; background: #fbfcfd;
+       border-bottom: 1px solid #e3e6e9; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+#counts { font-size: 13px; color: #374151; }
+#counts b { font-weight: 600; }
+#tools { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+button { appearance: none; border: 1px solid #d4d9de; background: #fff; color: #1f2937;
+         border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+button:hover { background: #f1f4f7; border-color: #c2c8cf; }
+label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #374151;
+              cursor: pointer; padding: 4px 8px; border-radius: 7px; }
+label.check:hover { background: #f1f4f7; }
+input[type="checkbox"] { width: 13px; height: 13px; accent-color: #3a7d5c; }
+#side { position: fixed; top: 52px; bottom: 0; left: 0; width: 400px; z-index: 9;
+        border-right: 1px solid #e3e6e9; background: #fdfefe; display: flex; flex-direction: column; }
+#detail { padding: 10px 12px; border-bottom: 1px solid #e3e6e9; font-size: 12px; min-height: 66px;
+          background: #fff; overflow-wrap: anywhere; word-break: break-word; }
+#detail .path { word-break: break-all; }
+#detail h2 { margin: 0 0 4px 0; font-size: 15px; }
+#detail .reason { color: #92400e; margin: 2px 0; }
+#detail a { color: #2563eb; }
+#search { margin: 8px 12px; padding: 6px 9px; border: 1px solid #d4d9de; border-radius: 7px; font: inherit; font-size: 13px; }
+#tableWrap { flex: 1; overflow-y: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { position: sticky; top: 0; background: #f4f6f8; text-align: left; padding: 6px 8px; font-weight: 600; border-bottom: 1px solid #e3e6e9; }
+td { padding: 5px 8px; border-bottom: 1px solid #eef1f3; vertical-align: top; }
+tr.row { cursor: pointer; }
+tr.row:hover { background: #f1f4f7; }
+tr.selected { background: #e8f0fe; }
+.badge { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; color: #fff; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; color: #fff; }
+.sev-failed, .sev-notcalled { background: #c0392b; }
+.sev-review { background: #d97706; }
+.sev-clean { background: #2e8b57; }
+.sev-reused { background: #9ca3af; }
+.warn { color: #b45309; font-weight: 600; }
+#tree { position: fixed; top: 52px; bottom: 0; left: 400px; right: 0; }
+svg { width: 100%; height: 100%; display: block; cursor: grab; }
+circle.node { cursor: pointer; }
+text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
+</style>
+</head>
+<body>
+<div id="bar">
+<span id="counts"></span>
+<span id="annlegend" style="display:flex;gap:10px;align-items:center;font-size:12px;color:#4b5563;flex-wrap:wrap;"></span>
+<div id="tools">
+<button id="overview" title="back to the starting collapsed overview">overview</button>
+<button id="expandAll">expand all</button>
+<button id="collapseAll">collapse</button>
+<button id="fit" title="fit the tree into the window">fit</button>
+<button id="zoomIn" title="zoom in">+</button>
+<button id="zoomOut" title="zoom out">&minus;</button>
+<label class="check"><input type="checkbox" id="onlyCalled"><span>called paths only</span></label>
+<label class="check"><input type="checkbox" id="showLabels" checked><span>labels</span></label>
+</div>
+</div>
+<div id="side">
+<div id="detail"></div>
+<input id="search" type="text" placeholder="filter samples by name...">
+<div id="tableWrap"><table><thead><tr><th>sample</th><th>final SNP</th><th>call</th></tr></thead><tbody id="rows"></tbody></table></div>
+</div>
+<div id="tree"></div>
+<script>
+var DATA = __PAYLOAD__;
+var COL = 130, ROW = 22, MARGIN = 24, OVERVIEW_LEAVES = 60;
+var nodes = DATA.nodes, samples = DATA.samples;
+var ANN = DATA.annotations || [];
+var annByNode = {};
+ANN.forEach(function(a){ (annByNode[a.node] = annByNode[a.node] || []).push(a); });
+var nodeByName = {};
+nodes.forEach(function(n){ if (!(n.name in nodeByName)) { nodeByName[n.name] = n; } });
+var RANKCOLOR = {};
+var RANKPALETTE = ["#8e44ad", "#2e8b57", "#d35400", "#2471a3", "#c0392b", "#16a085", "#7d6608"];
+function annColor(a){ if (a.color) { return a.color; } var r = a.rank || a.label; if (!RANKCOLOR[r]) { RANKCOLOR[r] = RANKPALETTE[Object.keys(RANKCOLOR).length % RANKPALETTE.length]; } return RANKCOLOR[r]; }
+var children = {};
+nodes.forEach(function(n){ if (n.parent !== null) { (children[n.parent] = children[n.parent] || []).push(n); } });
+var SEVRANK = {"failed": 0, "not called": 1, "review": 2, "reused": 3, "clean": 4};
+var SEVCLS = {"failed": "sev-failed", "not called": "sev-notcalled", "review": "sev-review", "clean": "sev-clean", "reused": "sev-reused"};
+var order = samples.map(function(s, i){ return i; });
+order.sort(function(a, b){
+\tvar sa = samples[a], sb = samples[b];
+\tvar ra = SEVRANK[sa.severity], rb = SEVRANK[sb.severity];
+\tif (ra !== rb) { return ra - rb; }
+\treturn sa.name < sb.name ? -1 : 1;
+});
+var counts = {};
+samples.forEach(function(s){ counts[s.severity] = (counts[s.severity] || 0) + 1; });
+document.getElementById("counts").innerHTML = samples.length + " samples: "
+\t+ "<b>" + (counts["clean"] || 0) + "</b> clean, "
+\t+ "<b>" + (counts["review"] || 0) + "</b> review, "
+\t+ "<b>" + (counts["not called"] || 0) + "</b> not called, "
+\t+ "<b>" + (counts["failed"] || 0) + "</b> failed, "
+\t+ "<b>" + (counts["reused"] || 0) + "</b> reused";
+function esc(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+(function(){ var seen = {}, html = ""; ANN.forEach(function(a){ var key = (a.rank || a.label) + "|" + a.kind; if (seen[key]) { return; } seen[key] = 1; var col = annColor(a); if (a.kind === "clade") { html += '<span><span class="pill" style="background:transparent;border:1.5px dashed ' + col + ';color:' + col + '">' + esc(a.rank || a.label) + "</span> clade</span>"; } else { html += '<span><span class="pill" style="background:' + col + '">' + esc(a.rank || a.label) + "</span></span>"; } }); document.getElementById("annlegend").innerHTML = html; })();
+var current = -1, onlyCalled = false, vb = null, svgEl = null, labels = true;
+function hasCalled(n){ if (n.called) { return true; } return (children[n.id] || []).some(hasCalled); }
+function keep(n){ return !onlyCalled || hasCalled(n); }
+function visKids(n){ if (n.collapsed) { return []; } return (children[n.id] || []).filter(keep); }
+function canCollapse(n){ return (children[n.id] || []).some(keep) && !hasCalled(n); }
+function layout(){
+\tnodes.forEach(function(n){ n.y = undefined; });
+\tvar nextY = 0;
+\t(function place(n){
+\t\tn.x = n.depth * COL + MARGIN;
+\t\tvar kids = visKids(n);
+\t\tif (!kids.length) { n.y = nextY * ROW + MARGIN; nextY += 1; }
+\t\telse { kids.forEach(place); n.y = (kids[0].y + kids[kids.length-1].y) / 2; }
+\t})(nodes[0]);
+}
+function subtreeSize(n){ var c = 0; (children[n.id] || []).forEach(function(k){ if (keep(k)) { c += 1 + subtreeSize(k); } }); return c; }
+function triScale(cnt){ if (cnt < 5) { return 0.6; } if (cnt < 10) { return 0.85; } if (cnt < 20) { return 1; } if (cnt < 50) { return 1.3; } if (cnt < 150) { return 1.6; } return 2; }
+function paint(i){
+\tcurrent = i;
+\tvar s = samples[i];
+\tvar states = s.states || {}, called = {}, edge = {}, nodata = {};
+\t(s.called || []).forEach(function(c){ called[c] = 1; });
+\t(s.edge || []).forEach(function(c){ edge[c] = 1; });
+\t(s.no_data || []).forEach(function(c){ nodata[c] = 1; });
+\tnodes.forEach(function(n){
+\t\tn.called = !!called[n.name];
+\t\tvar label = n.name === "ROOT" || (/^-.*-$/.test(n.name));
+\t\tn.dot = !label;
+\t\tn.fill = DATA.colors.non_aligned;
+\t\tn.r = 5;
+\t\tn.line = "#DDDDDD";
+\t\tn.dash = true;
+\t\tn.edge = !!edge[n.name];
+\t\tvar st = states[n.name];
+\t\tif (st === 1) { n.fill = DATA.colors.derived; n.r = 7.5; n.line = "#000000"; n.dash = false; }
+\t\telse if (st === 2) { n.fill = DATA.colors.ancestral; n.line = "#000000"; n.dash = false; }
+\t\telse if (st === 3) { n.fill = DATA.colors.other_base; n.r = 7.5; n.line = "#000000"; n.dash = false; }
+\t\tn.nodata = !!nodata[n.name];
+\t\tn.collapsed = false;
+\t});
+\tautoCollapse();
+\toverviewState = nodes.map(function(n){ return n.collapsed; });
+\tvar d = document.getElementById("detail");
+\tvar reasons = (s.reasons || []).map(function(r){ return '<div class="reason">' + esc(r) + "</div>"; }).join("");
+\tvar links = "";
+\tif (s.severity !== "reused" && s.severity !== "failed") {
+\t\tlinks = '<a href="' + encodeURIComponent(s.name) + '_snps.txt">' + esc(s.name) + '_snps.txt</a> &middot; '
+\t\t\t+ '<a href="' + encodeURIComponent(s.name) + '_not_called.txt">' + esc(s.name) + '_not_called.txt</a>';
+\t}
+\td.innerHTML = "<h2>" + esc(s.name) + ' <span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span></h2>"
+\t\t+ "Final SNP: <b>" + esc(s.final) + "</b> &middot; path: <span class=\"path\">" + esc(s.path) + "</span><br>" + reasons + links;
+\tvar rows = document.querySelectorAll("#rows tr");
+\tfor (var k = 0; k < rows.length; k++) { rows[k].className = rows[k].className.replace(" selected", ""); }
+\tvar sel = document.querySelector("#rows tr[data-i='" + i + "']");
+\tif (sel) { sel.className += " selected"; }
+\trender();
+\tfit();
+}
+function tipTitle(n){
+\tvar t = esc(n.name);
+\tif (n.edge) { t += " (alignment edge)"; }
+\tif (n.nodata) { t += " (no alignment data)"; }
+\tif (hasCalled(n)) { t += " (called SNP path: always open)"; }
+\telse if (visKids(n).length || (n.collapsed && (children[n.id] || []).some(keep))) { t += " (click to " + (n.collapsed ? "expand" : "collapse") + ")"; }
+\treturn t;
+}
+function render(){
+\tlayout();
+\tvar maxX = 0, maxY = 0;
+\tnodes.forEach(function(n){ if (n.x !== undefined && n.y !== undefined) { maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); } });
+\tvar W = maxX + 320, H = maxY + 2 * MARGIN;
+\tvar parts = ['<svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">'];
+\tparts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="white"/>');
+\tnodes.forEach(function(n){
+\t\tif (n.parent === null || n.y === undefined || !keep(n)) { return; }
+\t\tvar p = nodes[n.parent];
+\t\tvar dash = n.dash ? ' stroke-dasharray="4,3"' : "";
+\t\tparts.push('<line x1="' + p.x + '" y1="' + p.y + '" x2="' + p.x + '" y2="' + n.y + '" stroke="' + n.line + '" stroke-width="2"' + dash + "/>");
+\t\tparts.push('<line x1="' + p.x + '" y1="' + n.y + '" x2="' + n.x + '" y2="' + n.y + '" stroke="' + n.line + '" stroke-width="2"' + dash + "/>");
+\t});
+\tANN.forEach(function(a){
+\t\tif (a.kind !== "clade") { return; }
+\t\tvar n = nodeByName[a.node];
+\t\tif (!n || n.y === undefined || !keep(n)) { return; }
+\t\tvar col = annColor(a);
+\t\tvar cx0 = n.x, cx1 = n.x, cy0 = n.y, cy1 = n.y;
+\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); })(n);
+\t\tparts.push('<rect x="' + (cx0 - 16) + '" y="' + (cy0 - ROW) + '" width="' + (cx1 - cx0 + 32) + '" height="' + (cy1 - cy0 + 2 * ROW) + '" rx="12" fill="' + col + '" fill-opacity="0.08" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="6,4" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
+\t\tparts.push('<text x="' + (cx0 - 12) + '" y="' + (cy0 - ROW + 2) + '" fill="' + col + '" font-weight="700" font-size="12">' + esc(a.label) + "</text>");
+\t});
+\tnodes.forEach(function(n){
+\t\tif (n.y === undefined || !keep(n)) { return; }
+\t\tvar hasKids = visKids(n).length > 0 || (n.collapsed && (children[n.id] || []).some(keep));
+\t\tvar triW = 0;
+\t\tif (n.collapsed && (children[n.id] || []).some(keep)) {
+\t\t\tvar s = triScale(subtreeSize(n));
+\t\t\ttriW = COL * 0.7 * s;
+\t\t\tparts.push('<path d="M ' + n.x + ' ' + n.y + ' l ' + triW + ' ' + (-ROW * 1.5 * s) + ' l 0 ' + (ROW * 3 * s) + ' z" fill="' + n.fill + '" fill-opacity="0.35" stroke="' + n.line + '" stroke-width="1"/>');
+\t\t}
+\t\tif (n.dot !== false) {
+\t\t\tparts.push('<circle class="node" data-id="' + n.id + '" cx="' + n.x + '" cy="' + n.y + '" r="' + Math.max(3, n.r) + '" fill="' + n.fill + '" stroke="' + (n.edge ? "#d97706" : (n.collapsed ? "#333" : "none")) + '" stroke-width="' + (n.edge ? 2 : (n.collapsed ? 2 : 0)) + '"><title>' + tipTitle(n) + "</title></circle>");
+\t\t} else {
+\t\t\tparts.push('<circle class="node" data-id="' + n.id + '" cx="' + n.x + '" cy="' + n.y + '" r="3" fill="#fff" stroke="#999"><title>' + esc(n.name) + "</title></circle>");
+\t\t}
+\t\tif (labels && n.dot !== false && n.name !== "ROOT") {
+\t\t\tvar extra = n.collapsed ? " [" + subtreeSize(n) + "]" : "";
+\t\t\tparts.push('<text x="' + (n.x + 6 + triW) + '" y="' + (n.y - 5) + '">' + esc(n.name) + extra + "</text>");
+\t\t}
+\t\tvar anns = annByNode[n.name];
+\t\tif (anns) {
+\t\t\tvar shown = 0;
+\t\t\tanns.forEach(function(a){
+\t\t\t\tif (a.kind === "clade") { return; }
+\t\t\t\tvar acol = annColor(a);
+\t\t\t\tvar w = a.label.length * 6.6 + 14;
+\t\t\t\tvar by = n.y + 8 + shown * 20;
+\t\t\t\tshown += 1;
+\t\t\t\tparts.push('<rect x="' + (n.x - w / 2) + '" y="' + by + '" width="' + w + '" height="17" rx="8" fill="' + acol + '" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
+\t\t\t\tparts.push('<text x="' + n.x + '" y="' + (by + 12.5) + '" text-anchor="middle" fill="#ffffff" font-size="11">' + esc(a.label) + "</text>");
+\t\t\t});
+\t\t}
+\t});
+\tparts.push("</svg>");
+\tdocument.getElementById("tree").innerHTML = parts.join("");
+\tsvgEl = document.querySelector("#tree svg");
+\tapply();
+}
+function bounds(){
+\tvar x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+\tnodes.forEach(function(n){ if (n.y === undefined || !keep(n)) { return; }
+\t\tvar ext = 0, tw = 0;
+\t\tif (n.collapsed && (children[n.id] || []).some(keep)) {
+\t\t\tvar s = triScale(subtreeSize(n));
+\t\t\text = ROW * 1.5 * s; tw = COL * 0.7 * s;
+\t\t}
+\t\tx0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y - ext); x1 = Math.max(x1, n.x + tw); y1 = Math.max(y1, n.y + ext); });
+\treturn {x0: x0 - MARGIN, y0: y0 - MARGIN, x1: x1 + 300, y1: y1 + MARGIN};
+}
+function apply(){ if (svgEl && vb) { svgEl.setAttribute("viewBox", vb.x + " " + vb.y + " " + vb.w + " " + vb.h); } }
+function fit(){
+\tif (!svgEl) { return; }
+\tvar box = bounds(), el = svgEl.getBoundingClientRect(), aspect = (el.width / el.height) || 1;
+\tvar w = box.x1 - box.x0, h = box.y1 - box.y0;
+\tif (w / h > aspect) { h = w / aspect; } else { w = h * aspect; }
+\tvb = {x: (box.x0 + box.x1) / 2 - w / 2, y: (box.y0 + box.y1) / 2 - h / 2, w: w, h: h};
+\tapply();
+}
+function zoomBy(f){ if (!vb) { return; } vb.x += vb.w * (1 - f) / 2; vb.y += vb.h * (1 - f) / 2; vb.w *= f; vb.h *= f; apply(); }
+function leavesIfCollapsedAt(d){
+\tvar c = 0;
+\t(function walk(n){
+\t\tvar kids = (children[n.id] || []).filter(keep);
+\t\tif (!kids.length || (n.depth >= d && !hasCalled(n))) { c++; return; }
+\t\tkids.forEach(walk);
+\t})(nodes[0]);
+\treturn c;
+}
+function autoCollapse(){
+\tvar maxDepth = Math.max.apply(null, nodes.map(function(n){ return n.depth; }));
+\tif (leavesIfCollapsedAt(maxDepth) <= OVERVIEW_LEAVES) { return; }
+\tvar bestD = 0;
+\tfor (var t = 1; t <= maxDepth; t++) { if (leavesIfCollapsedAt(t) <= OVERVIEW_LEAVES) { bestD = t; } else { break; } }
+\tif (bestD < 2) { return; }
+\tnodes.forEach(function(n){ if (n.depth >= bestD) { n.collapsed = canCollapse(n); } });
+}
+function relayoutFit(){ render(); fit(); }
+function buildTable(filter){
+\tvar rows = document.getElementById("rows");
+\trows.innerHTML = "";
+\torder.forEach(function(i){
+\t\tvar s = samples[i];
+\t\tif (filter && s.name.toLowerCase().indexOf(filter) === -1) { return; }
+\t\tvar tr = document.createElement("tr");
+\t\ttr.className = "row";
+\t\ttr.setAttribute("data-i", i);
+\t\tvar note = (s.reasons || []).length ? '<span class="warn" title="' + esc(s.reasons.join("; ")) + '">&#9888; ' + s.reasons.length + "</span>" : "";
+\t\ttr.innerHTML = "<td>" + esc(s.name) + "</td><td>" + esc(s.final) + "</td>"
+\t\t\t+ '<td><span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span> " + note + "</td>";
+\t\ttr.onclick = function(){ paint(i); };
+\t\trows.appendChild(tr);
+\t});
+}
+document.getElementById("search").oninput = function(){ buildTable(this.value.trim().toLowerCase()); };
+document.getElementById("zoomIn").onclick = function(){ zoomBy(1 / 1.4); };
+document.getElementById("zoomOut").onclick = function(){ zoomBy(1.4); };
+document.getElementById("fit").onclick = fit;
+document.getElementById("expandAll").onclick = function(){ nodes.forEach(function(n){ n.collapsed = false; }); relayoutFit(); };
+document.getElementById("collapseAll").onclick = function(){ nodes.forEach(function(n){ if (n.depth >= 1) { n.collapsed = canCollapse(n); } }); relayoutFit(); };
+document.getElementById("onlyCalled").onchange = function(){ onlyCalled = this.checked; relayoutFit(); };
+document.getElementById("showLabels").onchange = function(){ labels = this.checked; render(); };
+document.getElementById("overview").onclick = function(){
+\tif (!overviewState) { return; }
+\tnodes.forEach(function(n){ n.collapsed = overviewState[n.id]; });
+\trelayoutFit();
+};
+var overviewState = null;
+var treeDiv = document.getElementById("tree");
+var suppressClick = false;
+treeDiv.addEventListener("click", function(e){
+\tif (suppressClick) { return; }
+\tvar t = e.target;
+\tif (t.tagName !== "circle" || !t.hasAttribute("data-id")) { return; }
+\tvar n = nodes[+t.getAttribute("data-id")];
+\tif (n.collapsed || canCollapse(n)) { n.collapsed = !n.collapsed; relayoutFit(); }
+});
+treeDiv.addEventListener("dblclick", function(e){ if (e.target.tagName !== "circle") { fit(); } });
+treeDiv.addEventListener("wheel", function(e){
+\te.preventDefault();
+\tif (!svgEl) { return; }
+\tvar r = svgEl.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+\tvar f = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+\tvar px = vb.x + vb.w * fx, py = vb.y + vb.h * fy;
+\tvb.w *= f; vb.h *= f;
+\tvb.x = px - vb.w * fx; vb.y = py - vb.h * fy;
+\tapply();
+}, {passive: false});
+var drag = null, moved = 0;
+treeDiv.addEventListener("mousedown", function(e){ drag = {x: e.clientX, y: e.clientY}; moved = 0; suppressClick = false; });
+window.addEventListener("mousemove", function(e){
+\tif (!drag || !svgEl) { return; }
+\tvar r = svgEl.getBoundingClientRect();
+\tvar dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+\tmoved += Math.abs(dx) + Math.abs(dy);
+\tvb.x -= dx * vb.w / r.width; vb.y -= dy * vb.h / r.height;
+\tdrag = {x: e.clientX, y: e.clientY};
+\tapply();
+});
+window.addEventListener("mouseup", function(){
+\tif (drag && moved > 5) { suppressClick = true; }
+\tdrag = null;
+});
+buildTable("");
+paint(order[0]);
 </script>
 </body>
 </html>
@@ -433,14 +854,20 @@ class NewickTree(object):
 		nodes = self.get_nodes()
 		logger.debug("Nodes: {n} Links: {l}".format(n=len(nodes),l=len(tree)))
 		logger.debug([nodes,tree])
+		newickTree = None
 		for parent,child in tree:
 			if parent == child:  ## root
 				root = NewickNode(child, nodes[child], False)					## Create the root node
 				self.nodeDict[child] = root										## Add the root node to the node dictionary
 				self.nodeDict["root"] = root									## Also add this reference as "root"
-				newickTree = root  												## The master parent will contain the full tree
+				newickTree = root 												## The master parent will contain the full tree
 				continue
 			self.new_node(child,nodes,parent)
+		if newickTree is None:
+			'''without the initialization a database with an empty tree table died with an
+				UnboundLocalError here; the clear error lets callers decide whether the tree is
+				needed at all'''
+			raise ValueError("the tree table of the database contains no root row (parent == child), the tree cannot be built")
 		## The newickTree is the same as the master parent (containing the full tree, the root node is defined on row 135)
 		self.root = newickTree ## kept as an object so draw_tree can walk the tree without re-parsing the string
 		logger.debug("Tree complete, return newickTree")
@@ -530,7 +957,7 @@ class NewickTree(object):
 				count=count,n=on_chain,strictness=self.strictness,minhit=self.min_required_hits))
 		return False,count,on_chain,missing
 
-	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False):
+	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False,annotations=None):
 		'''Colors the SNP tree with the states found in the query alignments and writes the
 			self-contained html viewer described in the module header.
 		Keyword arguments:
@@ -600,7 +1027,7 @@ class NewickTree(object):
 			no_data_info = self.get_no_data_info(no_data_nodes)
 		## Write the tree viewer
 		if save_tree:
-			self.write_tree_html(entries)
+			self.write_tree_html(entries, annotations)
 			if summary:
 				return
 		dlist = []
@@ -654,7 +1081,10 @@ class NewickTree(object):
 				dlist = sorted(dlist,key=lambda l:l[0], reverse=False)
 				if len(candidates) == 1:
 					dist,tsnp,count,on_chain,missing = candidates[0]
-					called = [dist,tsnp,(True,count)]
+					'''on_chain and missing are appended for the results dashboard: a call that
+						needed the strictness tolerance over positions without data must stand
+						out for manual review; consumers that index 0-2 are unaffected'''
+					called = [dist,tsnp,(True,count),on_chain,missing]
 					msg = "Final SNP called: {snp} ({count}/{n} SNPs on the path called)".format(snp=tsnp,count=count,n=on_chain)
 					if missing:
 						'''a call that relies on the strictness tolerance says which SNPs had no data'''
@@ -684,10 +1114,29 @@ class NewickTree(object):
 			return False,msg,[],no_data_info
 		return called,msg,dlist,no_data_info
 
-	def write_tree_html(self,entries):
+	def _check_annotations(self, annotations, entries):
+		'''drop annotations whose SNP name is not in the tree, loudly: an annotation file
+			written against another database would otherwise silently draw nothing'''
+		if not annotations:
+			return []
+		names = set(entry["name"] for entry in entries)
+		kept = []
+		unknown = []
+		for annotation in annotations:
+			if annotation["node"] in names:
+				kept.append(annotation)
+			else:
+				unknown.append(annotation["node"])
+		if unknown:
+			logger.warning("{n} tree annotations name SNPs that are not in this database and were skipped: {ids}".format(
+					n=len(unknown), ids=", ".join(sorted(set(unknown)))))
+		return kept
+
+	def write_tree_html(self,entries,annotations=None):
 		'''Write the self-contained viewer: the colored tree and its data are embedded in a single
 			html file, no server, no javascript downloads, opens in any browser on any OS'''
-		payload = json.dumps({"colors": self.snp_colors, "nodes": entries}, separators=(",", ":"))
+		annotations = self._check_annotations(annotations or [], entries)
+		payload = json.dumps({"colors": self.snp_colors, "nodes": entries, "annotations": annotations}, separators=(",", ":"))
 		'''The payload sits inside a <script> block, and json.dumps leaves "<" as it is, so a node
 			name from the database such as "B.1</script><script>..." closed the block and the rest
 			ran as script when the tree was opened. "<" only occurs inside json strings, where
@@ -699,6 +1148,21 @@ class NewickTree(object):
 		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], TREE_HTML_TEMPLATE)
 		with open(self.tree_file, "w") as out:
 			out.write(page)
+
+	def write_dashboard(self, reports, dashboard_file, annotations=None):
+		'''Write the results overview (DASHBOARD_HTML_TEMPLATE): the sample table and the
+			database tree embedded once, recolored per sample on click. Only the topology and
+			the per-sample SNP states are stored, so the file stays small even for 100+ samples'''
+		entries = self._tree_entries()
+		annotations = self._check_annotations(annotations or [], entries)
+		nodes = [{"id": entry["id"], "name": entry["name"], "parent": entry["parent"], "depth": entry["depth"]} for entry in entries]
+		payload = json.dumps({"colors": self.snp_colors, "nodes": nodes, "samples": reports, "annotations": annotations}, separators=(",", ":"))
+		'''same "<" escaping as write_tree_html: a database name must not close the script block'''
+		values = {"TITLE": "CanSNPer2 results", "PAYLOAD": payload.replace("<", "\\u003c")}
+		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], DASHBOARD_HTML_TEMPLATE)
+		with open(dashboard_file, "w") as out:
+			out.write(page)
+		return dashboard_file
 
 	def get_no_data_info(self,snp_ids):
 		'''Look up the database annotation of the SNP nodes that no alignment carried a base for, in the

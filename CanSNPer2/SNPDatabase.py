@@ -14,9 +14,10 @@ from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.ModifyTree import InputError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
+from CanSNPer2.modules.ImportDatabase import import_database, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.LogSetup import setup_logging
-from CanSNPer2 import __version__  ## used by the --version flag (issue #119)
+from CanSNPer2 import __version__, COMMANDS_HELP  ## __version__ used by the --version flag (issue #119)
 import CanSNPer2.modules
 
 def get_read_modules():
@@ -43,7 +44,10 @@ def get_arguments():
 	'''The command used to parse its arguments and open its log file at import time, so
 		importing CanSNPer2.SNPDatabase consumed sys.argv and wrote a log file as a side
 		effect (issue #174)'''
-	parser = argparse.ArgumentParser(description='CanSNPer2-database ')
+	parser = argparse.ArgumentParser(
+		description='CanSNPer2-database - create, modify and export CanSNP databases',
+		epilog=COMMANDS_HELP,
+		formatter_class=argparse.RawDescriptionHelpFormatter)
 
 	required_args = parser.add_argument_group('Required')
 	required_args.add_argument('-db',  '--database',     metavar='',                            help='CanSNPer2 database name')
@@ -56,6 +60,8 @@ def get_arguments():
 	create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
 														choices=supported_input, 				help="Select source file type")
 	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
+	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="Import an existing (legacy) database into the current format, written to --database")
+	create_database.add_argument('--import_db',  metavar='', default=False,                    help="Database to import from, with --import")
 
 
 	modify_database = parser.add_argument_group("Database modifications")
@@ -110,6 +116,27 @@ def main():
 	args = get_arguments()
 	logger = get_logger(args)
 	logger.debug(args)
+	if args.do_import:
+		'''import reads an existing (legacy) database and writes a fresh one in the current
+			format, so it is handled before the database checks below, which expect --database
+			to be an existing database or a --create target'''
+		if not args.import_db:
+			logger.error("--import needs the database to read from, give it with --import_db!")
+			exit(1)
+		if not args.database:
+			logger.error("--import needs the new database to write, give it with --database!")
+			exit(1)
+		try:
+			counts = import_database(args.import_db, args.database, verbose=args.verbose)
+		except DatabaseImportError as e:
+			logger.error(str(e))
+			exit(1)
+		print("Imported {src} into {dst} (current format)".format(src=args.import_db, dst=args.database))
+		detail = "{nodes} nodes, {tree} links, {snp_annotation} SNPs, {snp_references} reference genomes".format(**counts)
+		if counts["dropped_orphans"]:
+			detail += ", {0} orphan root node(s) dropped".format(counts["dropped_orphans"])
+		print(detail)
+		exit()
 	if not args.create:
 		'''a wrong path let sqlite create an empty database and the modification or export only failed
 			later with "no such table" errors (issue #125)'''
