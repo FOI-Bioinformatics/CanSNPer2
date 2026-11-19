@@ -87,8 +87,14 @@ jobs:
             --references $SRC/bacillus_anthracis_references.txt
           CanSNPer2-database --database ba.db --export -o export
           CanSNPer2-database --database ba.db --export --export_format newick -o export
-          test -s export/annotation.dmp
           test -s export/ba_tree.nwk
+          # a database rebuilt from the export must export to the same files
+          CanSNPer2-database --create --database rebuilt.db \
+            --tree export/ba_tree.txt --annotation export/ba_snp.txt --references export/ba_references.txt
+          CanSNPer2-database --database rebuilt.db --export -o export_rebuilt
+          for f in tree snp references; do
+            cmp export/ba_$f.txt export_rebuilt/rebuilt_$f.txt
+          done
 
       - name: Download the reference genome
         working-directory: ${{ runner.temp }}

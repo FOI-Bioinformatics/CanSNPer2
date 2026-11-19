@@ -95,9 +95,10 @@ Database modifications:
   --replace          replace node
 
 Export database:
-  --export           Export database to text format (exports tree and
-                     annotation file)
-  --export_format    Select output format [newick, tab]
+  --export           Export the database to text files
+  --export_format    source: the tree, SNP and reference files that --create
+                     reads; newick: the tree; tab is the old name of source
+                     (default source)
   -o , --outdir      outdir for database export!
 
 Logging and debug options:
@@ -107,6 +108,31 @@ Logging and debug options:
   --debug            print debug info
   --supress          supress warnings
 ```
+
+#### Export
+
+`--export` writes the three source files that `--create` reads, in the format of the
+[CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data) source folder:
+
+| File | Content |
+|---|---|
+| `<db>_tree.txt` | one line per node, the tab separated path from the root to the node |
+| `<db>_snp.txt` | `snp_id reference genome position derived_base ancestral_base date` |
+| `<db>_references.txt` | `genome strain genbank_id refseq_id assembly_name` |
+
+A database created from these files has the same tree, SNPs and reference genomes, so a scheme
+can be exported, edited as text and rebuilt:
+
+```sh
+CanSNPer2-database --database francisella_tularensis.db --export -o scheme/
+CanSNPer2-database --database rebuilt.db --create --tree scheme/francisella_tularensis_tree.txt \
+    --annotation scheme/francisella_tularensis_snp.txt --references scheme/francisella_tularensis_references.txt
+```
+
+A database whose tree has a node with more than one parent, more than one root, or SNPs that
+point to a missing reference genome cannot be written in this format and is refused.
+`--export_format newick` writes the tree only. Up to version 2.2.2 the default export (`tab`)
+wrote node and link tables that could not rebuild the database; `tab` now gives the source files.
 
 ### CanSNPer2-download
 

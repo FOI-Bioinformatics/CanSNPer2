@@ -103,10 +103,22 @@ COUNTS=$("$PY" -c "import sqlite3;c=sqlite3.connect('$DB');print(' '.join(str(c.
 # extra node named "root" above the tree's own root (issues #32, #34), so the node and link counts
 # are one lower than before that fix
 expect "row counts nodes/tree/rank/annotation/references" "328 328 2 328 5" "$COUNTS"
-cmd export-tab ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --export \
-    --export_format tab -o "$OUT/export_tab" --logs "$OUT/logs/export"
-expect "tab export annotation.dmp" "328" "$(wc -l < "$OUT/export_tab/annotation.dmp")"
-expect "tab export snptree.dmp" "329" "$(wc -l < "$OUT/export_tab/snptree.dmp")"
+# the export writes the source files that --create reads: a database rebuilt from them is
+# exported again and must give the same files
+cmd export-source ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --export \
+    -o "$OUT/export_src" --logs "$OUT/logs/export"
+expect "source export tree/snp/references rows" "328 329 6" \
+    "$(wc -l < "$OUT/export_src/gate_tree.txt" | tr -d ' ') $(wc -l < "$OUT/export_src/gate_snp.txt" | tr -d ' ') $(wc -l < "$OUT/export_src/gate_references.txt" | tr -d ' ')"
+cmd rebuild-from-export ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$OUT/rebuilt.db" --create \
+    --tree "$OUT/export_src/gate_tree.txt" --annotation "$OUT/export_src/gate_snp.txt" \
+    --references "$OUT/export_src/gate_references.txt" --logs "$OUT/logs/db"
+cmd export-rebuilt ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$OUT/rebuilt.db" --export \
+    --export_format tab -o "$OUT/export_rebuilt" --logs "$OUT/logs/export"
+SAME=same
+for f in tree snp references; do
+    cmp -s "$OUT/export_src/gate_$f.txt" "$OUT/export_rebuilt/rebuilt_$f.txt" || SAME="gate_$f.txt differs"
+done
+expect "export of the rebuilt database" "same" "$SAME"
 cmd export-newick ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --export \
     --export_format newick -o "$OUT/export_nwk" --logs "$OUT/logs/export"
 NW=$(ls "$OUT/export_nwk"/*.nwk 2>/dev/null | head -1)

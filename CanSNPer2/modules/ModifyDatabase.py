@@ -118,7 +118,11 @@ class ModifyCanSNPer2Database(ModifyTree):
 			check_source_headers(headers,GENOME_SOURCE_COLUMNS,reference_file)
 			dataArr = []
 			for row in af:
-				data = row.strip().split("\t")
+				if row.strip() == "":
+					continue
+				## only the line end is removed: strip() also removed empty trailing fields, so a
+				## reference without an assembly name was skipped as a short row
+				data = row.rstrip("\r\n").split("\t")
 				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #89)
 					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
 					continue
