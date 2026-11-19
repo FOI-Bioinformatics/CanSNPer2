@@ -289,3 +289,20 @@ def test_without_a_branch_the_default_branch_of_the_repository_is_used():
 	assert src.ref == "main" and src.commit == COMMIT
 	with pytest.raises(SchemeError, match="was not found on GitHub"):
 		GitHubSchemeSource(ref=None, repo="someone/missing", fetcher=MainRepo({}))
+
+
+def test_a_github_token_is_sent_to_the_api_only(monkeypatch):
+	seen = {}
+	class Response(object):
+		def __enter__(self): return self
+		def __exit__(self, *a): return False
+		def read(self): return b"ok"
+	def urlopen(request, timeout=None):
+		seen[request.full_url] = request.get_header("Authorization")
+		return Response()
+	monkeypatch.setattr(FetchScheme, "urlopen", urlopen)
+	monkeypatch.setenv("GITHUB_TOKEN", "secret")
+	FetchScheme.fetch("https://api.github.com/repos/a/b/commits/master")
+	FetchScheme.fetch("https://raw.githubusercontent.com/a/b/master/schemes.toml")
+	assert seen == {"https://api.github.com/repos/a/b/commits/master": "Bearer secret",
+	                "https://raw.githubusercontent.com/a/b/master/schemes.toml": None}

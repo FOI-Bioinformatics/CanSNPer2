@@ -67,6 +67,10 @@ A local directory is read as it is on disk: a file that differs from its manifes
 warning rather than an error, and when the directory is in a git checkout, `source.json`
 records the commit and lists the scheme files with uncommitted changes.
 
+Listing schemes and resolving a branch to a commit use the GitHub API, which allows 60
+anonymous requests an hour per address. On shared machines, set `GITHUB_TOKEN` (or `GH_TOKEN`)
+to a GitHub token to raise the limit; it is sent to the API only.
+
 2. Alternatively, with a database you already have, download its references
 
 ```sh

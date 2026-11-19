@@ -61,12 +61,19 @@ def fetch(url, accept=None, timeout=FETCH_TIMEOUT):
 	request = Request(url, headers={"User-Agent": "CanSNPer2/{v}".format(v=__version__)})
 	if accept:
 		request.add_header("Accept", accept)
+	token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+	if token and url.startswith("https://api.github.com/"):
+		## anonymous API use is limited to 60 requests an hour per address, which shared
+		## machines such as CI runners reach; a token raises it. Only sent to the API
+		request.add_header("Authorization", "Bearer {token}".format(token=token))
 	try:
 		with urlopen(request, timeout=timeout) as response:
 			return response.read()
 	except HTTPError as e:
 		if e.code in (404, 422): ## the GitHub API answers 422 for an unknown branch
 			raise NotFound("{url} was not found".format(url=url))
+		if e.code in (403, 429) and url.startswith("https://api.github.com/"):
+			raise SchemeError("Could not fetch {url}: {e}. The GitHub API allows 60 anonymous requests an hour, set GITHUB_TOKEN to a GitHub token to raise the limit".format(url=url, e=e))
 		raise SchemeError("Could not fetch {url}: {e}".format(url=url, e=e))
 	except (URLError, OSError) as e:
 		raise SchemeError("Could not fetch {url}: {e}".format(url=url, e=e))

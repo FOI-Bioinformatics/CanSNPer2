@@ -98,6 +98,8 @@ jobs:
 
       - name: Build the same database from the scheme on CanSNPer2-data
         working-directory: ${{ runner.temp }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the anonymous API limit is shared by all jobs on a runner address
         run: |
           CanSNPer2-download --list_schemes
           CanSNPer2-download --scheme bacillus_anthracis --branch master --no_references
