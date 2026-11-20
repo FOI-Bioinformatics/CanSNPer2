@@ -115,4 +115,4 @@ def test_the_command_line_export(tmp_path, export_format):
 		capture_output=True, text=True, cwd=str(tmp_path))
 	assert result.returncode == 0, result.stderr
 	assert sorted(os.listdir(out)) == ["scheme_references.txt", "scheme_snp.txt", "scheme_tree.txt"]
-	assert "Rebuild with: CanSNPer2-database --create" in result.stdout
+	assert "Import back with: CanSNPer2-database --import" in result.stdout

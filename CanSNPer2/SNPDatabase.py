@@ -14,7 +14,7 @@ from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.ModifyTree import InputError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
-from CanSNPer2.modules.ImportDatabase import import_database, DatabaseImportError
+from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__, COMMANDS_HELP  ## __version__ used by the --version flag (issue #119)
@@ -60,8 +60,7 @@ def get_arguments():
 	create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
 														choices=supported_input, 				help="Select source file type")
 	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
-	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="Import an existing (legacy) database into the current format, written to --database")
-	create_database.add_argument('--import_db',  metavar='', default=False,                    help="Database to import from, with --import")
+	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="build a database from the source files written by --export (--tree --annotation --references), written to --database")
 
 
 	modify_database = parser.add_argument_group("Database modifications")
@@ -117,25 +116,28 @@ def main():
 	logger = get_logger(args)
 	logger.debug(args)
 	if args.do_import:
-		'''import reads an existing (legacy) database and writes a fresh one in the current
-			format, so it is handled before the database checks below, which expect --database
-			to be an existing database or a --create target'''
-		if not args.import_db:
-			logger.error("--import needs the database to read from, give it with --import_db!")
+		'''import is the counterpart of --export: it reads the source triple and writes a
+			current-format database, so it is handled before the database checks below,
+			which expect --database to be an existing database or a --create target'''
+		missing = [name for name, value in (("--tree", args.tree), ("--annotation", args.annotation),
+			("--references", args.references)) if not value]
+		if missing:
+			logger.error("--import builds a database from the files --export writes, it needs all "
+				"three source files, missing: {0}!".format(", ".join(missing)))
 			exit(1)
 		if not args.database:
 			logger.error("--import needs the new database to write, give it with --database!")
 			exit(1)
 		try:
-			counts = import_database(args.import_db, args.database, verbose=args.verbose)
+			counts = import_from_sources(args.tree, args.annotation, args.references,
+				args.database, tmpdir=args.tmpdir, verbose=args.verbose)
 		except DatabaseImportError as e:
 			logger.error(str(e))
 			exit(1)
-		print("Imported {src} into {dst} (current format)".format(src=args.import_db, dst=args.database))
-		detail = "{nodes} nodes, {tree} links, {snp_annotation} SNPs, {snp_references} reference genomes".format(**counts)
-		if counts["dropped_orphans"]:
-			detail += ", {0} orphan root node(s) dropped".format(counts["dropped_orphans"])
-		print(detail)
+		print("Imported {tree}, {snp}, {references} into {dst} (current format)".format(
+			tree=args.tree, snp=args.annotation, references=args.references, dst=args.database))
+		print("{nodes} nodes, {tree} links, {snp_annotation} SNPs, "
+			"{snp_references} reference genomes".format(**counts))
 		exit()
 	if not args.create:
 		'''a wrong path let sqlite create an empty database and the modification or export only failed
@@ -188,7 +190,7 @@ def main():
 				logger.error("The database cannot be exported: {error}".format(error=e))
 				exit(1)
 			print("Exported to {files}".format(files=", ".join(files.values())))
-			print("Rebuild with: CanSNPer2-database --create --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
+			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
 		'''This should be reprogrammed so that one can add annotations without supplying a mod file!'''

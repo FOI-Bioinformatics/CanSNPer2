@@ -98,7 +98,7 @@ CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --sav
 
 ```
 usage: CanSNPer2-database [-h] [-db] [--tree] [--annotation] [--references]
-                      [--source_type] [--create] [--import] [--import_db]
+                      [--source_type] [--create] [--import]
                       [--mod_file] [--parent]
                       [--remove] [--replace] [--export] [--export_format] [-o]
                       [--tmpdir] [--logs] [--verbose] [--debug] [--supress]
@@ -117,9 +117,8 @@ Load database:
   --references       File containing all reference genomes listed
   --source_type      Select source file type
   --create           Create new database!
-  --import           Import an existing (legacy) database into the current format,
-                     written to --database
-  --import_db        Database to import from, with --import
+  --import           build a database from the source files written by --export
+                     (--tree --annotation --references), written to --database
 
 Database modifications:
   --mod_file         File with modifications/update to the tree
@@ -160,7 +159,7 @@ can be exported, edited as text and rebuilt:
 
 ```sh
 CanSNPer2-database --database my_scheme.db --export -o scheme/
-CanSNPer2-database --database rebuilt.db --create --tree scheme/my_scheme_tree.txt \
+CanSNPer2-database --database rebuilt.db --import --tree scheme/my_scheme_tree.txt \
     --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
 ```
 
@@ -171,19 +170,22 @@ wrote node and link tables that could not rebuild the database; `tab` now gives 
 
 #### Import
 
-`--import` reads an existing database and writes a new one in the current format, the way to
-upgrade databases made by older releases. Legacy databases carry an extra orphan root left by
-the old tree reader (issues #32/#34/#149): two self-linked nodes, which `--export` refuses.
-`--import` drops the orphan and produces a single-rooted database that then exports and
-rebuilds normally. The source is never modified.
+`--import` is the counterpart of `--export`: it reads the three source files - the base
+CanSNPer2 format - and writes a database in the current format to `--database`. Export, edit
+the text, import back:
 
 ```sh
-CanSNPer2-database --import --import_db old_scheme.db --database new_scheme.db
+CanSNPer2-database --import --database new_scheme.db --tree scheme/my_scheme_tree.txt \
+    --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
 ```
 
-A legacy shipped database (e.g. `francisella_tularensis.db`) imports to one root with all its
-nodes, SNPs and reference genomes kept, and is then exportable; re-importing a database that
-is already current changes nothing.
+The same loaders `--create` uses do the work, so the schema is always current, and the result
+is checked with the export validator before the database is kept: source files that do not
+form a clean scheme are refused and leave no half-written database behind. The destination
+must not already exist. (Old databases made by releases before the root fixes cannot be fed
+in directly; rebuild them from their source files, the ones shipped in
+[CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data), and they come out
+single-rooted and exportable.)
 
 ### CanSNPer2-download
 
