@@ -12,7 +12,7 @@
 # gate stays honest on machines that are not the reference one.
 #
 # Data it needs from the project (issue #185, the data lives next to the repository):
-#   ../CanSNPer2-data/source/francisella_tularensis_{tree,snp,references}.txt
+#   ../CanSNPer2-data/schemes/francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
 #   references/*.fna in this repository, and ../../test_data/*.fasta for the known answers
 # Override the root with ROOT=/path/to/project when the layout is different.
 
@@ -23,7 +23,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 ROOT=${ROOT:-$(cd "$REPO/.." && pwd)}
 PKG=$REPO
-SRC=$ROOT/CanSNPer2-data/source
+SRC=$ROOT/CanSNPer2-data/schemes/francisella_tularensis
 PY=${PYTHON:-python}
 OUT=${OUT:-$ROOT/test-run/release_gate}
 

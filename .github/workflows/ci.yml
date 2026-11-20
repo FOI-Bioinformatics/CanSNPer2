@@ -80,7 +80,7 @@ jobs:
       - name: Build and export a database
         working-directory: ${{ runner.temp }}
         run: |
-          SRC=$GITHUB_WORKSPACE/cansnper2-data/source
+          SRC=$GITHUB_WORKSPACE/cansnper2-data/schemes/bacillus_anthracis
           CanSNPer2-database --create --database ba.db \
             --tree $SRC/bacillus_anthracis_tree.txt \
             --annotation $SRC/bacillus_anthracis_snp.txt \
@@ -94,6 +94,19 @@ jobs:
           CanSNPer2-database --database rebuilt.db --export -o export_rebuilt
           for f in tree snp references; do
             cmp export/ba_$f.txt export_rebuilt/rebuilt_$f.txt
+          done
+
+      - name: Build the same database from the scheme on CanSNPer2-data
+        working-directory: ${{ runner.temp }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the anonymous API limit is shared by all jobs on a runner address
+        run: |
+          CanSNPer2-download --list_schemes
+          CanSNPer2-download --scheme bacillus_anthracis --branch master --no_references
+          test -s bacillus_anthracis.source.json
+          CanSNPer2-database --database bacillus_anthracis.db --export -o export_scheme
+          for f in tree snp references; do
+            cmp export/ba_$f.txt export_scheme/bacillus_anthracis_$f.txt
           done
 
       - name: Download the reference genome

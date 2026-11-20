@@ -38,17 +38,48 @@ Read input (not yet implemeted)
 * Minimap2
 
 ## User guide CanSNPer2 (for custom databases see below)
-1. Download pre-built databases from https://github.com/FOI-Bioinformatics/CanSNPer2-data
-
-2. Download references for database
+1. Build a database from a scheme in [CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data) and download its reference genomes
 
 ```sh
-CanSNPer2-download --database downloaded_database.db
+CanSNPer2-download --list_schemes                       # schemes on master (verified)
+CanSNPer2-download --scheme francisella_tularensis      # builds francisella_tularensis.db, downloads references/
+```
+
+The scheme files (SNPs, tree and references) are fetched and checked against the SHA-256
+recorded in the manifest of CanSNPer2-data, and the database is built locally by the installed
+CanSNPer2. `francisella_tularensis.source.json` beside the database records the repository
+commit and the hash of each file it was built from. `--branch dev` gives access to draft
+schemes that have not yet been verified; building one prints a warning. `--branch` also takes a
+commit, which makes a database reproducible from its `source.json`.
+
+Custom schemes can be read the same way from a local directory or from another GitHub
+repository, as long as it is laid out as CanSNPer2-data. Only
+`schemes/<name>/<name>_{snp,tree,references}.txt` is required; `schemes.toml`, the scheme
+`README.md` (with its Status) and `database/<name>.manifest.json` are used when present.
+
+```sh
+CanSNPer2-download --data_dir my-schemes --list_schemes
+CanSNPer2-download --data_dir my-schemes --scheme my_scheme       # a local folder or clone
+CanSNPer2-download --repo owner/my-schemes --scheme my_scheme     # default branch of that repository
+```
+
+A local directory is read as it is on disk: a file that differs from its manifest gives a
+warning rather than an error, and when the directory is in a git checkout, `source.json`
+records the commit and lists the scheme files with uncommitted changes.
+
+Listing schemes and resolving a branch to a commit use the GitHub API, which allows 60
+anonymous requests an hour per address. On shared machines, set `GITHUB_TOKEN` (or `GH_TOKEN`)
+to a GitHub token to raise the limit; it is sent to the API only.
+
+2. Alternatively, with a database you already have, download its references
+
+```sh
+CanSNPer2-download --database my_database.db
 ```
 
 3. Run genomes
 ```sh
-CanSNPer2 --database downloaded_database.db fastadir/*.fasta --summary
+CanSNPer2 --database francisella_tularensis.db fastadir/*.fasta --summary
 ```
 
 The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree (self-contained html, opens in any browser) with all SNPs from set colored.
@@ -137,15 +168,35 @@ wrote node and link tables that could not rebuild the database; `tab` now gives 
 ### CanSNPer2-download
 
 ```
-usage: CanSNPer2-download [-h] -db  [-s] [-o] [--logs] [--verbose]
+usage: CanSNPer2-download [-h] [-db] [--scheme] [--branch] [--repo]
+                          [--data_dir] [--list_schemes] [--overwrite]
+                          [--no_references] [-s] [-o] [--logs] [--verbose]
 
 CanSNPer2-download
 
-optional arguments:
+options:
   -h, --help         show this help message and exit
 
-Required:
-  -db , --database   CanSNP database
+Database:
+  -db , --database   CanSNP database (with --scheme: the database to build,
+                     default <scheme>.db)
+
+CanSNPer2-data scheme options:
+  --scheme           Fetch this scheme from CanSNPer2-data and build its
+                     database
+  --branch           Branch, tag or commit of the repository; in
+                     CanSNPer2-data master holds verified schemes, dev also
+                     draft schemes (default master, with --repo the default
+                     branch of that repository)
+  --repo             GitHub repository laid out as CanSNPer2-data, as
+                     owner/name (default FOI-Bioinformatics/CanSNPer2-data)
+  --data_dir         Local directory laid out as CanSNPer2-data (a clone, or a
+                     folder of custom schemes) to read schemes from instead of
+                     GitHub
+  --list_schemes     List the schemes of the repository or --data_dir and exit
+  --overwrite        Replace an existing database when building from --scheme
+  --no_references    Build the database from --scheme without downloading its
+                     references
 
 Download options:
   -s , --source      Source for download (genbank/refseq)
@@ -154,6 +205,10 @@ Download options:
 Logging and debug options:
   --logs             Specify log directory
   --verbose          Verbose logging
+
+Give a database with --database, or name a scheme with --scheme to fetch it
+from CanSNPer2-data (or --repo, or --data_dir), build its database and
+download its references in one step.
 ```
 Example structure of references.txt
 ```

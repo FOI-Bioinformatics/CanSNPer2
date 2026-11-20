@@ -198,10 +198,21 @@ class DownloadGenomes(object):
 		return 0
 
 def main():
-	parser = argparse.ArgumentParser(description='CanSNPer2-download')
+	parser = argparse.ArgumentParser(description='CanSNPer2-download',
+		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
+			"CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step.")
 
-	baseopts = parser.add_argument_group('Required')
-	baseopts.add_argument('-db',  '--database', 	metavar='', required=True,									help='CanSNP database')
+	baseopts = parser.add_argument_group('Database')
+	baseopts.add_argument('-db',  '--database', 	metavar='',													help='CanSNP database (with --scheme: the database to build, default <scheme>.db)')
+
+	schemeopts = parser.add_argument_group('CanSNPer2-data scheme options')
+	schemeopts.add_argument('--scheme', 			metavar='',													help="Fetch this scheme from CanSNPer2-data and build its database")
+	schemeopts.add_argument('--branch', 			metavar='',													help="Branch, tag or commit of the repository; in CanSNPer2-data master holds verified schemes, dev also draft schemes (default master, with --repo the default branch of that repository)")
+	schemeopts.add_argument('--repo', 				metavar='',													help="GitHub repository laid out as CanSNPer2-data, as owner/name (default FOI-Bioinformatics/CanSNPer2-data)")
+	schemeopts.add_argument('--data_dir', 			metavar='',													help="Local directory laid out as CanSNPer2-data (a clone, or a folder of custom schemes) to read schemes from instead of GitHub")
+	schemeopts.add_argument('--list_schemes', 		action='store_true',										help="List the schemes of the repository or --data_dir and exit")
+	schemeopts.add_argument('--overwrite', 		action='store_true',										help="Replace an existing database when building from --scheme")
+	schemeopts.add_argument('--no_references', 	action='store_true',										help="Build the database from --scheme without downloading its references")
 
 	downlopts = parser.add_argument_group('Download options')
 	downlopts.add_argument('-s', '--source', 			metavar='', default="genbank",	choices=["genbank","refseq"], 	help="Source for download (genbank/refseq)")
@@ -212,6 +223,62 @@ def main():
 	debugopts.add_argument('--verbose',	action='store_const', const=logging.DEBUG, help='Verbose logging')
 
 	args = parser.parse_args()
+	if not (args.database or args.scheme or args.list_schemes):
+		parser.error("give a database with --database, a scheme with --scheme, or --list_schemes")
+	if args.data_dir and (args.repo or args.branch):
+		parser.error("--data_dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
+
+	def scheme_source():
+		'''where the schemes are read from: a local directory or a GitHub repository'''
+		from CanSNPer2.modules.FetchScheme import GitHubSchemeSource, LocalSchemeSource, DATA_REPO
+		if args.data_dir:
+			return LocalSchemeSource(args.data_dir)
+		if args.repo:
+			return GitHubSchemeSource(ref=args.branch, repo=args.repo) ## default branch of that repository unless --branch is given
+		return GitHubSchemeSource(ref=args.branch or "master")
+
+	logval = logging.WARNING
+	if args.verbose:
+		logval = args.verbose
+
+	if args.list_schemes:
+		'''only prints the schemes, so no log file is written'''
+		logging.basicConfig(level=logval, format="%(levelname)s: %(message)s")
+		from CanSNPer2.modules.FetchScheme import SchemeError
+		try:
+			source = scheme_source()
+			schemes = source.list_schemes()
+		except SchemeError as e:
+			print(e)
+			exit(1)
+		print("SNP schemes in {loc}:".format(loc=source.location()))
+		for name, status in schemes:
+			print("  {name:<30} {status}".format(name=name, status=status or "status not given"))
+		exit()
+
+	args.logs = args.logs.rstrip("/")+"/"
+	logpath = setup_logging(args.logs, "CanSNPer2-download", level=logval) ## own tag: it used to append to the CanSNPer2-database log (issue #217)
+	logger = logging.getLogger(__name__)
+
+	if args.scheme:
+		'''fetch the scheme files, check them against the manifest of CanSNPer2-data and
+			build the database with this CanSNPer2 version'''
+		from CanSNPer2.modules.FetchScheme import build_scheme, SchemeError
+		from CanSNPer2.modules.ModifyTree import InputError
+		from CanSNPer2.modules.DatabaseConnection import SourceFileError
+		if not args.database:
+			args.database = "{scheme}.db".format(scheme=args.scheme)
+		try:
+			if os.path.exists(args.database) and not args.overwrite:
+				raise SchemeError("{db} already exists, use --overwrite to replace it".format(db=args.database))
+			source = scheme_source()
+			build_scheme(args.scheme, args.database, overwrite=args.overwrite, source=source)
+		except (SchemeError, InputError, SourceFileError) as e:
+			logger.error(str(e))
+			exit(1)
+		print("Built {db} from the scheme {scheme} in {loc}".format(db=args.database, scheme=args.scheme, loc=source.location()))
+		if args.no_references:
+			exit()
 
 	'''fail with a clear message on a bad database path instead of creating an empty database (issue #125)'''
 	from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
@@ -221,13 +288,6 @@ def main():
 		print(e)
 		exit(1)
 
-	logval = logging.WARNING
-	if args.verbose:
-		logval = args.verbose
-
-	args.logs = args.logs.rstrip("/")+"/"
-	logpath = setup_logging(args.logs, "CanSNPer2-download", level=logval) ## own tag: it used to append to the CanSNPer2-database log (issue #217)
-	logger = logging.getLogger(__name__)
 	# create a database connection
 	DG = DownloadGenomes(args.database,args.source,args.outdir)
 	if DG.run():
