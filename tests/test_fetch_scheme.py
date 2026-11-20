@@ -269,7 +269,7 @@ def test_a_scheme_folder_inside_a_larger_git_repository_reports_its_own_paths(tm
 	run("init", "-q")
 	run("add", "sub/data/schemes/test_scheme/test_scheme_snp.txt")
 	run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "snp only")
-	(data / "schemes/test_scheme/test_scheme_snp.txt").write_text(SNP + "C.1\ttest\tTest2026\tREF1\t300\tA\tG\n")
+	(data / "schemes/test_scheme/test_scheme_snp.txt").write_text(SNP.replace("\t200\t", "\t300\t"))
 	provenance = build_scheme("test_scheme", str(tmp_path / "t.db"), source=LocalSchemeSource(str(data)))
 	assert provenance["uncommitted_sources"] == [
 		"schemes/test_scheme/test_scheme_references.txt",

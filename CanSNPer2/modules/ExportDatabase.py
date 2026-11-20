@@ -14,11 +14,15 @@ import logging
 import os
 import sqlite3
 
-from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS
+from CanSNPer2.modules.DatabaseConnection import GENOME_SOURCE_COLUMNS
 
 logger = logging.getLogger(__name__)
 
-SNP_COLUMNS = ANNOTATION_SOURCE_COLUMNS + ("date",)
+## the SNP header of CanSNPer2-data (validate.py SNP_HEADER), so an export can be added there
+## as it is. The database keeps no strain per SNP: the strain of the SNP's reference genome is
+## written, as CanSNPCreator does. The date column is not written, it is not part of that
+## header; a database built from the export gets the build date.
+SNP_COLUMNS = ("snp_id", "strain", "reference", "genome", "position", "derived_base", "ancestral_base")
 
 
 class ExportError(Exception):
@@ -80,13 +84,13 @@ def export_source(database, outdir, name=None):
 		paths = tree_paths(conn)
 		references = conn.execute("SELECT {cols} FROM snp_references ORDER BY id".format(
 			cols=",".join(GENOME_SOURCE_COLUMNS))).fetchall()
-		snps = conn.execute("""SELECT a.snp_id, a.reference, g.genome, a.position, a.derived_base,
-				a.ancestral_base, a.date
+		snps = conn.execute("""SELECT a.snp_id, g.strain, a.reference, g.genome, a.position, a.derived_base,
+				a.ancestral_base
 			FROM snp_annotation a LEFT JOIN snp_references g ON g.id = a.genome_i
 			ORDER BY a.node_id""").fetchall()
 	finally:
 		conn.close()
-	without_genome = [row[0] for row in snps if row[2] is None]
+	without_genome = [row[0] for row in snps if row[3] is None]
 	if without_genome:
 		raise ExportError("{n} SNP(s) point to a reference genome that is not in the snp_references table: "
 			"{snps}".format(n=len(without_genome), snps=", ".join(map(str, without_genome[:10]))))

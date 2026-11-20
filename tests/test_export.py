@@ -12,6 +12,8 @@ import pytest
 
 from CanSNPer2.modules.ExportDatabase import ExportError, export_source
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
+from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS
+from CanSNPer2.modules.SourceCheck import check_sources
 
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tA.1\tA.3\nR\tB.1\nR\tB.1\tB.2\n"
 SNPS = ("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\tdate\n"
@@ -49,7 +51,7 @@ def content(db):
 		"links": conn.execute("""SELECT c.name, p.name, r.rank FROM tree t JOIN nodes c ON c.id=t.child
 			JOIN nodes p ON p.id=t.parent JOIN rank r ON r.rank_i=t.rank_i ORDER BY c.name""").fetchall(),
 		"snps": conn.execute("""SELECT a.node_id, a.snp_id, a.position, a.ancestral_base, a.derived_base,
-			a.reference, a.date, g.genome FROM snp_annotation a JOIN snp_references g ON g.id=a.genome_i
+			a.reference, g.genome FROM snp_annotation a JOIN snp_references g ON g.id=a.genome_i
 			ORDER BY a.node_id""").fetchall(),
 		"references": conn.execute("""SELECT genome,strain,genbank_id,refseq_id,assembly_name
 			FROM snp_references ORDER BY genome""").fetchall(),
@@ -79,9 +81,61 @@ def test_the_files_have_the_source_format(tmp_path):
 	files = export_source(source_db(tmp_path), str(tmp_path / "export"))
 	assert open(files["tree"]).read() == TREE
 	snp = open(files["snp"]).read().splitlines()
-	assert snp[0] == "snp_id\treference\tgenome\tposition\tderived_base\tancestral_base\tdate"
-	assert snp[2] == "A.1\tPaper2020\tREF1\t100\tT\tC\t01/02/20"
+	assert snp[0] == "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base"
+	# the strain is that of the SNP's reference genome; the date is not exported
+	assert snp[2] == "A.1\tstrain one\tPaper2020\tREF1\t100\tT\tC"
+	assert snp[3] == "A.2\tstrain two\tPaper2021\tREF2\t200\tG\tA"
 	assert open(files["references"]).read() == REFERENCES
+
+
+# the header that CanSNPer2-data/validate.py requires of a scheme's SNP file
+CANSNPER2_DATA_SNP_HEADER = ["snp_id", "strain", "reference", "genome", "position",
+	"derived_base", "ancestral_base"]
+
+
+def test_the_snp_header_is_the_one_CanSNPer2_data_requires(tmp_path):
+	files = export_source(source_db(tmp_path), str(tmp_path / "export"))
+	assert open(files["snp"]).readline().rstrip("\n").split("\t") == CANSNPER2_DATA_SNP_HEADER
+	# and it still carries every column the loaders need
+	assert set(ANNOTATION_SOURCE_COLUMNS) <= set(CANSNPER2_DATA_SNP_HEADER)
+
+
+def test_an_export_passes_the_source_checks(tmp_path):
+	files = export_source(source_db(tmp_path), str(tmp_path / "export"))
+	assert check_sources(tree=files["tree"], annotation=files["snp"], references=files["references"]) == []
+
+
+def test_an_export_passes_CanSNPer2_data_validate(tmp_path):
+	"""run validate.py's SNP, tree and reference checks on an export, when a CanSNPer2-data
+		checkout sits next to CanSNPer2 (or CANSNPER2_DATA points to one)"""
+	data = os.environ.get("CANSNPER2_DATA", os.path.join(os.path.dirname(__file__), "..", "..", "CanSNPer2-data"))
+	script = os.path.join(data, "validate.py")
+	if not os.path.exists(script):
+		pytest.skip("no CanSNPer2-data checkout")
+	import importlib.util
+	spec = importlib.util.spec_from_file_location("cansnper2_data_validate", script)
+	validate = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(validate)
+	# a scheme as published there: accessions of the checked form, an assembly name on every
+	# reference (an empty last column is trailing whitespace to validate.py) and a SNP on
+	# every node (B.2 has none in the shared fixture)
+	db = str(tmp_path / "scheme.db")
+	files = {}
+	references = (REFERENCES.replace("GCA_1.1", "GCA_000000001.1").replace("GCF_1.1", "GCF_000000001.1")
+		.replace("GCA_2.1", "GCA_000000002.1").replace("GCF_2.1", "GCF_000000002.1").replace("\t\n", "\tASM2v1\n"))
+	for key, text in (("tree", TREE.replace("R\tB.1\tB.2\n", "")), ("snp", SNPS), ("references", references)):
+		files[key] = str(tmp_path / ("src_" + key + ".txt"))
+		with open(files[key], "w") as out:
+			out.write(text)
+	create(db, files["tree"], files["snp"], files["references"])
+	export_source(db, str(tmp_path / "schemes" / "scheme"))
+	scheme = validate.Scheme("scheme")
+	scheme.path = lambda relative: str(tmp_path / relative)
+	problems, warnings = [], []
+	nodes = validate.check_tree(problems, scheme)
+	genomes = validate.check_references(problems, scheme)
+	validate.check_snp(problems, warnings, scheme, nodes, genomes)
+	assert problems == []
 
 
 def test_a_node_with_two_parents_is_refused(tmp_path):

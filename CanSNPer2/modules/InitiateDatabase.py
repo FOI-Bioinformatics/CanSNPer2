@@ -1,6 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError
+from CanSNPer2.modules.SourceCheck import check_sources
 from importlib import import_module
 from datetime import date
 
@@ -56,6 +57,15 @@ class CreateSNPDatabase(CreateDatabase):
 class CanSNPDatabase(DatabaseFunctions):
 	"""Class containing functions for Loading data into the database, inherits functions from the CanSNPer2 taxonomy database classes"""
 	def __init__(self,*args,**kwargs):
+		if kwargs["create"]:
+			'''the source files are checked before anything is written: the loaders used to store
+				or silently drop rows that do not form a valid scheme, and connecting below
+				already creates the database file'''
+			problems = check_sources(tree=kwargs.get("tree"), annotation=kwargs.get("annotation"),
+				references=kwargs.get("references"))
+			if problems:
+				raise SourceFileError("The source files cannot be built into a database, {n} problem(s):\n  {list}".format(
+					n=len(problems), list="\n  ".join(problems)))
 		super().__init__(kwargs["database"],verbose=kwargs["verbose"])
 		logger.debug(kwargs)
 		'''Connect to database'''
