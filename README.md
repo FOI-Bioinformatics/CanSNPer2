@@ -401,6 +401,24 @@ Sequences are identified by the first word of their header line, in references a
 queries; these names must be set and unique, otherwise the run (reference) or the sample
 (query) stops with a message naming the file.
 
+### References of several sequences
+
+SNP positions in the database run along the sequences of the reference (chromosomes,
+plasmids) joined end to end in the order of the reference fasta file, which is the order
+of the NCBI assembly that CanSNPer2-download fetches. The database does not record the
+sequences, so every reference is checked before it is used, at download and at the start
+of a run: it must be at least as long as the last SNP position on it, and its base at each
+SNP position must be the ancestral or the derived base of that SNP. A reference with its
+sequences in another order, or another genome, has the expected base at about half of the
+SNPs; a reference that lacks it at a fifth of its SNPs or more is refused, fewer
+mismatches are reported as a warning.
+
+The tables `x_snps.txt` and `x_not_called.txt` give the position on the joined reference
+(`Pos`) and, in the last two columns, the reference sequence it falls on and the position
+on that sequence (`ReferenceSeq`, `ReferenceSeqPosition`), for comparison with positions
+published per chromosome. The two columns are `-` when the reference file cannot be read
+(`--skip_alignment` without the reference folder).
+
 
 ## Aligners
 
