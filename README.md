@@ -94,6 +94,20 @@ CanSNPer2-download --database francisella_tularensis.db
 CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --save_tree
 ```
 
+The source files are checked before a database is built, with the rules of
+[CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data)'s `validate.py`. Files
+that do not form one scheme are refused, every problem is listed with its file and line, and no
+database is written. The same checks apply to `--import` and `CanSNPer2-download --scheme`.
+
+| File | Refused |
+|---|---|
+| tree | a line that does not start at the root of the first line, a node with more than one parent, an empty column |
+| SNP | a position that is not a positive integer, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a snp_id or a position on one genome listed twice, a row with too few columns |
+| references | a genome listed twice, a row with too few columns |
+
+`#` comment lines, blank lines, a trailing comment column in the SNP file, `;` separated
+trees and nodes without a SNP are accepted.
+
 ### CanSNPer2-database
 
 ```
@@ -151,11 +165,13 @@ Logging and debug options:
 | File | Content |
 |---|---|
 | `<db>_tree.txt` | one line per node, the tab separated path from the root to the node |
-| `<db>_snp.txt` | `snp_id reference genome position derived_base ancestral_base date` |
+| `<db>_snp.txt` | `snp_id strain reference genome position derived_base ancestral_base` |
 | `<db>_references.txt` | `genome strain genbank_id refseq_id assembly_name` |
 
-A database created from these files has the same tree, SNPs and reference genomes, so a scheme
-can be exported, edited as text and rebuilt:
+The SNP file has the header CanSNPer2-data requires. The database keeps no strain per SNP, so
+the strain of the SNP's reference genome is written; the date column is not exported, and a
+database built from the files gets the build date. A database created from these files has the
+same tree, SNPs and reference genomes, so a scheme can be exported, edited as text and rebuilt:
 
 ```sh
 CanSNPer2-database --database my_scheme.db --export -o scheme/

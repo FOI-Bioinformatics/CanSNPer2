@@ -84,17 +84,16 @@ def test_semicolon_separated_tree_builds_the_same_database(tmp_path, caplog):
 
 def test_annotation_file_comments_and_trailing_comment_column(tmp_path, caplog):
 	# #22: # lines are comments, blank lines are ignored, and a row may leave out the
-	# trailing free-text comment column; short rows in real columns still warn
+	# trailing free-text comment column; a row short in a real column is refused
+	# (tests/test_create_input_checks.py)
 	ann = ("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\tcomment\n"
 	       "#A.1 is one of the major branches\n"
 	       "\n"
 	       "A.1\tfrancisella\tBirdsell2014\tREF1\t100\tT\tC\ta named branch\n"
-	       "B.1\tfrancisella\tVogler2009\tREF1\t200\tT\tG\n"
-	       "G.9\tfrancisella\tshort\n")
+	       "B.1\tfrancisella\tVogler2009\tREF1\t200\tT\tG\n")
 	db = build_db(tmp_path, "comment.db", tree_file("\t"), ann)
 	nodes, links, rows = tables(db)
 	assert [r[0] for r in rows] == ["A.1", "B.1"], rows
-	assert "Skipped short row" in caplog.text and "G.9" in caplog.text
 
 
 def clean_case(obj, tmp_path, content):

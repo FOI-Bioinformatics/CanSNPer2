@@ -1,0 +1,281 @@
+"""CanSNPer2-database --create refuses source files that do not form a valid scheme.
+
+The loaders used to accept almost anything: a position "abc" and bases "a"/"a" were
+stored, a SNP on an unknown genome or a duplicated snp_id was dropped with a warning,
+a node given two parents became two nodes, and a tree in the wrong layout built a
+different tree than intended - all with exit status 0. The rules below follow
+CanSNPer2-data/validate.py, so a scheme that passes there also builds here.
+
+Every refusal must name the problem and leave no database file behind; all problems
+of a file set are reported together, so they can be fixed in one pass."""
+import os
+import subprocess
+import sys
+
+import pytest
+
+from CanSNPer2.modules.DatabaseConnection import SourceFileError
+from CanSNPer2.modules.ImportDatabase import DatabaseImportError, import_from_sources
+from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
+
+TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tB.1\n"
+SNP_HEADER = "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\n"
+SNP_ROWS = ("R\ts1\tPaper2020\tREF1\t10\tA\tG\n"
+	"A.1\ts1\tPaper2020\tREF1\t100\tT\tC\n"
+	"A.2\ts1\tPaper2021\tREF1\t200\tG\tA\n"
+	"B.1\ts2\tPaper2020\tREF2\t400\tA\tC\n")
+REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
+	"REF1\ts1\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n"
+	"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\tASM2v1\n")
+
+
+def write_sources(tmp_path, tree=TREE, snp=SNP_HEADER + SNP_ROWS, references=REFERENCES):
+	files = {}
+	for key, text in (("tree", tree), ("snp", snp), ("references", references)):
+		files[key] = str(tmp_path / ("scheme_" + key + ".txt"))
+		with open(files[key], "w") as out:
+			out.write(text)
+	return files
+
+
+def create(tmp_path, files, name="scheme.db"):
+	db = str(tmp_path / name)
+	CanSNPDatabase(database=db, create=True, tree=files["tree"], annotation=files["snp"],
+		references=files["references"], source_type="CanSNPer", verbose=False)
+	return db
+
+
+def refused(tmp_path, files):
+	'''build the files, expect a refusal, and return its message'''
+	db = str(tmp_path / "scheme.db")
+	with pytest.raises(SourceFileError) as error:
+		create(tmp_path, files)
+	assert not os.path.exists(db), "a refused build must not leave a database behind"
+	return str(error.value)
+
+
+def with_snp_row(row):
+	return SNP_HEADER + SNP_ROWS + row + "\n"
+
+
+def test_a_valid_scheme_still_builds(tmp_path):
+	db = create(tmp_path, write_sources(tmp_path))
+	assert os.path.exists(db)
+
+
+# SNP file ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("position", ["abc", "0", "-5", "1.5", "12a", ""])
+def test_a_position_must_be_a_positive_integer(tmp_path, position):
+	snp = SNP_HEADER + SNP_ROWS.replace("\t100\t", "\t{0}\t".format(position))
+	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
+	assert "position '{0}' is not a positive integer".format(position) in message
+
+
+@pytest.mark.parametrize("column,base", [
+	("derived_base", "a"), ("derived_base", "AT"), ("derived_base", "N"), ("derived_base", "-"),
+	("ancestral_base", "c"), ("ancestral_base", "N"), ("ancestral_base", ""),
+])
+def test_a_base_must_be_one_of_ACGT(tmp_path, column, base):
+	if column == "derived_base":
+		row = "A.1\ts1\tPaper2020\tREF1\t100\t{0}\tC".format(base)
+	else:
+		row = "A.1\ts1\tPaper2020\tREF1\t100\tT\t{0}".format(base)
+	snp = SNP_HEADER + SNP_ROWS.replace("A.1\ts1\tPaper2020\tREF1\t100\tT\tC", row)
+	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
+	assert "{0} '{1}' is not one of A, C, G, T".format(column, base) in message
+
+
+def test_derived_and_ancestral_base_must_differ(tmp_path):
+	snp = SNP_HEADER + SNP_ROWS.replace("\t100\tT\tC", "\t100\tG\tG")
+	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
+	assert "derived and ancestral base are both 'G'" in message
+
+
+def test_a_snp_on_a_genome_missing_from_the_references_is_refused(tmp_path):
+	snp = SNP_HEADER + SNP_ROWS.replace("B.1\ts2\tPaper2020\tREF2", "B.1\ts2\tPaper2020\tREF9")
+	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
+	assert "genome 'REF9' is not listed in" in message
+
+
+def test_a_snp_id_listed_twice_is_refused(tmp_path):
+	message = refused(tmp_path, write_sources(tmp_path,
+		snp=with_snp_row("A.1\ts1\tPaper2020\tREF1\t150\tT\tC")))
+	assert "snp_id 'A.1' is listed 2 times" in message
+
+
+def test_a_position_annotated_twice_on_one_genome_is_refused(tmp_path):
+	tree = TREE + "R\tB.1\tB.2\n"
+	message = refused(tmp_path, write_sources(tmp_path, tree=tree,
+		snp=with_snp_row("B.2\ts1\tPaper2020\tREF1\t100\tA\tC")))
+	assert "position 100 on 'REF1' is annotated 2 times" in message
+
+
+def test_the_same_position_on_two_genomes_is_allowed(tmp_path):
+	'''positions are per reference genome, 100 on REF1 and 100 on REF2 are different sites'''
+	tree = TREE + "R\tB.1\tB.2\n"
+	create(tmp_path, write_sources(tmp_path, tree=tree,
+		snp=with_snp_row("B.2\ts2\tPaper2020\tREF2\t100\tA\tC")))
+
+
+def test_a_snp_whose_node_is_not_in_the_tree_is_refused(tmp_path):
+	message = refused(tmp_path, write_sources(tmp_path,
+		snp=with_snp_row("X.9\ts1\tPaper2020\tREF1\t900\tA\tC")))
+	assert "snp_id 'X.9' does not appear in" in message
+
+
+def test_a_short_snp_row_is_refused(tmp_path):
+	message = refused(tmp_path, write_sources(tmp_path, snp=with_snp_row("B.1\ts2\tPaper2020")))
+	assert "expected 7 columns, found 3" in message
+
+
+def test_comments_blank_lines_and_a_comment_column_are_still_accepted(tmp_path):
+	'''the relaxations of issue #22 stay: # lines, blank lines, and a trailing comment
+		column that rows may leave out'''
+	snp = (SNP_HEADER.rstrip("\n") + "\tcomment\n"
+		+ "# a comment line\n\n"
+		+ SNP_ROWS.replace("\t100\tT\tC\n", "\t100\tT\tC\ta named branch\n"))
+	create(tmp_path, write_sources(tmp_path, snp=snp))
+
+
+def test_a_node_without_a_snp_is_allowed(tmp_path):
+	'''the tree root and grouping nodes may carry no SNP; that is reported by
+		CanSNPer2-data/validate.py for published schemes, not refused by the loader'''
+	create(tmp_path, write_sources(tmp_path, tree=TREE + "R\tB.1\tB.2\n"))
+
+
+# tree file --------------------------------------------------------------------------
+
+def test_a_node_with_two_parents_is_refused(tmp_path):
+	tree = TREE + "R\tB.1\tA.2\n"
+	message = refused(tmp_path, write_sources(tmp_path, tree=tree))
+	assert "node 'A.2' is given more than one parent: A.1, B.1" in message
+
+
+def test_every_line_must_start_at_the_same_root(tmp_path):
+	tree = TREE + "Q\tA.1\n"
+	message = refused(tmp_path, write_sources(tmp_path, tree=tree))
+	assert "every line must start at the root 'R'" in message and "'Q'" in message
+
+
+def test_a_child_parent_table_given_as_tree_is_refused(tmp_path):
+	'''the --mod_file layout (child, parent per line, with a header) is not a tree file'''
+	tree = "child\tparent\nA.1\tR\nA.2\tA.1\nB.1\tR\n"
+	message = refused(tmp_path, write_sources(tmp_path, tree=tree))
+	assert "every line must start at the root" in message
+
+
+def test_a_space_separated_tree_is_refused(tmp_path):
+	'''spaces are allowed inside node names (Francisellaceae uses "Francisella
+		tularensis"), so a space-separated tree reads as one long node name; the SNPs then
+		name nodes that are not in the tree'''
+	tree = "R\nR A.1\nR A.1 A.2\nR B.1\n"
+	message = refused(tmp_path, write_sources(tmp_path, tree=tree))
+	assert "does not appear in" in message
+
+
+def test_an_empty_column_between_nodes_is_refused(tmp_path):
+	tree = TREE + "R\t\tB.2\n"
+	message = refused(tmp_path, write_sources(tmp_path, tree=tree))
+	assert "empty column 2 between populated columns" in message
+
+
+def test_semicolon_trees_and_repeated_paths_are_still_accepted(tmp_path):
+	'''CanSNPer1 trees use ";", and repeating a path that is already known is harmless'''
+	tree = TREE.replace("\t", ";") + "R;A.1\n"
+	create(tmp_path, write_sources(tmp_path, tree=tree))
+
+
+# references file --------------------------------------------------------------------
+
+def test_a_genome_listed_twice_in_the_references_is_refused(tmp_path):
+	references = REFERENCES + "REF1\ts3\tGCA_000000003.1\tGCF_000000003.1\tASM3v1\n"
+	message = refused(tmp_path, write_sources(tmp_path, references=references))
+	assert "genome 'REF1' is listed 2 times" in message
+
+
+def test_a_short_reference_row_is_refused(tmp_path):
+	references = REFERENCES + "REF3\ts3\n"
+	message = refused(tmp_path, write_sources(tmp_path, references=references))
+	assert "expected 5 columns, found 2" in message
+
+
+def test_an_empty_assembly_name_is_allowed(tmp_path):
+	'''exported databases may carry an empty last column (issue of #63)'''
+	references = REFERENCES.replace("\tASM2v1\n", "\t\n")
+	create(tmp_path, write_sources(tmp_path, references=references))
+
+
+def test_snps_without_a_references_file_are_refused(tmp_path):
+	files = write_sources(tmp_path)
+	db = str(tmp_path / "scheme.db")
+	with pytest.raises(SourceFileError, match="needs the references file"):
+		CanSNPDatabase(database=db, create=True, tree=files["tree"], annotation=files["snp"],
+			references=False, source_type="CanSNPer", verbose=False)
+	assert not os.path.exists(db)
+
+
+# reporting --------------------------------------------------------------------------
+
+def test_all_problems_are_reported_together_with_file_and_line(tmp_path):
+	snp = SNP_HEADER + SNP_ROWS.replace("\t100\t", "\tabc\t").replace("\t400\tA\tC", "\t400\tA\tA")
+	files = write_sources(tmp_path, snp=snp, tree=TREE + "R\tB.1\tA.2\n")
+	message = refused(tmp_path, files)
+	assert "{0}:3: position 'abc'".format(files["snp"]) in message
+	assert "{0}:5: derived and ancestral base are both 'A'".format(files["snp"]) in message
+	assert "node 'A.2' is given more than one parent" in message
+
+
+def test_import_refuses_the_same_files(tmp_path):
+	snp = SNP_HEADER + SNP_ROWS.replace("\t100\t", "\tabc\t")
+	files = write_sources(tmp_path, snp=snp)
+	target = str(tmp_path / "imported.db")
+	with pytest.raises(DatabaseImportError, match="position 'abc'"):
+		import_from_sources(files["tree"], files["snp"], files["references"], target)
+	assert not os.path.exists(target)
+
+
+def test_the_command_line_create_exits_1_and_names_the_problem(tmp_path):
+	snp = SNP_HEADER + SNP_ROWS.replace("\t100\tT\tC", "\tabc\ta\ta")
+	files = write_sources(tmp_path, snp=snp)
+	db = tmp_path / "cli.db"
+	result = subprocess.run([sys.executable, "-m", "CanSNPer2.SNPDatabase", "--create",
+		"--database", str(db), "--tree", files["tree"], "--annotation", files["snp"],
+		"--references", files["references"], "--logs", str(tmp_path / "logs")],
+		capture_output=True, text=True, cwd=str(tmp_path))
+	assert result.returncode == 1, result.stdout + result.stderr
+	assert "position 'abc' is not a positive integer" in result.stderr
+	assert "derived_base 'a' is not one of A, C, G, T" in result.stderr
+	assert not db.exists()
+
+
+# published schemes ------------------------------------------------------------------
+
+DATA = os.environ.get("CANSNPER2_DATA",
+	os.path.join(os.path.dirname(__file__), "..", "..", "CanSNPer2-data"))
+
+
+def published_schemes():
+	folder = os.path.join(DATA, "schemes")
+	if not os.path.isdir(folder):
+		return []
+	names = []
+	for name in sorted(os.listdir(folder)):
+		if not os.path.exists(os.path.join(folder, name, name + "_snp.txt")):
+			continue
+		if name == "yersinia_pestis":
+			'''published with "/" as the derived base of 1.ANT2.b, 1.ORI2.c and 1.ORI3.b (its
+				known_issues in schemes.toml); passes once the bases are corrected there'''
+			names.append(pytest.param(name, marks=pytest.mark.xfail(raises=SourceFileError, strict=False,
+				reason="'/' derived bases in the published Yersinia scheme")))
+		else:
+			names.append(name)
+	return names
+
+
+@pytest.mark.skipif(not published_schemes(), reason="no CanSNPer2-data checkout next to CanSNPer2 (set CANSNPER2_DATA)")
+@pytest.mark.parametrize("name", published_schemes())
+def test_the_schemes_of_CanSNPer2_data_build(tmp_path, name):
+	folder = os.path.join(DATA, "schemes", name)
+	files = {key: os.path.join(folder, "{0}_{1}.txt".format(name, key)) for key in ("tree", "snp", "references")}
+	create(tmp_path, files)
