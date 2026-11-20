@@ -135,6 +135,12 @@ text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
 <div id="hint">click a dot: collapse / expand &middot; drag: pan &middot; wheel: zoom &middot; double click: fit &middot; called paths stay open</div>
 <script>
 var DATA = __PAYLOAD__;
+window.onerror = function(message, source, line){
+\tvar banner = document.createElement("div");
+\tbanner.style.cssText = "background:#c0392b;color:#fff;padding:10px 14px;font-size:13px;";
+\tbanner.textContent = "The CanSNPer2 tree page hit a script error: " + message + " (line " + line + "). Please report this message together with the CanSNPer2 version.";
+\tdocument.body.insertBefore(banner, document.body.firstChild);
+};
 var COL = 130, ROW = 22, MARGIN = 24, OVERVIEW_LEAVES = 60;
 var nodes = DATA.nodes;
 var ANN = DATA.annotations || [];
@@ -325,6 +331,7 @@ autoCollapse();
 overviewState = nodes.map(function(n){ return n.collapsed; });
 render();
 fit();
+if (!svgEl) { window.onerror("the tree did not draw at all", "", 0); }
 </script>
 </body>
 </html>
@@ -412,6 +419,12 @@ text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
 <div id="tree"></div>
 <script>
 var DATA = __PAYLOAD__;
+window.onerror = function(message, source, line){
+\tvar banner = document.createElement("div");
+\tbanner.style.cssText = "background:#c0392b;color:#fff;padding:10px 14px;font-size:13px;";
+\tbanner.textContent = "The CanSNPer2 results page hit a script error: " + message + " (line " + line + "). Please report this message together with the CanSNPer2 version.";
+\tdocument.body.insertBefore(banner, document.body.firstChild);
+};
 var COL = 130, ROW = 22, MARGIN = 24, OVERVIEW_LEAVES = 60;
 var nodes = DATA.nodes, samples = DATA.samples;
 var ANN = DATA.annotations || [];
@@ -676,6 +689,9 @@ window.addEventListener("mouseup", function(){
 });
 buildTable("");
 paint(order[0]);
+if (document.querySelectorAll("#rows tr").length !== samples.length || !svgEl) {
+\twindow.onerror("the sample table or the tree stayed empty", "", 0);
+}
 </script>
 </body>
 </html>

@@ -83,6 +83,8 @@ def test_tree_viewer_carries_annotations(tmp_path):
 				{"node": "NOWHERE.9", "kind": "node", "rank": "type", "label": "wrong database"}])
 	data = payload(nt.tree_file)
 	assert [a["node"] for a in data["annotations"]] == ["A.1", "B.1"], "unknown names are dropped"
+	assert "window.onerror" in open(nt.tree_file).read(), "the viewer must report its own script failures"
+	assert "did not draw" in open(nt.tree_file).read(), "the viewer must notice an empty tree"
 
 
 def test_dashboard_carries_annotations(tmp_path):

@@ -104,3 +104,5 @@ def test_dashboard_wires_only_existing_elements(tmp_path):
 	head, script = page.split("<script>")
 	for element_id in set(re.findall(r'getElementById\("([^"]+)"\)', script)):
 		assert 'id="' + element_id + '"' in head, "the script wires #" + element_id + ", the page has no such element"
+	assert "window.onerror" in script, "the page must report its own script failures"
+	assert "stayed empty" in script, "the page must notice that it stayed empty"
