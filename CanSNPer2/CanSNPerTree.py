@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 oname = __name__
 __name__ 		= "CanSNPer2"
-from CanSNPer2 import __version__
+from CanSNPer2 import __version__, COMMANDS_HELP
 __author__ 		= "David Sundell"
 __credits__ 	= ["David Sundell"]
 __license__ 	= "GPLv3"
@@ -76,7 +76,10 @@ def fraction(value):
 
 def main():
 	'''Initiate CanSNPer2 object'''
-	parser = argparse.ArgumentParser(description='CanSNPer2 ')
+	parser = argparse.ArgumentParser(
+		description='CanSNPer2 - type query assemblies (or reads) against a CanSNP database',
+		epilog=COMMANDS_HELP,
+		formatter_class=argparse.RawDescriptionHelpFormatter)
 	required_arguments = parser.add_argument_group("Required arguments")
 	required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 		help="File(s) to align (fasta)")
 	required_arguments.add_argument('-db',  '--database', 	metavar='', 							help='CanSNP database')
@@ -86,6 +89,7 @@ def main():
 	output_options.add_argument('--save_tree',				action='store_true',					help='Save tree as PDF using ETE3 (default False)')
 	output_options.add_argument('--no_snpfiles', 			action='store_false',					help="Don´t save output files.")
 	output_options.add_argument('--summary',				action='store_true',					help="Output a summary file and tree with all called SNPs\nnot affected by no_snpfiles")
+	output_options.add_argument('--annotations', metavar='FILE', default=None, help="TSV file annotating tree nodes: <snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]. 'node' draws a badge under the SNP dot, 'clade' a dashed box around its whole subtree; rank is a level carried by the annotation (type, subspecies, marker...), never a tree depth")
 
 	run_options = parser.add_argument_group("Run options")
 	run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
@@ -190,6 +194,7 @@ def main():
 									mask=args.mask,
 									rerun=args.rerun,
 									summary=args.summary,
+									annotations=args.annotations,
 									strictness=args.strictness
 	)
 	print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))

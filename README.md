@@ -98,7 +98,8 @@ CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --sav
 
 ```
 usage: CanSNPer2-database [-h] [-db] [--tree] [--annotation] [--references]
-                      [--source_type] [--create] [--mod_file] [--parent]
+                      [--source_type] [--create] [--import]
+                      [--mod_file] [--parent]
                       [--remove] [--replace] [--export] [--export_format] [-o]
                       [--tmpdir] [--logs] [--verbose] [--debug] [--supress]
 
@@ -116,6 +117,8 @@ Load database:
   --references       File containing all reference genomes listed
   --source_type      Select source file type
   --create           Create new database!
+  --import           build a database from the source files written by --export
+                     (--tree --annotation --references), written to --database
 
 Database modifications:
   --mod_file         File with modifications/update to the tree
@@ -155,15 +158,34 @@ A database created from these files has the same tree, SNPs and reference genome
 can be exported, edited as text and rebuilt:
 
 ```sh
-CanSNPer2-database --database francisella_tularensis.db --export -o scheme/
-CanSNPer2-database --database rebuilt.db --create --tree scheme/francisella_tularensis_tree.txt \
-    --annotation scheme/francisella_tularensis_snp.txt --references scheme/francisella_tularensis_references.txt
+CanSNPer2-database --database my_scheme.db --export -o scheme/
+CanSNPer2-database --database rebuilt.db --import --tree scheme/my_scheme_tree.txt \
+    --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
 ```
 
 A database whose tree has a node with more than one parent, more than one root, or SNPs that
 point to a missing reference genome cannot be written in this format and is refused.
 `--export_format newick` writes the tree only. Up to version 2.2.2 the default export (`tab`)
 wrote node and link tables that could not rebuild the database; `tab` now gives the source files.
+
+#### Import
+
+`--import` is the counterpart of `--export`: it reads the three source files - the base
+CanSNPer2 format - and writes a database in the current format to `--database`. Export, edit
+the text, import back:
+
+```sh
+CanSNPer2-database --import --database new_scheme.db --tree scheme/my_scheme_tree.txt \
+    --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
+```
+
+The same loaders `--create` uses do the work, so the schema is always current, and the result
+is checked with the export validator before the database is kept: source files that do not
+form a clean scheme are refused and leave no half-written database behind. The destination
+must not already exist. (Old databases made by releases before the root fixes cannot be fed
+in directly; rebuild them from their source files, the ones shipped in
+[CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data), and they come out
+single-rooted and exportable.)
 
 ### CanSNPer2-download
 
@@ -246,7 +268,7 @@ T/N.1	T.1	A/M.1	M.1
 CanSNPer2 help
 ```
 usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
-               [--summary] [--refdir] [--workdir] [--read_input]
+               [--summary] [--annotations FILE] [--refdir] [--workdir] [--read_input]
                [--min_required_hits MIN_REQUIRED_HITS]
                [--strictness STRICTNESS] [--mask MASK] [--keep_going]
                [--rerun] [--aligner] [--alignment_timeout MINUTES]
@@ -270,6 +292,11 @@ Output options:
   --no_snpfiles         Don´t save output files.
   --summary             Output a summary file and tree with all called SNPs
                         not affected by no_snpfiles
+  --annotations FILE    TSV file annotating tree nodes: <snp name>  <node|clade>
+                        <rank> <label> [<color>]. 'node' draws a badge under the
+                        SNP dot, 'clade' a dashed box around its whole subtree;
+                        rank is a level carried by the annotation (type,
+                        subspecies, marker...), never a tree depth
 
 Run options:
   --refdir              Specify reference directory
@@ -313,6 +340,33 @@ with `--skip_alignment --tmpdir <that directory>`.
   --debug               Debug output
   --supress             Supress warnings
 ```
+
+### Annotating the tree
+
+`--annotations FILE` draws meaning that SNP calling itself does not know about onto every
+html tree view (the per-sample viewers, the summary tree and the results dashboard):
+
+```
+snp	kind	rank	label	color
+A/M.1	node	type	Type A	#2471a3
+B.1	node	type	Type B	#d35400
+B.1	node	subspecies	subsp. anthracis
+A.1	node	subspecies	subspecies A group
+B.16	node	subspecies	subspecies B group
+B.6	clade	marker	AMR feature (separated at the B.6 / B.12 split)	#c0392b
+```
+
+- `kind node` draws a colored badge under the SNP dot; a node may carry several badges
+  (B.1 above is both a type and a subspecies level).
+- `kind clade` draws a dashed rounded box around the whole subtree below the named SNP —
+  for a feature that one branch of the tree separates, like an antibiotic resistance
+  marker carried by the lineage under B.6.
+- `rank` is a free-text level carried by the annotation itself and is never derived from
+  the depth in the tree: the database tree has uneven resolution, so B.1 and B.16 can
+  both be subspecies levels while standing at different depths. The legend groups
+  annotations by rank.
+- `color` is optional; without it ranks get a stable palette color. Annotations naming a
+  SNP that is not in the database are skipped with a warning.
 
 ### Sample and sequence names
 

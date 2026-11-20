@@ -6,8 +6,18 @@ Check so that all required packages are installed
 
 import shutil
 import sys
+import argparse
+
+from CanSNPer2 import COMMANDS_HELP
 
 def main():
+	'''no options today, but the parser makes --help work and show the command list'''
+	parser = argparse.ArgumentParser(
+		description='CanSNPer2-test - check the installation: python imports and aligner programs in PATH',
+		epilog=COMMANDS_HELP,
+		formatter_class=argparse.RawDescriptionHelpFormatter)
+	parser.parse_args()
+
 	failed = []
 	'''CanSNPer2 needs no third party python packages any more: the ete3/PyQt tree drawing
 		was replaced by the html viewer in modules/NewickTree.py, so ete3 could be dropped

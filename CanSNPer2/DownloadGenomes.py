@@ -19,6 +19,7 @@ _MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions
 from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2 import COMMANDS_HELP
 import logging
 logger = logging.getLogger(__name__)
 
@@ -198,9 +199,12 @@ class DownloadGenomes(object):
 		return 0
 
 def main():
-	parser = argparse.ArgumentParser(description='CanSNPer2-download',
+	parser = argparse.ArgumentParser(
+		description='CanSNPer2-download - fetch the reference genomes a database needs from NCBI',
 		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
-			"CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step.")
+			"CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step."
+			+ COMMANDS_HELP,
+		formatter_class=argparse.RawDescriptionHelpFormatter)
 
 	baseopts = parser.add_argument_group('Database')
 	baseopts.add_argument('-db',  '--database', 	metavar='',													help='CanSNP database (with --scheme: the database to build, default <scheme>.db)')

@@ -89,6 +89,9 @@ class CanSNPer2(object):
 		self.typed = {}
 		self.not_typed = {}
 		self.skipped = {}
+		'''per sample outcome for the summary.html dashboard: severity, reasons and the SNP
+			states the embedded tree paints when the sample is selected'''
+		self.sample_reports = {}
 		'''the SNP path per sample, so the summary can print it for every sample (issue #24)'''
 		self.result_paths = {}
 		'''samples whose result file from an earlier run was used again; only these are read
@@ -152,6 +155,13 @@ class CanSNPer2(object):
 
 		'''Fetch other key word arguments'''
 		self.save_tree = kwargs.get("save_tree",False)
+		'''tree annotations for the html views: a file path (load_annotations parses it) or
+			an already built list of {node, kind, rank, label} dicts'''
+		annotations = kwargs.get("annotations",None)
+		if isinstance(annotations,str):
+			from CanSNPer2.modules.NewickTree import load_annotations
+			annotations = load_annotations(annotations)
+		self.annotations = annotations or []
 		self.keep_temp = kwargs.get("keep_temp",False)
 		self.keep_going = keep_going
 
@@ -499,7 +509,7 @@ class CanSNPer2(object):
 			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
-		final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary)
+		final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations)
 		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
 		return final_snp
 
@@ -810,6 +820,31 @@ class CanSNPer2(object):
 		'''Print summary tree showing all unique SNPs in the final tree'''
 		self.create_tree([],"summary",final_snps,True,min_required_hits=self.min_required_hits,summary=True)
 
+	def add_sample_report(self,name,severity,final_snp,snp_path,reasons,states=None,called=None,edge=None,no_data=None):
+		'''one row of the results dashboard: what the sample became, why a manual look may be
+			wanted, and the SNP states the embedded tree paints when it is selected'''
+		self.sample_reports[name] = {"name":name,"severity":severity,"final":final_snp,"path":snp_path,
+				"reasons":list(reasons),"states":dict(states or {}),"called":list(called or []),
+				"edge":sorted(edge or []),"no_data":sorted(no_data or [])}
+
+	def write_dashboard(self):
+		'''summary.html: the results overview for runs with many samples. The samples sit in a
+			table with the ones that need a manual look first (failed, not called, calls that
+			lean on the strictness tolerance over positions without data, calls whose path runs
+			over SNPs flagged at an alignment edge); the database tree is embedded once and
+			clicking a sample paints the tree with that sample's states, because the topology
+			is the same for every sample'''
+		if not self.sample_reports:
+			return
+		try:
+			newickTree = NewickTree(self.database,"summary",self.outdir,min_required_hits=self.min_required_hits,strictness=self.strictness)
+		except ValueError as e:
+			logger.warning("No results overview written: {error}".format(error=e))
+			return
+		dashboard = newickTree.write_dashboard([self.sample_reports[name] for name in self.sample_reports],
+				"{outdir}/summary.html".format(outdir=self.outdir), self.annotations)
+		logger.info("Results overview: open {dashboard} in a browser".format(dashboard=dashboard))
+
 	def run(self,database):
 		'''Run CanSNPer2'''
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
@@ -858,6 +893,11 @@ class CanSNPer2(object):
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
 						self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(outputfile=outputfile)
 						self.reused.add(self.query_name)
+						'''the dashboard lists reused samples too, but without states: the tree cannot
+							paint a result it did not compute in this run'''
+						old_final,old_path = self.read_result_file(outputfile)
+						self.add_sample_report(self.query_name,"reused",old_final,old_path,
+								["result from an earlier run, use --rerun to recompute it and see it in the tree"])
 						continue
 					logger.info("Running CanSNPer2 on {query}".format(query=qfile))
 					if not self.skip_alignment: ### alignments made before (--skip_alignment) are only read
@@ -872,6 +912,7 @@ class CanSNPer2(object):
 						logger.debug("{program} exited with a non zero exit status, continue with next sample!".format(program=self.aligner.name))
 						logger.warning("{program} error skip {sample}".format(program=self.aligner.name,sample=q))
 						self.skipped[self.query_name] = "{program} produced no alignments".format(program=self.aligner.name)
+						self.add_sample_report(self.query_name,"failed","NA","NA",["{program} produced no alignments for this sample".format(program=self.aligner.name)])
 						self.alignment_files = []
 						continue
 					'''Read the alignments and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)'''
@@ -886,6 +927,7 @@ class CanSNPer2(object):
 							warnings, and the folder that was searched is what the user needs (issue #176, #177)'''
 						logger.warning("One or several xmfa files were not found for {qfile}, continue with next file: {error}".format(qfile=qfile,error=e))
 						self.skipped[self.query_name] = str(e)
+						self.add_sample_report(self.query_name,"failed","NA","NA",["alignment files missing: {error}".format(error=e)])
 						self.alignment_files = []
 						continue
 					'''If file export is requested print the result for each SNP location to file'''
@@ -956,6 +998,30 @@ class CanSNPer2(object):
 						self.typed[self.query_name] = SNP
 					else:
 						self.not_typed[self.query_name] = message if not final_snp else "{snp} was not confirmed with enough hits".format(snp=final_snp[1])
+					'''the dashboard row for this sample: severity and the reasons a call needs a
+						manual look (positions on the path with no alignment data, SNPs flagged at an
+						alignment edge, a competing unconfirmed path); states/called let the embedded
+						tree paint the sample when it is selected'''
+					called_path = [snp[1] for snp in called] if called else []
+					edge_flags = set(row[0] for row in SNP_info if len(row) > 8 and row[8] == "edge")
+					edge_on_path = [s for s in edge_flags if s in set(called_path)]
+					path_missing = final_snp[4] if final_snp and len(final_snp) > 4 else []
+					severity = "clean"
+					reasons = []
+					if SNP == "NA":
+						severity = "not called"
+						reasons.append(message if not final_snp else "{snp} was not confirmed with enough hits".format(snp=final_snp[1]))
+					if path_missing:
+						if severity == "clean":
+							severity = "review"
+						reasons.append("{k} SNP positions on the called path had no alignment data (the call leans on --strictness): {ids}".format(k=len(path_missing),ids=", ".join(path_missing)))
+					if edge_on_path:
+						if severity == "clean":
+							severity = "review"
+						reasons.append("SNPs flagged at an alignment edge on the called path: {ids}".format(ids=", ".join(sorted(edge_on_path))))
+					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
+							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),
+							no_data=[row[0] for row in no_data_snps])
 					if self.export:
 						print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
 					'''Clean references to aligned xmfa files between queries if several was supplied'''
@@ -968,6 +1034,7 @@ class CanSNPer2(object):
 					if not self.keep_going:
 						raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)") from e
 					logger.warning("An error occured during processing of {file}, continuing!".format(file=self.query_name))
+					self.add_sample_report(self.query_name,"failed","NA","NA",["processing failed: {err}".format(err=e)])
 
 		'''the run has to say what it actually produced: an all NA run used to end with
 			"finished successfully" and exit code 0 (issue #191)'''
@@ -982,6 +1049,11 @@ class CanSNPer2(object):
 
 		if self.summary:
 			self.print_summary()
+		'''the results dashboard is written for every run: with many samples the list of final
+			SNPs on stdout is no longer an overview, and the samples that need a manual look
+			have to be found without reading every result file'''
+		if len(self.query) > 0:
+			self.write_dashboard()
 		'''Finally clean up temporary folder when all alignments and trees has been printed!'''
 		if not self.keep_temp and len(self.query) > 0: ## if keep temp is turned on do not remove away alignments also if no input files were given
 			self.cleanup()
