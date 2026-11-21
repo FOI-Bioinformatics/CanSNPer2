@@ -11,6 +11,7 @@ import tempfile
 
 import logging
 
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.ModifyTree import InputError, TreeError
@@ -225,7 +226,7 @@ def modify(args, logger):
 	return 0
 
 
-def main():
+def command():
 	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
 	args = get_arguments()
 	logger = get_logger(args)
@@ -362,6 +363,12 @@ def main():
 	else:
 		logger.error("No datafile supplied, nothing to process!")
 		exit(1)
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if __name__ == "__main__":
 	'''without this guard "python -m CanSNPer2.SNPDatabase" parsed its arguments and then did nothing (issue #128)'''

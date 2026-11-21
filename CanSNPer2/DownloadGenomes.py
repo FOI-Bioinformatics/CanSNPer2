@@ -16,6 +16,7 @@ import multiprocessing
 	so the fork context is requested explicitly, as in modules/CanSNPer2.py (issue #186).
 	Queues must come from the same context as the processes.'''
 _MP_CTX = multiprocessing.get_context("fork")
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, reference_snps
 from CanSNPer2.modules.LogSetup import setup_logging
@@ -287,7 +288,7 @@ class DownloadGenomes(object):
 		logging.info("Done!")
 		return 0
 
-def main():
+def command():
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-download - fetch the reference genomes a database needs from NCBI',
 		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
@@ -396,6 +397,12 @@ def main():
 	if DG.run():
 		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
 		exit(1)
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if __name__ == '__main__':
 	main()

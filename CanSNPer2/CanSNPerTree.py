@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 oname = __name__
 __name__ 		= "CanSNPer2"
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2 import __version__, COMMANDS_HELP
 __author__ 		= "David Sundell"
 __credits__ 	= ["David Sundell"]
@@ -75,7 +76,7 @@ def fraction(value):
 	return number
 
 
-def main():
+def command():
 	'''Initiate CanSNPer2 object'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2 - type query assemblies (or reads) against a CanSNP database',
@@ -221,6 +222,12 @@ def main():
 		was used again, made from the same input, counts as typed'''
 	if not CanSNPer2_obj.typed and not CanSNPer2_obj.reused and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
 		exit(1)
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if oname=="__main__":
 	main()
