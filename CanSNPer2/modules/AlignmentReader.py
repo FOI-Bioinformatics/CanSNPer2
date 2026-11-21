@@ -217,11 +217,15 @@ class AlignmentReader(object):
 			return self.SNPS
 		try:
 			self.read_alignment(alignment)
-		except FileNotFoundError:
+		except FileNotFoundError as e:
 			'''this used to return False, which every caller read as "no SNPs in this
 				alignment", so a missing alignment typed the sample NA and exited 0
-				(issue #176, #179)'''
-			logger.error("The alignment file {f} was not found".format(f=alignment))
+				(issue #176, #179). A file the reader needs besides the alignment (the
+				sequence table of progressiveMauve) is named by its own message.'''
+			if os.path.isfile(alignment):
+				logger.error(str(e))
+			else:
+				logger.error("The alignment file {f} was not found".format(f=alignment))
 			raise
 		self.finish()
 		if self.mask and self.masked.get(self.reference):

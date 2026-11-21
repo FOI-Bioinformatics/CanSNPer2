@@ -16,6 +16,7 @@ import shlex
 import shutil
 import logging
 
+from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX, write_sequence_table
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 from CanSNPer2.modules.ParsePAF import ParsePAF
 from CanSNPer2.modules.ParseDelta import ParseDelta
@@ -98,6 +99,12 @@ class ProgressiveMauve(Aligner):
 
 	def command(self, reference_file, query_file, output):
 		return [self.executable(), "--output", output, reference_file, query_file]
+
+	def prepare(self, reference_file, query_file, output):
+		'''the xmfa counts reference positions along the reference sequences joined end to
+			end; the names and lengths of the sequences, in the order mauve joins them, are
+			written next to the alignment for ParseXMFA to convert them back'''
+		write_sequence_table(reference_file, output + SEQUENCES_SUFFIX)
 
 	def reader(self, **kwargs):
 		return ParseXMFA(**kwargs)

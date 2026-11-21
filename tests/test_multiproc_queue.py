@@ -14,7 +14,9 @@ import pytest
 
 from helpers import make_db
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
+from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX
 from CanSNPer2.modules.ParsePAF import ParsePAF
+from CanSNPer2.modules.ParseXMFA import ParseXMFA
 
 
 def make_big_db(path, nsnp):
@@ -41,7 +43,33 @@ def make_paf(path, positions):
 		handle.write("\t".join(str(f) for f in fields) + "\n")
 
 
-def test_large_custom_database_is_collected_completely(tmp_path):
+def make_xmfa(path, positions):
+	'''one progressiveMauve block covering every registered SNP, the query carries the derived
+		base; the reference sequence table that ProgressiveMauve.prepare writes is written next
+		to it'''
+	last = positions[-1] + 10
+	ref = ["C"] * last
+	target = list(ref)
+	for pos in positions:
+		ref[pos - 1] = "A"
+		target[pos - 1] = "T"
+	with open(path, "w") as handle:
+		handle.write("#FormatVersion Mauve1\n============\n")
+		for seq in (ref, target):
+			handle.write("> 1:1-{0} + seq\n{1}\n".format(last, "\n".join("".join(seq[i:i + 60]) for i in range(0, last, 60))))
+	with open(path + SEQUENCES_SUFFIX, "w") as handle:
+		handle.write("chr\t{0}\n".format(last))
+
+
+## the readers the queue handling is tested with: (reader class, alignment writer, file ending)
+READERS = [
+	pytest.param(ParsePAF, make_paf, "paf", id="minimap2"),
+	pytest.param(ParseXMFA, make_xmfa, "xmfa", id="progressiveMauve"),
+]
+
+
+@pytest.mark.parametrize("reader, write_alignment, suffix", READERS)
+def test_large_custom_database_is_collected_completely(tmp_path, reader, write_alignment, suffix):
 	'''>2000 SNPs per reference over four alignments: every queue item must be taken,
 		the queues may not fill up and drop workers (issue #41)'''
 	nsnp, nalign = 2500, 4
@@ -49,12 +77,12 @@ def test_large_custom_database_is_collected_completely(tmp_path):
 	positions = make_big_db(db, nsnp)
 	alignments = []
 	for n in range(nalign):
-		alignment = str(tmp_path / "REF_big{0}.paf".format(n))
-		make_paf(alignment, positions)
+		alignment = str(tmp_path / "REF_big{0}.{1}".format(n, suffix))
+		write_alignment(alignment, positions)
 		alignments.append(alignment)
 
 	obj = CanSNPer2(["query.fna"], workdir=str(tmp_path), tmpdir="tmp", logdir="logs", outdir="out")
-	snps, snp_info, called = obj.find_snps_multiproc(xmfa_obj=ParsePAF(database=db), xmfa_files=alignments)
+	snps, snp_info, called = obj.find_snps_multiproc(xmfa_obj=reader(database=db), xmfa_files=alignments)
 	assert len(snps) == nsnp
 	assert len(snp_info) == nsnp * nalign
 	assert len(called) == nsnp * nalign
@@ -169,15 +197,16 @@ def test_failed_alignment_is_not_typed_from(tmp_path):
 	assert "alignment could not be read to its end" in message
 
 
-def test_worker_opens_its_own_database_connection(tmp_path):
+@pytest.mark.parametrize("reader, write_alignment, suffix", READERS)
+def test_worker_opens_its_own_database_connection(tmp_path, reader, write_alignment, suffix):
 	'''an AlignmentReader carries the database path and connects inside run(), so the parent
 		never holds a cursor that its forked workers would read through (issue #49)'''
 	db = str(tmp_path / "one.db")
 	positions = make_big_db(db, 3)
-	alignment = str(tmp_path / "REF_one.paf")
-	make_paf(alignment, positions)
+	alignment = str(tmp_path / "REF_one.{0}".format(suffix))
+	write_alignment(alignment, positions)
 
-	parser = ParsePAF(database=db)
+	parser = reader(database=db)
 	assert parser.database is False, "the parent connected to the database it hands to the workers"
 	obj = CanSNPer2(["query.fna"], workdir=str(tmp_path), tmpdir="tmp", logdir="logs", outdir="out")
 	snps, snp_info, called = obj.find_snps_multiproc(xmfa_obj=parser, xmfa_files=[alignment])
