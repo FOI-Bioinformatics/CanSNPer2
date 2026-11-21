@@ -5,6 +5,23 @@ from CanSNPer2.modules.SourceCheck import check_sources
 from importlib import import_module
 from datetime import date
 
+def snp_annotation_sql(table="snp_annotation"):
+	'''the CREATE statement of the snp_annotation table of the current format; the conversion
+		of a database from the format before 2.3.0 builds it under another name first'''
+	return """CREATE TABLE IF NOT EXISTS {table} (
+									node_id INTEGER PRIMARY KEY,
+									snp_id VARCHAR(6) ,
+									sequence VARCHAR(40),
+									sequence_position INTEGER,
+									ancestral_base VARCHAR(1),
+									derived_base VARCHAR(1),
+									reference VARCHAR(20),
+									date DATETIME,
+									genome_i INTEGER,
+									FOREIGN KEY (genome_i) REFERENCES genomes (genome_i)
+								);
+							""".format(table=table)
+
 def dynamic_import(abs_module_path, class_name):
 	module = import_module(".".join([abs_module_path,class_name]))
 	target_class = getattr(module, class_name)
@@ -27,19 +44,7 @@ class CreateSNPDatabase(CreateDatabase):
 			self.create_cansnp_table()
 
 	def create_cansnp_table(self):
-		sql_create_SNP_table =      """CREATE TABLE IF NOT EXISTS snp_annotation (
-									node_id INTEGER PRIMARY KEY,
-									snp_id VARCHAR(6) ,
-									sequence VARCHAR(40),
-									sequence_position INTEGER,
-									ancestral_base VARCHAR(1),
-									derived_base VARCHAR(1),
-									reference VARCHAR(20),
-									date DATETIME,
-									genome_i INTEGER,
-									FOREIGN KEY (genome_i) REFERENCES genomes (genome_i)
-								);
-							"""
+		sql_create_SNP_table = snp_annotation_sql()
 		sql_create_snp_references_table =  """CREATE TABLE IF NOT EXISTS snp_references (
 									id INTEGER PRIMARY KEY,
 									genome VARCHAR(6),

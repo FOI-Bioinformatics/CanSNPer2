@@ -29,7 +29,9 @@ class DownloadGenomes(object):
 	"""docstring for DownloadGenomes."""
 	def __init__(self, database, source="genbank",directory="references",verbose=False):
 		super(DownloadGenomes, self).__init__()
-		self.database = CanSNPdbFunctions(database,verbose=verbose)
+		'''database None gives a downloader for single genomes through download(), as the
+			conversion of SNP source files uses it; run() needs the database'''
+		self.database = CanSNPdbFunctions(database,verbose=verbose) if database is not None else None
 		self.source = source
 		self.directory = directory
 		if not os.path.exists(self.directory):
