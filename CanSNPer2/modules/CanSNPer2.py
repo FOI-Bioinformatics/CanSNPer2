@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.Aligners import Aligner, get_aligner
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions, duplicate_names, reference_snps
+from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps
 from CanSNPer2 import __version__
 
 
@@ -436,20 +436,21 @@ class CanSNPer2(object):
 		return cleaned_path
 
 	def check_reference_file(self,path,name):
-		'''A reference shorter than the last SNP position the database places on it is truncated
-			or the wrong genome: its SNPs beyond the end had no data, which counts against a call,
-			so the run gave missing or wrong genotypes without an error. Checked once per run.'''
+		'''The reference must have every sequence the database places SNPs on, each at least as
+			long as its largest SNP position, and the ancestral or derived base at its SNPs. A
+			truncated, renamed or wrong reference otherwise gave missing or wrong genotypes
+			without an error. Checked once per run.'''
 		if path not in self.checked_references:
-			if not hasattr(self, "last_positions"):
+			if not hasattr(self, "reference_snps"):
 				try:
-					database = CanSNPdbFunctions(self.database,verbose=self.verbose)
-					self.last_positions = last_snp_positions(database)
-					self.reference_snps = reference_snps(database)
+					'''sqlite creates an empty file for a path that does not exist'''
+					if not self.database or not os.path.isfile(self.database):
+						raise FileNotFoundError("{database} is not a file".format(database=self.database))
+					self.reference_snps = reference_snps(CanSNPdbFunctions(self.database,verbose=self.verbose))
 				except Exception as e:
-					logger.warning("Could not read the SNP positions from the database, the reference files are not checked for length and bases: {e}".format(e=e))
-					self.last_positions = {}
+					logger.warning("Could not read the SNP positions from the database, the reference files are not checked for sequences, length and bases: {e}".format(e=e))
 					self.reference_snps = {}
-			self.checked_references[path] = check_reference(path, name, self.last_positions.get(name), self.reference_snps.get(name))
+			self.checked_references[path] = check_reference(path, name, self.reference_snps.get(name))
 		if self.checked_references[path]:
 			raise CanSNPer2Error(self.checked_references[path])
 
@@ -466,8 +467,12 @@ class CanSNPer2(object):
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
-			if not self.skip_alignment:
-				self.check_reference_file("{refdir}/{ref}".format(refdir=self.refdir, ref=ref), ref_name)
+			ref_path = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
+			'''with --skip_alignment the reference is checked when it is at hand: a renamed
+				reference gave NA calls and nothing in the log. Alignments can be read again
+				without the reference folder, the check is then left out.'''
+			if not self.skip_alignment or os.path.isfile(ref_path):
+				self.check_reference_file(ref_path, ref_name)
 			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
 			commands.append(self.aligner.command(ref_file, query_file, output))
 			if not self.skip_alignment:

@@ -64,6 +64,7 @@ class ParseXMFA(AlignmentReader):
 			joined = offsets[sequence] + position
 			self.joined_keys[joined] = (sequence, position)
 		self.joined = sorted(self.joined_keys)
+		self.unknown_sequences.update(name for name in offsets if name not in self.snp_positions)
 		if missing_sequences:
 			logger.warning("SNPs on {sequences} of {reference} are not evaluated: the aligned reference has no such sequence ({table})".format(
 					sequences=", ".join(sorted(missing_sequences)), reference=self.reference, table=table_path))

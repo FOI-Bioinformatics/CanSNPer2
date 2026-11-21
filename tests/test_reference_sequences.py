@@ -1,34 +1,39 @@
 """References of several sequences (chromosomes, plasmids).
 
-Database positions run along the reference sequences joined end to end in file order. The
-database does not record the sequences, and the reference check only compared the total
-length, so a reference with the same sequences in another order (or another genome of
-about the same length) passed the check. Every aligner then read the bases of the wrong
-positions: on Brucella (two chromosomes) most calls became NA without an error that
-pointed at the reference.
+The database stores each SNP as a reference sequence (the first word of its fasta header)
+and a position on that sequence. The reference check therefore looks every SNP up on its
+own sequence:
 
-- The reference base at each SNP position must be the ancestral or the derived base of
+- every sequence the database names must be in the file; the order of the sequences and
+  sequences the database does not name (plasmids) do not matter;
+- each sequence must be at least as long as its largest SNP position;
+- the reference base at each SNP position must be the ancestral or the derived base of
   that SNP. A reference that fails this at many SNPs is refused, a few mismatches are
   reported as a warning.
-- The result tables give the reference sequence and the position on that sequence next
-  to the position on the joined reference, so the positions can be compared with
-  publications that give them per chromosome."""
+
+A reference whose sequence names match none of the database (RefSeq names in a file for a
+scheme built on GenBank accessions) used to give NA calls without a message, also when the
+alignments were read again with --skip_alignment."""
+import gzip
 import logging
 import random
-import sqlite3
 
 import pytest
 
+from helpers import make_db
 from CanSNPer2.DownloadGenomes import DownloadGenomes
-from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, SNP_FILE_COLUMNS, add_reference_sequence
+from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import base_mismatches, check_reference, locate, reference_snps, sequence_table
+from CanSNPer2.modules.ParsePAF import ParsePAF
+from CanSNPer2.modules.ReferenceCheck import check_reference, read_sequences, reference_snps
 
 rng = random.Random(7)
 CHR1 = "".join(rng.choice("ACGT") for _ in range(600))
 CHR2 = "".join(rng.choice("ACGT") for _ in range(400))
-JOINED = CHR1 + CHR2
-POSITIONS = [50, 120, 333, 480, 599, 601, 700, 850, 999, 1000]   ## 5 on chr1, 5 on chr2
+PLASMID = "".join(rng.choice("ACGT") for _ in range(200))
+SEQUENCES = {"chrI": CHR1, "chrII": CHR2}
+POSITIONS = [("chrI", 50), ("chrI", 120), ("chrI", 333), ("chrI", 480), ("chrI", 599),
+	("chrII", 1), ("chrII", 100), ("chrII", 250), ("chrII", 399), ("chrII", 400)]
 OTHER = {"A": "G", "C": "T", "G": "A", "T": "C"}
 
 
@@ -37,101 +42,129 @@ def fasta(*records):
 
 
 def snp_rows():
-	'''(snp_id, position, ancestral, derived): the reference carries the ancestral base, the
-		derived base is another one'''
-	return [("S.{0}".format(i), pos, JOINED[pos - 1], OTHER[JOINED[pos - 1]]) for i, pos in enumerate(POSITIONS)]
+	'''(snp_id, sequence, position, ancestral, derived): the reference carries the ancestral
+		base, the derived base is another one'''
+	rows = []
+	for i, (sequence, pos) in enumerate(POSITIONS):
+		base = SEQUENCES[sequence][pos - 1]
+		rows.append(("S.{0}".format(i), sequence, pos, base, OTHER[base]))
+	return rows
 
 
-def make_db(path, rows=None):
-	conn = sqlite3.connect(path)
-	conn.executescript("""
-		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
-		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
-			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);
-		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6), strain varchar(6));
-		INSERT INTO snp_references (id, genome, strain) VALUES (5, 'REF', 'REF');
-	""")
-	for i, (snp_id, pos, anc, der) in enumerate(rows or snp_rows()):
-		conn.execute("INSERT INTO nodes (id, name) VALUES (?, ?)", (i + 1, snp_id))
-		conn.execute("INSERT INTO snp_annotation VALUES (?, ?, ?, ?, ?, 'test', '06/11/26', 5)", (i + 1, snp_id, pos, anc, der))
-	conn.commit()
-	conn.close()
-	return path
+def write(path, text):
+	path.write_text(text)
+	return str(path)
 
 
-@pytest.fixture
-def references(tmp_path):
-	right = tmp_path / "right.fna"
-	right.write_text(fasta(("chr1", CHR1), ("chr2", CHR2)))
-	swapped = tmp_path / "swapped.fna"
-	swapped.write_text(fasta(("chr2", CHR2), ("chr1", CHR1)))
-	return str(right), str(swapped)
+def neither(sequence, positions):
+	'''sequence with a base that is neither the ancestral nor the derived one at positions'''
+	seq = list(sequence)
+	for pos in positions:
+		base = seq[pos - 1]
+		seq[pos - 1] = next(b for b in "ACGT" if b not in (base, OTHER[base]))
+	return "".join(seq)
 
 
-def test_the_sequence_table_gives_names_and_lengths_in_file_order(references):
-	right, swapped = references
-	assert sequence_table(right) == [("chr1", 600), ("chr2", 400)]
-	assert sequence_table(swapped) == [("chr2", 400), ("chr1", 600)]
+def paf_line(sequence, position, query_base, qname="ctg1"):
+	'''one primary minimap2 record of 11 reference bases around position, with query_base at it'''
+	ref = SEQUENCES.get(sequence, CHR2)
+	start = position - 6        ## 0-based start, 5 bases before the SNP
+	left, base, right = ref[start:position - 1], ref[position - 1], ref[position:position + 5]
+	if query_base == base:
+		cs = "=" + left + base + right
+	else:
+		cs = "={0}*{1}{2}={3}".format(left, base.lower(), query_base.lower(), right)
+	fields = [qname, "1000", 100, 111, "+", sequence, "1000", start, start + 11, 11, 11, 60, "tp:A:P", "cs:Z:" + cs]
+	return "\t".join(str(f) for f in fields)
 
 
-def test_a_joined_position_is_located_on_its_sequence(references):
-	table = sequence_table(references[0])
-	assert locate(table, 1) == ("chr1", 1)
-	assert locate(table, 600) == ("chr1", 600)
-	assert locate(table, 601) == ("chr2", 1)
-	assert locate(table, 1000) == ("chr2", 400)
-	assert locate(table, 1001) == ("-", "-")
-	assert locate(table, "-") == ("-", "-")
-
-
-def test_the_snps_of_each_reference_are_read_from_the_database(tmp_path):
-	db = make_db(str(tmp_path / "t.db"))
+def test_reference_snps_are_read_per_sequence(tmp_path):
+	db = make_db(tmp_path / "t.db", snp_rows())
 	snps = reference_snps(CanSNPdbFunctions(db))
 	assert sorted(snps) == ["REF"]
 	assert sorted(snps["REF"]) == sorted(snp_rows())
 
 
-def test_the_right_reference_has_the_ancestral_or_derived_base_at_every_snp(references):
-	right, swapped = references
-	assert base_mismatches(right, snp_rows()) == []
-	assert check_reference(right, "REF", 1000, snp_rows()) is None
+def test_read_sequences_gives_names_and_upper_case_sequences(tmp_path):
+	path = write(tmp_path / "r.fna", ">chrI first\nacgt\nAC\n>chrII\nGG\n")
+	assert read_sequences(path) == [("chrI", "ACGTAC"), ("chrII", "GG")]
 
 
-def test_a_reference_with_its_sequences_in_another_order_is_refused(references):
-	'''same sequences, same total length: the length check alone let this through'''
-	right, swapped = references
-	assert check_reference(swapped, "REF", 1000) is None
-	mismatches = base_mismatches(swapped, snp_rows())
-	assert len(mismatches) >= 5
-	problem = check_reference(swapped, "REF", 1000, snp_rows())
+def test_the_right_reference_passes(tmp_path):
+	right = write(tmp_path / "right.fna", fasta(("chrI", CHR1), ("chrII", CHR2)))
+	assert check_reference(right, "REF", snp_rows()) is None
+
+
+def type_with_skipped_alignment(tmp_path, reference_text, name):
+	'''type a PAF alignment again (--skip_alignment) against a reference file with the given
+		text; B.1 (chrII:100) is derived in the query, S.0 (chrI:50) ancestral'''
+	work = tmp_path / name
+	(work / "refs").mkdir(parents=True)
+	(work / "shared").mkdir()
+	(work / "refs" / "REF.fna").write_text(reference_text)
+	query = work / "sample.fna"
+	query.write_text(fasta(("ctg1", CHR1)))
+	db = make_db(work / "t.db", snp_rows())
+	anc = CHR2[99]
+	(work / "shared" / "REF_sample.paf").write_text(paf_line("chrII", 100, OTHER[anc]) + "\n" + paf_line("chrI", 50, CHR1[49], qname="ctg2") + "\n")
+	obj = CanSNPer2([str(query)], workdir=str(work), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
+		database=db, aligner="minimap2", skip_alignment=True)
+	files = obj.align(str(query))
+	states, _info, called = obj.find_snps_multiproc(xmfa_obj=obj.aligner.reader(database=db), xmfa_files=files,
+		references=obj.alignment_references)
+	return states, called
+
+
+def test_reference_in_another_order_passes_and_types_the_same(tmp_path):
+	right = fasta(("chrI", CHR1), ("chrII", CHR2))
+	swapped = fasta(("chrII", CHR2), ("chrI", CHR1))
+	assert check_reference(write(tmp_path / "swapped.fna", swapped), "REF", snp_rows()) is None
+	assert type_with_skipped_alignment(tmp_path, right, "right") == type_with_skipped_alignment(tmp_path, swapped, "swapped")
+	states, called = type_with_skipped_alignment(tmp_path, swapped, "again")
+	assert states == {"S.6": 1, "S.0": 2} and called == ["S.6"]
+
+
+def test_reference_with_an_extra_plasmid_passes(tmp_path):
+	path = write(tmp_path / "plasmid.fna", fasta(("pXO1", PLASMID), ("chrI", CHR1), ("chrII", CHR2)))
+	assert check_reference(path, "REF", snp_rows()) is None
+
+
+def test_header_with_description_matches_by_first_word(tmp_path):
+	path = write(tmp_path / "desc.fna", ">chrI Brucella chromosome I, complete sequence\n{0}\n>chrII Brucella chromosome II\n{1}\n".format(CHR1, CHR2))
+	assert check_reference(path, "REF", snp_rows()) is None
+
+
+def test_missing_sequence_is_refused_naming_it(tmp_path):
+	path = write(tmp_path / "missing.fna", fasta(("chrI", CHR1), ("NZ_CP007763.1", CHR2)))
+	problem = check_reference(path, "REF", snp_rows())
 	assert problem is not None
-	assert "chr2, chr1" in problem and "order" in problem
-	assert "{n} of 10 SNPs".format(n=len(mismatches)) in problem
+	assert "chrII" in problem and "NZ_CP007763.1" in problem
+	assert "GenBank" in problem and "CanSNPer2-download" in problem
 
 
-def test_a_single_mismatching_snp_is_a_warning_only(references, caplog):
+def test_short_sequence_is_refused(tmp_path):
+	path = write(tmp_path / "short.fna", fasta(("chrI", CHR1), ("chrII", CHR2[:300])))
+	problem = check_reference(path, "REF", snp_rows())
+	assert problem is not None
+	assert "chrII" in problem and "300 bases" in problem and "400" in problem
+
+
+def test_wrong_bases_on_one_sequence_refused_at_fraction(tmp_path):
+	'''5 of 10 SNPs, all on chrII, have neither base: more than MISMATCH_FRACTION of the
+		SNPs of the reference'''
+	wrong = neither(CHR2, [pos for seq, pos in POSITIONS if seq == "chrII"])
+	path = write(tmp_path / "wrong.fna", fasta(("chrI", CHR1), ("chrII", wrong)))
+	problem = check_reference(path, "REF", snp_rows())
+	assert problem is not None
+	assert "5 of 10 SNPs" in problem and "reference base" in problem and "chrII" in problem
+
+
+def test_few_wrong_bases_warn(tmp_path, caplog):
 	'''one wrong base in a scheme is a scheme error to report, not a reason to stop typing'''
-	rows = snp_rows()
-	snp_id, pos, anc, der = rows[3]
-	neither = [b for b in "ACGT" if b not in (anc, der)]
-	rows[3] = (snp_id, pos, neither[0], neither[1])
+	path = write(tmp_path / "few.fna", fasta(("chrI", CHR1), ("chrII", neither(CHR2, [250]))))
 	with caplog.at_level(logging.WARNING):
-		assert check_reference(references[0], "REF", 1000, rows) is None
-	assert "S.3" in caplog.text and "1 of 10 SNPs" in caplog.text
-
-
-def test_typing_stops_on_a_reference_with_its_sequences_in_another_order(tmp_path, references):
-	db = make_db(str(tmp_path / "t.db"))
-	refdir = tmp_path / "refs"
-	refdir.mkdir()
-	(refdir / "REF.fna").write_text(open(references[1]).read())
-	query = tmp_path / "sample.fna"
-	query.write_text(fasta(("chr1", CHR1), ("chr2", CHR2)))
-	obj = CanSNPer2([str(query)], workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out", database=db)
-	with pytest.raises(CanSNPer2Error, match="reference base"):
-		obj.align(str(query))
+		assert check_reference(path, "REF", snp_rows()) is None
+	assert "S.7" in caplog.text and "1 of 10 SNPs" in caplog.text
 
 
 class Results(list):
@@ -139,31 +172,33 @@ class Results(list):
 		self.append(item)
 
 
-def test_a_download_with_its_sequences_in_another_order_is_refused(tmp_path, references):
-	import gzip
+def test_download_refuses_a_genome_without_a_named_sequence(tmp_path):
 	obj = DownloadGenomes.__new__(DownloadGenomes)
 	obj.source, obj.directory, obj.database = "genbank", str(tmp_path / "refs"), None
-	data = gzip.compress(open(references[1]).read().encode())
+	data = gzip.compress(fasta(("NZ_CP007762.1", CHR1), ("NZ_CP007763.1", CHR2)).encode())
 	def retrieve(link, target, timeout=None):
 		with open(target, "wb") as out:
 			out.write(data)
 	obj.retrieve = retrieve
 	results = Results()
-	obj.download("GCA_000007125.1", "ASM712v1", "REF", directory=obj.directory, results=results, last_position=1000, snps=snp_rows())
-	assert results[0][1] is False and "reference base" in results[0][2]
+	obj.download("GCA_000007125.1", "ASM712v1", "REF", directory=obj.directory, results=results, snps=snp_rows())
+	assert results[0][1] is False and "chrI" in results[0][2] and "chrII" in results[0][2]
 
 
-def test_the_result_rows_carry_the_reference_sequence_and_its_position(references):
-	assert SNP_FILE_COLUMNS[-2:] == ["ReferenceSeq", "ReferenceSeqPosition"]
-	tables = {"REF": sequence_table(references[0])}
-	rows = [["S.6", "REF", "700", "q2", "100", "A", "G", "A", ""],
-			["S.0", "REF", "50", "q1", "50", "A", "G", "A", "edge"],
-			["X", "-", "-", "N/A", "N/A", "-", "-", "N/A", ""],
-			["S.9", "OTHER", "5", "N/A", "N/A", "A", "G", "N/A", ""]]
-	out = add_reference_sequence(rows, tables)
-	assert out[0][-2:] == ["chr2", "100"]
-	assert out[1][-2:] == ["chr1", "50"]
-	assert out[2][-2:] == ["-", "-"]
-	assert out[3][-2:] == ["-", "-"]          ## reference file not at hand (--skip_alignment)
-	assert all(len(row) == len(SNP_FILE_COLUMNS) for row in out)
-	assert rows[0][-1] == ""                  ## the input rows are not changed
+def test_skipped_alignment_checks_the_reference_when_it_is_there(tmp_path):
+	'''--skip_alignment used to skip the reference check, so a renamed reference gave NA
+		calls without a message'''
+	renamed = fasta(("NZ_CP007762.1", CHR1), ("NZ_CP007763.1", CHR2))
+	with pytest.raises(CanSNPer2Error, match="chrII"):
+		type_with_skipped_alignment(tmp_path, renamed, "renamed")
+
+
+def test_an_alignment_on_unknown_sequences_is_reported(tmp_path, caplog):
+	'''no SNP observed, and the alignment names reference sequences the database does not use'''
+	db = make_db(tmp_path / "t.db", snp_rows())
+	paf = tmp_path / "REF_sample.paf"
+	paf.write_text(paf_line("NZ_CP007763.1", 100, "A") + "\n")
+	with caplog.at_level(logging.WARNING):
+		snps = ParsePAF().run(str(paf), reference="REF", database=db)
+	assert snps == {}
+	assert "NZ_CP007763.1" in caplog.text and "chrI" in caplog.text and "chrII" in caplog.text

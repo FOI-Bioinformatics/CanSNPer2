@@ -94,6 +94,7 @@ class AlignmentReader(object):
 		self.snplist = {}          ## {(sequence, position): (ancestral base, derived base, snp id)}
 		self.snp_positions = {}    ## {sequence: sorted positions of its SNPs}
 		self.observations = {}     ## {(sequence, position): observation row}, see observe()
+		self.unknown_sequences = set()  ## aligned reference sequences on which the database has no SNPs
 		self.SNPS = {}
 		self.SNP_info = []
 		self.called_snps = []
@@ -120,6 +121,7 @@ class AlignmentReader(object):
 			block further along the reference'''
 		positions = self.snp_positions.get(sequence)
 		if not positions:
+			self.unknown_sequences.add(sequence)
 			return []
 		return positions[bisect_left(positions,start):bisect_right(positions,end)]
 
@@ -190,6 +192,12 @@ class AlignmentReader(object):
 				self.called_snps.append(snp_id)
 		return self.SNPS
 
+	@staticmethod
+	def _listing(names, limit=5):
+		'''up to limit of the names, sorted and comma separated'''
+		names = sorted(names)
+		return ", ".join(names[:limit]) + (" ..." if len(names) > limit else "")
+
 	def read_alignment(self, path):
 		'''walk the alignment file and call observe() for the SNP positions it covers'''
 		raise NotImplementedError("{cls} does not implement read_alignment".format(cls=type(self).__name__))
@@ -227,6 +235,12 @@ class AlignmentReader(object):
 			else:
 				logger.error("The alignment file {f} was not found".format(f=alignment))
 			raise
+		if not self.observations and self.unknown_sequences:
+			'''a reference whose sequences have other names than in the database (RefSeq
+				instead of GenBank accessions) is aligned, but none of its SNPs is found, which
+				gave NA calls and nothing in the log'''
+			logger.warning("No SNP of {reference} was found in {alignment}: its reference sequences ({aligned}) match none of the sequences the database places SNPs on ({expected}). The reference sequences must have the names the database uses".format(
+					reference=reference, alignment=alignment, aligned=self._listing(self.unknown_sequences), expected=self._listing(self.snp_positions)))
 		self.finish()
 		if self.mask and self.masked.get(self.reference):
 			logger.info("{n} SNP positions against {reference} were within {mask} bases of an alignment edge and were not evaluated".format(

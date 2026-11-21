@@ -17,7 +17,7 @@ import multiprocessing
 	Queues must come from the same context as the processes.'''
 _MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions, reference_snps
+from CanSNPer2.modules.ReferenceCheck import check_reference, reference_snps
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import COMMANDS_HELP
 import logging
@@ -63,16 +63,15 @@ class DownloadGenomes(object):
 		with urlopen(link, timeout=timeout) as response, open(target,"wb") as out:
 			shutil.copyfileobj(response, out)
 
-	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, last_position=None, snps=None):
+	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, snps=None):
 		'''Download genomes from refseq or genbank on request
 			https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/00x/xxx/GCF_00000xxxx.x_ASMxxxv1/GCF_00000xxxx.x_ASMxxxv1_genomic.fna.gz
 			(the ftp:// protocol was retired by NCBI in 2021, the same tree is served over https (issue #120))
 			Each genome runs in its own process, so it reports (refid, ok, reason) back through
 			results: an exception in a child never reaches the log or the exit code otherwise (issue #218)
-			last_position: the largest SNP position the database has on this reference; a genome
-			shorter than that is reported as failed
-			snps: [(snp_id, position, ancestral, derived), ...] of this reference; a genome without
-			the ancestral or the derived base at many of them is reported as failed
+			snps: [(snp_id, sequence, position, ancestral, derived), ...] of this reference; a genome
+			without a sequence named there, with a sequence shorter than its SNP positions or
+			without the ancestral or the derived base at many SNPs is reported as failed
 		'''
 		def report(success, reason=""):
 			if results is not None:
@@ -99,7 +98,7 @@ class DownloadGenomes(object):
 			'''a genome downloaded before is used again, but only when it is long enough for the
 				SNPs of the database: older versions could leave a half unpacked file behind and
 				took it for complete on the next run'''
-			problem = check_reference(ungzipped, refid, last_position, snps)
+			problem = check_reference(ungzipped, refid, snps)
 			if problem is None:
 				logger.debug("Reference file for {refid} already exists!".format(refid=refid))
 				self.link_reference(ungzipped, link, refid)
@@ -131,7 +130,7 @@ class DownloadGenomes(object):
 			os.remove(tmpfile)
 			if os.path.exists(partial):
 				os.remove(partial) ## a half unpacked genome would look complete to the next run (issue #218)
-		problem = check_reference(ungzipped, refid, last_position, snps)
+		problem = check_reference(ungzipped, refid, snps)
 		if problem is not None:
 			logger.error("Downloaded {refid}, but {problem}".format(refid=refid, problem=problem))
 			report(False, problem)
@@ -158,19 +157,18 @@ class DownloadGenomes(object):
 		for genome_id in keys:
 			assembly = self.genomes[genome_id]
 			targets.append((genome_id, assembly, self.genomes[assembly]))
-		'''the length every reference must have, from the SNP positions of the database'''
+		'''the SNPs of each reference, which its downloaded genome is checked against'''
 		try:
-			last_positions = last_snp_positions(self.database)
 			snps = reference_snps(self.database)
 		except Exception as e:
-			logger.warning("Could not read the SNP positions from the database, the downloaded references are not checked for length and bases: {e}".format(e=e))
-			last_positions, snps = {}, {}
+			logger.warning("Could not read the SNP positions from the database, the downloaded references are not checked for sequences, length and bases: {e}".format(e=e))
+			snps = {}
 		results = _MP_CTX.Queue()
 		threads = []
 		logging.info("Downloading {n} references from {source} into {directory}".format(
 				n=len(targets), source=self.source, directory=self.directory))
 		for genome_id, assembly, refid in targets:
-			kwargs = {"source":self.source, "directory":self.directory, "results":results, "last_position":last_positions.get(refid), "snps":snps.get(refid)}
+			kwargs = {"source":self.source, "directory":self.directory, "results":results, "snps":snps.get(refid)}
 			p = _MP_CTX.Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
 			p.start()
 			threads.append(p)
