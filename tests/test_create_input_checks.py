@@ -248,6 +248,22 @@ def test_a_genome_listed_twice_in_the_references_is_refused(tmp_path):
 	assert "genome 'REF1' is listed 2 times" in message
 
 
+def test_a_genbank_id_used_by_two_genomes_is_refused(tmp_path):
+	references = REFERENCES + "REF3\ts3\tGCA_000000001.1\tGCF_000000003.1\tASM3v1\n"
+	message = refused(tmp_path, write_sources(tmp_path, references=references))
+	assert "references.txt:4: genbank_id 'GCA_000000001.1' of genome 'REF3' is already used by genome 'REF1' on line 2" in message
+
+
+def test_the_old_snp_header_message_is_the_shared_conversion_hint(tmp_path):
+	from CanSNPer2.modules.DatabaseConnection import JOINED_FORMAT_HINT
+	from CanSNPer2.modules.SourceCheck import check_snps
+	old = tmp_path / "old_snp.txt"
+	old.write_text("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\n")
+	problems = []
+	check_snps(str(old), problems)
+	assert len(problems) == 1 and JOINED_FORMAT_HINT in problems[0]
+
+
 def test_a_short_reference_row_is_refused(tmp_path):
 	references = REFERENCES + "REF3\ts3\n"
 	message = refused(tmp_path, write_sources(tmp_path, references=references))
@@ -325,11 +341,6 @@ def published_schemes():
 				checks; it builds once the scheme is converted with CanSNPer2-database --convert'''
 			names.append(pytest.param(name, marks=pytest.mark.skip(
 				reason="published with joined positions, not yet converted")))
-		elif name == "yersinia_pestis":
-			'''published with "/" as the derived base of 1.ANT2.b, 1.ORI2.c and 1.ORI3.b (its
-				known_issues in schemes.toml); passes once the bases are corrected there'''
-			names.append(pytest.param(name, marks=pytest.mark.xfail(raises=SourceFileError, strict=False,
-				reason="'/' derived bases in the published Yersinia scheme")))
 		else:
 			names.append(name)
 	return names

@@ -8,14 +8,16 @@ import shutil
 import sys
 import argparse
 
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2 import COMMANDS_HELP
 
-def main():
-	'''no options today, but the parser makes --help work and show the command list'''
+def command():
+	'''only --debug today, but the parser makes --help work and show the command list'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-test - check the installation: python imports and aligner programs in PATH',
 		epilog=COMMANDS_HELP,
 		formatter_class=argparse.RawDescriptionHelpFormatter)
+	parser.add_argument('--debug', action='store_true', help="print the traceback of an unexpected error")
 	parser.parse_args()
 
 	failed = []
@@ -43,6 +45,12 @@ def main():
 			print("ERROR: "+error)
 		sys.exit(1)
 	print("required python packages installed!")
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if __name__ == "__main__":
 	'''without this guard "python -m CanSNPer2.selftest" did nothing at all, the same missing guard

@@ -84,8 +84,7 @@ class ReadTaxonomy(object):
 					'''Check for empty rows'''
 					continue
 				if len(data) < 2: ## a row must name both a child and a parent, swapping an incomplete row would crash (issue #102-#104)
-					logging.warning("Skipped row without child and parent columns in the tree file: '{row}'".format(row=tree_row.strip()))
-					continue
+					raise InputError("A row of the tree file {file} has no child and parent columns: '{row}'".format(file=treefile,row=tree_row.strip()))
 				if swap:
 					data[0],data[1] = data[1],data[0]
 				'''Add nodes into database'''

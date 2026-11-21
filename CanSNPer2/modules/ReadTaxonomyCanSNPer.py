@@ -16,7 +16,7 @@ __email__ = "bioinformatics@foi.se"
 __date__ = "2020-01-17"
 __status__ = "Production"
 
-from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions
+from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions, DatabaseWriteError
 import logging
 import gzip
 import sys
@@ -81,6 +81,15 @@ class ReadTaxonomyBase(object):
 		'''Change separator from default (\t)'''
 		self.sep = sep
 
+	def written(self, result, what):
+		'''the query wrapper of the database only logs a failed insert and returns the exception,
+			so a tree, node or link that could not be written was left out of the database and
+			--create ended with exit status 0; such a result is raised as DatabaseWriteError'''
+		if isinstance(result, Exception):
+			raise DatabaseWriteError("The {what} could not be written to {db}: {error}".format(
+				what=what, db=self.database.database, error=result))
+		return result
+
 	def add_rank(self, rank,qiime=False):
 		'''Insert rank into database'''
 		try:
@@ -92,6 +101,7 @@ class ReadTaxonomyBase(object):
 				rank_i = self.database.add_rank(self.levelDict.get(rank))
 			else:
 				rank_i = self.database.add_rank(rank)
+			self.written(rank_i, "rank {rank}".format(rank=rank))
 			self.rank[rank] = rank_i
 		else:
 			return False
@@ -101,7 +111,8 @@ class ReadTaxonomyBase(object):
 		'''Add relationship in tree'''
 		if not child and parent:
 			raise InputError("A link requires both a child and a parent!")
-		self.database.add_link(child=child,parent=parent,rank=self.rank[rank])
+		self.written(self.database.add_link(child=child,parent=parent,rank=self.rank[rank]),
+			"link from node {parent} to node {child}".format(parent=parent, child=child))
 		self.ids+=1
 
 	def add_node(self, description,id=False):
@@ -110,7 +121,7 @@ class ReadTaxonomyBase(object):
 			dict to keep track of which nodes were already added
 		'''
 		logger.debug("Node desc: {desc} id: {id}".format(desc=description,id=id))
-		self.taxid_base = self.database.add_node(description,id)
+		self.taxid_base = self.written(self.database.add_node(description,id), "node {name}".format(name=description))
 		self.taxonomy[description] = self.taxid_base
 		return self.taxid_base
 
@@ -136,8 +147,8 @@ class ReadTaxonomyBase(object):
 					'''Check for empty rows'''
 					continue
 				if len(data) < 2: ## a row must name both a child and a parent (issue #105/#106)
-					logger.warning("Skipped row without child and parent columns in the tree file: '{row}'".format(row=tree_row.strip()))
-					continue
+					raise InputError("A row of the tree file {file} has no child and parent columns: '{row}'".format(
+						file=treefile, row=tree_row.strip()))
 				rank = "no rank"
 				if len(data) > 2:
 					rank = data.pop().strip()
@@ -243,6 +254,11 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 				nodes = row.strip().split(";")  ## get node and all its parents in a list
 				logger.debug(nodes)
 				child = nodes[-1]  ## get name of child node
+				if len(nodes) > 1 and child.strip() in self.taxonomy:
+					'''a path that is already known (a repeated line, or a line that ends at an inner
+						node) added the node a second time, as a new node under the same name;
+						SourceCheck has made sure that a node has only one parent'''
+					continue
 				'''If the tree was not properly formatted an a parent is missing make sure that function works anyway by adding any parent node above child'''
 				try:
 					pname = nodes[-2].strip()
@@ -255,7 +271,8 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 					continue
 				'''Now all parents exists, add new child node and add the link'''
 				child_i = self.add_node(child)
-				self.database.add_link(child_i,parent_i)
+				self.written(self.database.add_link(child_i,parent_i),
+					"link from node {parent} to node {child}".format(parent=parent_i, child=child))
 		self.database.commit()
 		self.length = self.taxid_num - self.root                ## Check number of new nodes added
 		logger.info("New taxonomy ids assigned {taxidnr}".format(taxidnr=self.length))

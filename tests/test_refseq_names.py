@@ -116,3 +116,29 @@ def test_renamed_genome_gets_the_mode_of_open(tmp_path, umask):
 	finally:
 		os.umask(previous)
 	assert os.stat(str(path)).st_mode & 0o777 == 0o666 & ~umask
+
+
+DIFFERENT_REPORT = (
+	"# Sequence-Name\tSequence-Role\tAssigned-Molecule\tAssigned-Molecule-Location/Type\tGenBank-Accn\tRelationship\tRefSeq-Accn\tAssembly-Unit\tSequence-Length\tUCSC-style-name\n"
+	"chrI\tassembled-molecule\tI\tChromosome\tchrI\t=\tNZ_CP007762.1\tPrimary Assembly\t600\tna\n"
+	"chrII\tassembled-molecule\tII\tChromosome\tchrII\t<>\tNZ_CP007763.1\tPrimary Assembly\t400\tna\n"
+	"pX\tassembled-molecule\tpX\tPlasmid\tpX\t<>\tNZ_CP007764.1\tPrimary Assembly\t200\tna\n"
+)
+
+
+def test_genbank_names_skips_rows_whose_sequences_differ(caplog):
+	'''a RefSeq sequence that differs from its GenBank sequence (Relationship <>) keeps its
+		name, as positions on one need not hold on the other; one warning names them'''
+	import logging
+	with caplog.at_level(logging.WARNING):
+		names = genbank_names(DIFFERENT_REPORT)
+	assert names == {"NZ_CP007762.1": "chrI"}
+	warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+	assert len(warnings) == 1, warnings
+	assert "NZ_CP007763.1" in warnings[0] and "NZ_CP007764.1" in warnings[0], warnings
+
+
+def test_genbank_names_without_a_relationship_column():
+	report = ("# Sequence-Name\tGenBank-Accn\tRefSeq-Accn\n"
+		"chrI\tchrI\tNZ_CP007762.1\n")
+	assert genbank_names(report) == {"NZ_CP007762.1": "chrI"}

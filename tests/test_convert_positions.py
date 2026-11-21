@@ -285,7 +285,7 @@ def test_cli_reports_a_file_that_is_not_a_database(tmp_path):
 		"-o", str(tmp_path / "out"))
 	assert result.returncode == 1
 	assert "Traceback" not in result.stderr
-	assert "not a database" in result.stderr
+	assert "is not an sqlite database" in result.stderr
 	assert not os.path.exists(str(tmp_path / "out" / "old.db"))
 
 
@@ -305,3 +305,19 @@ def test_outputs_get_the_mode_of_open(tmp_path, umask):
 	for name in ("old_snp.txt", "old.db"):
 		mode = os.stat(str(tmp_path / "out" / name)).st_mode & 0o777
 		assert mode == 0o666 & ~umask, (name, oct(mode))
+
+
+def test_cli_records_scheme_info_in_a_converted_database(tmp_path):
+	'''a converted database is not reported as one built before 2.3.0'''
+	import datetime
+	from CanSNPer2 import __version__
+	from CanSNPer2.modules.SchemeInfo import read_scheme_info
+	write_reference(tmp_path / "refs")
+	db = old_database(tmp_path / "old.db")
+	result = run_cli(tmp_path, "--convert", "--database", db, "--refdir", str(tmp_path / "refs"),
+		"-o", str(tmp_path / "out"))
+	assert result.returncode == 0, result.stderr
+	info = read_scheme_info(str(tmp_path / "out" / "old.db"))
+	assert info == {"format": "2.3", "built_with": __version__, "built": datetime.date.today().isoformat(),
+		"status": "unknown", "source": "converted from old.db"}, info
+	assert read_scheme_info(db) == {}
