@@ -12,7 +12,8 @@
 # gate stays honest on machines that are not the reference one.
 #
 # Data it needs from the project (issue #185, the data lives next to the repository):
-#   ../CanSNPer2-data-perseq/schemes (DATA=/path overrides) /francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
+#   ../CanSNPer2-data-perseq/schemes/francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
+#   (the converted CanSNPer2-data worktree; override the folder with DATA=/path/to/CanSNPer2-data-perseq)
 #   references/*.fna in this repository, and ../../test_data/*.fasta for the known answers
 # Override the root with ROOT=/path/to/project when the layout is different.
 
@@ -240,7 +241,7 @@ expect "snps table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/re
 expect "not_called table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
 BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 expect "query trace columns filled in every SNP row" "0" "$BADQ"
-QPNUM=$(awk -F'\t' 'NR>1 && $5 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+QPNUM=$(awk -F'\t' 'NR>1 && $6 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 if [ "$QPNUM" -gt 0 ]; then
     printf '  ok    %-52s %s rows with a numeric QueryPosition\n' "query coordinates traced (#23)" "$QPNUM"
     PASSED=$((PASSED+1))
@@ -265,7 +266,7 @@ expect "same not-called through --skip_mauve" "313" "$(wc -l < "$OUT/res_skip/qu
 # tree html and the log (#27). The wide mask pushes those positions in artificially.
 cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_mask" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/mask" --skip_mauve --mask 20000
-NODATA=$(awk -F'\t' 'NR>1 && $8=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
+NODATA=$(awk -F'\t' 'NR>1 && $9=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
 COVERED=$("$PY" -c "
 nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_not_called.txt')) if i)
 sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('SNP path', 'Final SNP', 'Query file')))

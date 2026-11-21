@@ -112,14 +112,14 @@ trees and nodes without a SNP are accepted.
 
 ```
 usage: CanSNPer2-database [-h] [-db] [--tree] [--annotation] [--references]
-                      [--source_type] [--create] [--import]
-                      [--mod_file] [--parent]
-                      [--remove] [--replace] [--export] [--export_format] [-o]
-                      [--tmpdir] [--logs] [--verbose] [--debug] [--supress]
+                      [--source_type] [--create] [--import] [--convert]
+                      [--refdir] [--mod_file] [--parent] [--remove]
+                      [--replace] [--export] [--export_format] [-o] [--tmpdir]
+                      [--logs] [--verbose] [--debug] [--supress]
 
-CanSNPer2-database
+CanSNPer2-database - create, modify and export CanSNP databases
 
-optional arguments:
+options:
   -h, --help         show this help message and exit
 
 Required:
@@ -131,8 +131,17 @@ Load database:
   --references       File containing all reference genomes listed
   --source_type      Select source file type
   --create           Create new database!
-  --import           build a database from the source files written by --export
-                     (--tree --annotation --references), written to --database
+  --import           build a database from the source files written by
+                     --export (--tree --annotation --references), written to
+                     --database
+
+Convert from the format before 2.3.0:
+  --convert          convert a SNP source file (--annotation) or a database
+                     (--database) from positions along the joined reference
+                     sequences to positions on each reference sequence,
+                     written to -o
+  --refdir           folder with the reference files <genome>.fna used by
+                     --convert; missing files are downloaded
 
 Database modifications:
   --mod_file         File with modifications/update to the tree
@@ -155,6 +164,13 @@ Logging and debug options:
   --verbose          print process info, default no output
   --debug            print debug info
   --supress          supress warnings
+
+available CanSNPer2 commands (installed together):
+  CanSNPer2            type query assemblies or reads against a CanSNP database
+  CanSNPer2-database   create, modify and export CanSNP databases
+  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
+  CanSNPer2-test       check the installation: imports and aligner programs in PATH
+Run any command with --help for its arguments; examples in README.md.
 ```
 
 #### Export
@@ -210,7 +226,7 @@ usage: CanSNPer2-download [-h] [-db] [--scheme] [--branch] [--repo]
                           [--data_dir] [--list_schemes] [--overwrite]
                           [--no_references] [-s] [-o] [--logs] [--verbose]
 
-CanSNPer2-download
+CanSNPer2-download - fetch the reference genomes a database needs from NCBI
 
 options:
   -h, --help         show this help message and exit
@@ -244,9 +260,13 @@ Logging and debug options:
   --logs             Specify log directory
   --verbose          Verbose logging
 
-Give a database with --database, or name a scheme with --scheme to fetch it
-from CanSNPer2-data (or --repo, or --data_dir), build its database and
-download its references in one step.
+Give a database with --database, or name a scheme with --scheme to fetch it from CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step.
+available CanSNPer2 commands (installed together):
+  CanSNPer2            type query assemblies or reads against a CanSNP database
+  CanSNPer2-database   create, modify and export CanSNP databases
+  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
+  CanSNPer2-test       check the installation: imports and aligner programs in PATH
+Run any command with --help for its arguments; examples in README.md.
 ```
 Example structure of references.txt
 ```
