@@ -244,13 +244,15 @@ def test_export_logs_the_notice_and_writes_no_table_rows(tmp_path):
 
 def test_download_logs_the_notice(tmp_path):
 	db = toy_database(tmp_path, status="draft")
-	## without reference genomes in the database nothing is fetched from NCBI
+	## without reference genomes in the database nothing is fetched from NCBI, and the
+	## command ends with exit 1 after the notice
 	conn = sqlite3.connect(db)
 	conn.execute("DELETE FROM snp_references")
 	conn.commit()
 	conn.close()
 	result = run(tmp_path, "CanSNPer2.DownloadGenomes", ["--database", db, "-o", "refs", "--logs", "logs"])
-	assert result.returncode == 0, result.stderr
+	assert result.returncode == 1, result.stderr
+	assert "nothing to download" in result.stderr
 	assert result.stderr.count("toy (draft)") == 1, result.stderr
 
 

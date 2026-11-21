@@ -93,9 +93,23 @@ def test_a_file_that_does_not_match_the_manifest_builds_nothing(tmp_path):
 	assert os.listdir(tmp_path) == []
 
 
-def test_a_scheme_without_a_manifest_is_built_with_a_warning(tmp_path, caplog):
+def test_a_verified_scheme_without_a_manifest_is_refused(tmp_path):
 	db = str(tmp_path / "test_scheme.db")
-	build_scheme("test_scheme", db, source=source(scheme_repo(manifest=False)))
+	with pytest.raises(SchemeError, match="--allow_unverified"):
+		build_scheme("test_scheme", db, source=source(scheme_repo(manifest=False)))
+	assert os.listdir(tmp_path) == []
+
+
+def test_a_scheme_without_a_manifest_is_built_with_a_warning_when_allowed(tmp_path, caplog):
+	db = str(tmp_path / "test_scheme.db")
+	build_scheme("test_scheme", db, source=source(scheme_repo(manifest=False)), allow_unverified=True)
+	assert os.path.exists(db)
+	assert "cannot be checked" in caplog.text
+
+
+def test_a_draft_scheme_without_a_manifest_is_built_with_a_warning(tmp_path, caplog):
+	db = str(tmp_path / "test_scheme.db")
+	build_scheme("test_scheme", db, source=source(scheme_repo(manifest=False, status="draft")))
 	assert os.path.exists(db)
 	assert "cannot be checked" in caplog.text
 

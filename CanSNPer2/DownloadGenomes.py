@@ -73,6 +73,12 @@ def rename_sequences(path, names):
 		if os.path.exists(tmp):
 			os.remove(tmp)
 
+def missing_accession(source):
+	'''the reason given for a genome without the accession of source'''
+	column = "refseq_id" if source == "refseq" else "genbank_id"
+	return ("the database has no {column} for this genome; give its assembly accession in the "
+		"references file and build the database again").format(column=column)
+
 class DownloadGenomes(object):
 	"""docstring for DownloadGenomes."""
 	def __init__(self, database, source="genbank",directory="references",verbose=False):
@@ -80,6 +86,7 @@ class DownloadGenomes(object):
 		'''database None gives a downloader for single genomes through download(), as the
 			conversion of SNP source files uses it; run() needs the database'''
 		self.database = CanSNPdbFunctions(database,verbose=verbose) if database is not None else None
+		self.database_path = database
 		self.source = source
 		self.directory = directory
 		if not os.path.exists(self.directory):
@@ -127,6 +134,11 @@ class DownloadGenomes(object):
 			if results is not None:
 				results.put((refid, success, reason))
 		sourceD = {"refseq":"F", "genbank": "A"}
+		if not genome_id:
+			'''a NULL accession raised an AttributeError in the worker, which was reported as a
+				process that ended without reporting, with a traceback'''
+			report(False, missing_accession(source))
+			return
 		try:
 			n1,n2,n3 = textwrap.wrap(genome_id.split("_")[-1].split(".")[0],3)  ## Get the three number parts
 		except ValueError:
@@ -216,20 +228,29 @@ class DownloadGenomes(object):
 
 	def run(self):
 		'''Start download and collect what each worker actually managed to fetch (issue #218)'''
+		database = getattr(self, "database_path", None) or "the database"
 		self.genomes,keys = self.get_genomes(self.database,self.source)
 		if not keys:
-			logger.warning("The database lists no genome references, there is nothing to download!")
-			return 0
+			'''this was a warning with exit status 0, so a script went on without references'''
+			logger.error("{db} lists no reference genomes, there is nothing to download; build the database "
+				"again with its references file".format(db=database))
+			return 1
 		targets = []
+		failed = []
 		for genome_id in keys:
 			assembly = self.genomes[genome_id]
+			if not genome_id:
+				failed.append("{refid}: {reason}".format(refid=self.genomes[assembly], reason=missing_accession(self.source)))
+				continue
 			targets.append((genome_id, assembly, self.genomes[assembly]))
-		'''the SNPs of each reference, which its downloaded genome is checked against'''
+		'''the SNPs of each reference, which its downloaded genome is checked against; without
+			them the check of sequence names, lengths and bases was skipped with only a warning'''
 		try:
 			snps = reference_snps(self.database)
 		except Exception as e:
-			logger.warning("Could not read the SNP positions from the database, the downloaded references are not checked for sequences, length and bases: {e}".format(e=e))
-			snps = {}
+			logger.error("The SNP positions of {db} could not be read ({e}), so the downloaded references "
+				"cannot be checked; build the database again with CanSNPer2-database --create".format(db=database, e=e))
+			return 1
 		results = _MP_CTX.Queue()
 		threads = []
 		logging.info("Downloading {n} references from {source} into {directory}".format(
@@ -250,16 +271,16 @@ class DownloadGenomes(object):
 			except queue.Empty: ## Queue from multiprocessing is a function and has no Empty, the worker that died without reporting crashed the whole command
 				break
 			reports[refid] = (success, reason)
-		failed = []
 		for genome_id, assembly, refid in targets:
 			success, reason = reports.get(refid, (False, "the download process ended without reporting"))
 			if not success:
 				failed.append("{refid} ({genome_id} / {assembly}): {reason}".format(
 						refid=refid, genome_id=genome_id, assembly=assembly, reason=reason))
+		total = len(keys)
 		logging.info("{n} of {m} references are now in {directory}".format(
-				n=len(targets)-len(failed), m=len(targets), directory=self.directory))
+				n=total-len(failed), m=total, directory=self.directory))
 		if failed:
-			logger.error("{n} of {m} references could not be downloaded:".format(n=len(failed), m=len(targets)))
+			logger.error("{n} of {m} references could not be downloaded:".format(n=len(failed), m=total))
 			for line in failed:
 				logger.error("  "+line)
 			return 1
@@ -285,6 +306,7 @@ def main():
 	schemeopts.add_argument('--list_schemes', 		action='store_true',										help="List the schemes of the repository or --data_dir and exit")
 	schemeopts.add_argument('--overwrite', 		action='store_true',										help="Replace an existing database when building from --scheme")
 	schemeopts.add_argument('--no_references', 	action='store_true',										help="Build the database from --scheme without downloading its references")
+	schemeopts.add_argument('--allow_unverified', 	action='store_true',										help="Build a verified scheme from GitHub although its files cannot be checked against a manifest (no manifest, or no hash for a file)")
 
 	downlopts = parser.add_argument_group('Download options')
 	downlopts.add_argument('-s', '--source', 			metavar='', default="genbank",	choices=["genbank","refseq"], 	help="Source for download (genbank/refseq)")
@@ -293,6 +315,7 @@ def main():
 	debugopts = parser.add_argument_group('Logging and debug options')
 	debugopts.add_argument('--logs', metavar='', default='logs', 				help='Specify log directory')
 	debugopts.add_argument('--verbose',	action='store_const', const=logging.DEBUG, help='Verbose logging')
+	debugopts.add_argument('--debug',	action='store_const', const=logging.DEBUG, help='Debug logging, and the traceback of an unexpected error')
 
 	args = parser.parse_args()
 	if not (args.database or args.scheme or args.list_schemes):
@@ -310,8 +333,8 @@ def main():
 		return GitHubSchemeSource(ref=args.branch or "master")
 
 	logval = logging.WARNING
-	if args.verbose:
-		logval = args.verbose
+	if args.verbose or args.debug:
+		logval = logging.DEBUG
 
 	if args.list_schemes:
 		'''only prints the schemes, so no log file is written'''
@@ -337,15 +360,18 @@ def main():
 			build the database with this CanSNPer2 version'''
 		from CanSNPer2.modules.FetchScheme import build_scheme, SchemeError
 		from CanSNPer2.modules.ModifyTree import InputError
+		from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
 		from CanSNPer2.modules.DatabaseConnection import SourceFileError, DatabaseWriteError
+		from CanSNPer2.modules.DatabaseConnection import ConnectionError as DatabaseConnectionError
 		if not args.database:
 			args.database = "{scheme}.db".format(scheme=args.scheme)
 		try:
 			if os.path.exists(args.database) and not args.overwrite:
 				raise SchemeError("{db} already exists, use --overwrite to replace it".format(db=args.database))
 			source = scheme_source()
-			build_scheme(args.scheme, args.database, overwrite=args.overwrite, source=source)
-		except (SchemeError, InputError, SourceFileError, DatabaseWriteError) as e:
+			build_scheme(args.scheme, args.database, overwrite=args.overwrite, source=source,
+				allow_unverified=args.allow_unverified)
+		except (SchemeError, InputError, TreeFileError, SourceFileError, DatabaseWriteError, DatabaseConnectionError) as e:
 			logger.error(str(e))
 			exit(1)
 		print("Built {db} from the scheme {scheme} in {loc}".format(db=args.database, scheme=args.scheme, loc=source.location()))
@@ -368,7 +394,7 @@ def main():
 	# create a database connection
 	DG = DownloadGenomes(args.database,args.source,args.outdir)
 	if DG.run():
-		logger.error("CanSNPer2-download finished with missing references, check the failures listed above")
+		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
 		exit(1)
 
 if __name__ == '__main__':
