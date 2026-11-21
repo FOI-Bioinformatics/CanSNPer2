@@ -21,13 +21,14 @@ Two kinds of input are converted:
 '''
 
 import bisect
+import io
 import os
 import shutil
 import sqlite3
 import tempfile
 import logging
 
-from CanSNPer2.modules.ReferenceCheck import read_sequences, listing
+from CanSNPer2.modules.ReferenceCheck import read_sequences, listing, FastaFileError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.InitiateDatabase import snp_annotation_sql
 from CanSNPer2.modules.FileMode import set_default_mode
@@ -47,11 +48,28 @@ class ConversionError(Exception):
 	pass
 
 
+def read_text(path, newline=None):
+	'''the text of a SNP or references file as a file object. A UTF-8 byte order mark is
+		removed; a gzip-compressed file or one that is not UTF-8 is refused with the name of
+		the file, where the decoder named only the byte it stopped at'''
+	with open(path, "rb") as fin:
+		data = fin.read()
+	if data[:2] == b"\x1f\x8b":
+		raise ConversionError("{path} is gzip-compressed, decompress it first".format(path=path))
+	try:
+		return io.StringIO(data.decode("utf-8-sig"), newline=newline)
+	except UnicodeDecodeError as e:
+		raise ConversionError("{path} is not UTF-8 text ({error}), save it as UTF-8 and run again".format(path=path, error=e))
+
+
 class JoinedReference(object):
 	'''the sequences of a reference fasta file in file order, addressed by joined position'''
 	def __init__(self, path):
 		self.path = path
-		self.records = read_sequences(path)
+		try:
+			self.records = read_sequences(path)
+		except FastaFileError as e:
+			raise ConversionError(str(e))
 		if not self.records:
 			raise ConversionError("The reference file {path} contains no sequences".format(path=path))
 		self.starts = []  ## 0-based joined start of each sequence
@@ -164,7 +182,7 @@ def convert_table(source, target, genome_files, sequences=None):
 	placed = set()
 	header = None
 	count = 0
-	with open(source, newline="") as fin:
+	with read_text(source, newline="") as fin:
 		for number, raw in enumerate(fin, start=1):
 			line, ending = _split_ending(raw)
 			if line.strip() == "" or line.startswith("#"):
@@ -307,7 +325,7 @@ def table_genomes(path):
 	'''the genomes named in the genome column of a source file'''
 	genomes = []
 	header = None
-	with open(path) as fin:
+	with read_text(path) as fin:
 		for line in fin:
 			line = line.rstrip("\r\n")
 			if line.strip() == "" or line.startswith("#"):
@@ -338,7 +356,7 @@ def references_from_file(path):
 	'''{genome: (genbank_id, assembly_name)} from a references source file'''
 	references = {}
 	header = None
-	with open(path) as fin:
+	with read_text(path) as fin:
 		for line in fin:
 			line = line.rstrip("\r\n")
 			if line.strip() == "" or line.startswith("#"):
