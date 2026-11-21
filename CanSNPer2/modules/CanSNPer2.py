@@ -1134,8 +1134,7 @@ class CanSNPer2(object):
 					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
 							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),
 							no_data=[row[0] for row in no_data_snps])
-					if self.export:
-						print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP)) ## the call is printed whether or not result files are written
 					'''Clean references to aligned xmfa files between queries if several was supplied'''
 					self.alignment_files = []
 				except Exception as e:
