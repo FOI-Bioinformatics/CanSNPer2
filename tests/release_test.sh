@@ -320,6 +320,8 @@ else
 fi
 
 say "== leave-one-out: every reference typed without its own genome"
+# the removed genome has no file in the reference folder, which stops typing unless
+# --allow_missing_references is given (2.3.0)
 # the subtaxons below are the recorded baseline (MANUAL_TEST_COMMANDS.txt step 7,
 # re-measured 2026-11-11 after the --strictness tolerance of druvus #53, which moved
 # FSC200 from B.12 to B.21: 12/13 called with the single gap B.72 being a position
@@ -340,7 +342,7 @@ for q in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do
     done
     cmd "loo-$q" any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$PKG/references/$q.fna" -db "$DB" \
         --refdir "$OUT/loo_refs_$q" -o "$OUT/res_loo_$q" --tmpdir "$OUT/tmp_loo_$q" \
-        --logdir "$OUT/logs/loo_$q"
+        --logdir "$OUT/logs/loo_$q" --allow_missing_references
     SUB=$(grep -h "$q:" "$LASTLOG" | tail -1 | sed "s/.*: //")
     SNPS=$(wc -l < "$OUT/res_loo_$q/${q}_snps.txt" 2>/dev/null | tr -d ' ')
     EXP=$(loo_expect "$q")

@@ -71,6 +71,9 @@ class CanSNPer2(object):
 		self.query = query
 		self.verbose = verbose
 		self.refdir = refdir
+		'''a reference genome of the database without its file in refdir stops the run,
+			unless this is set: the run then continues with one warning'''
+		self.allow_missing_references = kwargs.get("allow_missing_references", False)
 		'''the aligner is a name from Aligners.ALIGNERS or an Aligner object; aligner_path is
 			the program or the folder that holds it (mauve_path is its old name)'''
 		aligner = kwargs.get("aligner")
@@ -266,7 +269,9 @@ class CanSNPer2(object):
 			makes mauve align a genome against unrelated species, which wastes hours and fails
 			with a non zero exitcode (issue #124). A genome of the database without its file
 			stops the run: its SNPs were silently never compared, and when no file matched
-			the database every file in the folder was used.
+			the database every file in the folder was used. With allow_missing_references
+			the run continues against the genomes that have a file, with one warning that
+			names the others; it still stops when no genome has a file.
 		'''
 		if getattr(self, "references", None):
 			return self.references
@@ -283,11 +288,16 @@ class CanSNPer2(object):
 			raise CanSNPer2Error("No reference .fna files were found in {refdir}, run {download} first".format(refdir=self.refdir,download=download))
 		genomes = sorted(self.reference_snps)
 		missing = [genome for genome in genomes if genome + ".fna" not in refs]
-		if missing:
+		if missing and (not self.allow_missing_references or len(missing) == len(genomes)):
 			raise CanSNPer2Error("{n} reference genome(s) of {database} have no file <genome>.fna in {refdir}: {names}; "
-				"the SNPs on them would not be compared. Fetch them with {download}".format(
-				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing),download=download))
-		matched = [genome + ".fna" for genome in genomes]
+				"the SNPs on them would not be compared. Fetch them with {download}{option}".format(
+				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing),download=download,
+				option="" if self.allow_missing_references else ", or give --allow_missing_references to type without them"))
+		if missing:
+			logger.warning("{n} reference genome(s) of {database} have no file <genome>.fna in {refdir}: {names}; "
+				"the SNPs on them are not compared (--allow_missing_references)".format(
+				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing)))
+		matched = [genome + ".fna" for genome in genomes if genome not in missing]
 		skipped = [ref.rsplit(".",1)[0] for ref in refs if ref not in matched]
 		if skipped:
 			logger.warning("Skipping {n} reference file(s) in {refdir} that are not reference genomes with SNPs in the database: {names}".format(n=len(skipped),refdir=self.refdir,names=", ".join(skipped)))

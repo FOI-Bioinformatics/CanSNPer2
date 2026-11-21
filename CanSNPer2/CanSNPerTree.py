@@ -95,6 +95,7 @@ def command():
 
 	run_options = parser.add_argument_group("Run options")
 	run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
+	run_options.add_argument('--allow_missing_references', action='store_true',		help="Type even when reference genomes of the database have no <genome>.fna in --refdir; one warning names them, and their SNPs are not compared (default: stop with an error)")
 	run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 	run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
 	run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
@@ -179,6 +180,7 @@ def command():
 
 	CanSNPer2_obj = CanSNPer2(args.query,
 									refdir=args.refdir,
+									allow_missing_references=args.allow_missing_references,
 									verbose=args.verbose,
 									outdir=args.outdir,
 									tmpdir=args.tmpdir,
