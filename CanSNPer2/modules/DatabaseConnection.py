@@ -23,7 +23,8 @@ class ConnectionError(Exception):
 	def __init__(self, value):
 		self.value = value
 	def __str__(self):
-		return repr(self.value)
+		'''the message itself; repr() printed every message in quotes'''
+		return str(self.value)
 
 CANSNP_TABLES = ("nodes","tree","snp_annotation","snp_references")
 
@@ -71,6 +72,10 @@ def check_database(path, current_format=True):
 	try:
 		tables = set([row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()])
 		columns = set([row[1] for row in conn.execute("PRAGMA table_info(snp_annotation)").fetchall()])
+	except sqlite3.DatabaseError:
+		'''a file that is not an sqlite database (a text file, a source file given as --database)
+			ended the command with a traceback'''
+		raise ConnectionError("{path} is not an sqlite database, give a CanSNP database built with CanSNPer2-database --create or CanSNPer2-download --scheme".format(path=path))
 	finally:
 		conn.close()
 	missing = [table for table in CANSNP_TABLES if table not in tables]

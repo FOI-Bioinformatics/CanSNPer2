@@ -8,6 +8,7 @@
   of the same name made the minimap2 reader lose SNPs and read others from the wrong sequence;
   a query with duplicate names gave positions in the wrong contig."""
 import os
+import sqlite3
 
 import pytest
 
@@ -20,8 +21,13 @@ GENOME = ">chr1 test\n" + "ACGT" * 250 + "\n"
 
 
 def make_db(path):
-	'''one SNP on chr1, the sequence of GENOME'''
+	'''one SNP on chr1, the sequence of GENOME, on the root of the tree (a node linked to
+		itself); typing refuses SNPs on nodes that are not in the tree'''
 	helpers.make_db(path, [("S.1", "chr1", 100, "A", "T")])
+	conn = sqlite3.connect(path)
+	conn.execute("INSERT INTO tree (parent, child, rank_i) VALUES (1, 1, 1)")
+	conn.commit()
+	conn.close()
 
 
 def project(tmp_path, queries, **kwargs):

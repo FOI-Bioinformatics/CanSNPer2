@@ -5,17 +5,25 @@ CreateDatabase is a simple script to simplify the creation of a new database
 
 #**** Imports ****
 import sys, os
+import shutil
 import sqlite3
+import tempfile
 
 import logging
 
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
-from CanSNPer2.modules.ModifyTree import InputError
+from CanSNPer2.modules.ModifyTree import InputError, TreeError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import TreeError as DatabaseTreeError
+from CanSNPer2.modules.SourceCheck import check_modification
+from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
+from CanSNPer2.modules.SchemeInfo import (STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice,
+	build_info, modified_info, write_scheme_info)
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__, COMMANDS_HELP  ## __version__ used by the --version flag (issue #119)
 import CanSNPer2.modules
@@ -61,6 +69,12 @@ def get_arguments():
 														choices=supported_input, 				help="Select source file type")
 	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
 	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="build a database from the source files written by --export (--tree --annotation --references), written to --database")
+	create_database.add_argument('--scheme_name',   metavar='',                                 help="with --create or --import: the name of the scheme, recorded in the database")
+	create_database.add_argument('--scheme_status', metavar='',                                 help="with --create or --import: the status of the scheme, verified, draft or unknown, recorded in the database")
+	create_database.add_argument('--scheme_source', metavar='',                                 help="with --create or --import: where the scheme files came from (a repository or folder), recorded in the database")
+
+	info_database = parser.add_argument_group("Database information")
+	info_database.add_argument('--info',         action='store_true',                           help="print the scheme information the database records (scheme, status, source, CanSNPer2 version) and exit")
 
 
 	convert_database = parser.add_argument_group("Convert from the format before 2.3.0")
@@ -147,7 +161,10 @@ def convert(args, logger):
 			if args.references:
 				references.update(references_from_file(args.references))
 			files = genome_files(args.refdir, database_genomes(source), references)
-			count = convert_database(source, target, files, sequences=sequences)
+			'''the converted database records that it was converted by this version; the
+				scheme and its status are not known from the old database'''
+			scheme_info = build_info(status="unknown", source="converted from {name}".format(name=os.path.basename(source)))
+			count = convert_database(source, target, files, sequences=sequences, scheme_info=scheme_info)
 	except (ConversionError, ConnectionError, sqlite3.Error, OSError) as e:
 		'''every failure of the conversion is one error message and exit code 1, not a traceback'''
 		logger.error(str(e))
@@ -158,11 +175,93 @@ def convert(args, logger):
 	return 0
 
 
-def main():
+def modify(args, logger):
+	'''--mod_file (with --annotation and --references) and --remove change an existing database.
+		The loaders used to skip a SNP on an unknown node or genome and a short row with a warning,
+		and to ignore a failed insert, and the command ended with exit status 0 and a database
+		that had changed in part. Now the changes are made on a copy beside the database: the
+		tree is changed first, the SNP and references files are then checked against the tree
+		and the reference genomes of the copy (SourceCheck.check_modification), and the copy
+		replaces the database only when every step succeeded and it passes check_database.
+		A run that fails leaves the database byte-identical. A run that succeeds marks the
+		scheme_info of the database as modified (SchemeInfo.modified_info), so a changed
+		database no longer claims to be the published scheme. A database given as a symbolic link
+		is resolved first, so the file it points to is replaced and the link is kept. Returns
+		the exit code.'''
+	database = args.database
+	target = os.path.realpath(database)
+	work = None
+	modifier = None
+	try:
+		fd, work = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(target)), suffix=".part",
+			dir=os.path.dirname(target))
+		os.close(fd)
+		shutil.copyfile(target, work)
+		shutil.copymode(target, work) ## the database keeps its mode, not the 0600 of mkstemp
+		options = dict(vars(args))
+		options["database"] = work
+		modifier = ModifyCanSNPer2Database(**options)
+		if args.remove:
+			modifier.remove_branch(args.parent)
+		else:
+			modifier.update_database()
+			problems = check_modification(work, annotation=args.annotation or None,
+				references=args.references or None, name=database)
+			if problems:
+				raise SourceFileError("The files cannot be added to {db}, {n} problem(s):\n  {list}".format(
+					db=database, n=len(problems), list="\n  ".join(problems)))
+			if args.references:
+				'''the references first, so the new SNPs can be placed on new genomes'''
+				logger.info("Load new genomes!")
+				modifier.load_genome_reference_file(args.references)
+			if args.annotation:
+				logger.info("Load new SNP annotations!")
+				modifier.load_annotation_file(args.annotation)
+		modifier.close()
+		modifier = None
+		check_database(work)
+		'''the changed database no longer matches the scheme files it was built from, so its
+			scheme_info is marked: status unknown, commit +modified, the date and the version'''
+		conn = sqlite3.connect(work)
+		try:
+			write_scheme_info(conn, modified_info(read_scheme_info(work)))
+		finally:
+			conn.close()
+		os.replace(work, target)
+	except (InputError, TreeError, DatabaseTreeError, SourceFileError, DatabaseWriteError, ConnectionError,
+			sqlite3.Error, OSError) as e:
+		'''messages name the database, not the copy that was worked on'''
+		message = getattr(e, "message", None) or str(e)
+		if work is not None:
+			message = message.replace(work, database)
+		logger.error(message)
+		logger.error("{db} was not changed".format(db=database))
+		return 1
+	finally:
+		if modifier is not None:
+			modifier.close()
+		if work is not None and os.path.exists(work):
+			os.remove(work)
+	return 0
+
+
+def command():
 	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
 	args = get_arguments()
 	logger = get_logger(args)
 	logger.debug(args)
+	scheme_options = [option for option, value in (("--scheme_name", args.scheme_name),
+		("--scheme_status", args.scheme_status), ("--scheme_source", args.scheme_source)) if value is not None]
+	if scheme_options and not (args.create or args.do_import):
+		logger.error("{options} {verb} recorded by --create and --import only, they cannot be "
+			"used with an existing database".format(options=", ".join(scheme_options),
+			verb="is" if len(scheme_options) == 1 else "are"))
+		exit(1)
+	if args.scheme_status is not None and args.scheme_status not in STATUSES:
+		logger.error("--scheme_status {status} is not a known status, give verified, draft or unknown".format(
+			status=args.scheme_status))
+		exit(1)
+	scheme_info = {"scheme": args.scheme_name, "status": args.scheme_status, "source": args.scheme_source}
 	if args.convert:
 		exit(convert(args, logger))
 	if args.do_import:
@@ -180,7 +279,7 @@ def main():
 			exit(1)
 		try:
 			counts = import_from_sources(args.tree, args.annotation, args.references,
-				args.database, tmpdir=args.tmpdir, verbose=args.verbose)
+				args.database, tmpdir=args.tmpdir, verbose=args.verbose, scheme_info=scheme_info)
 		except DatabaseImportError as e:
 			logger.error(str(e))
 			exit(1)
@@ -200,6 +299,17 @@ def main():
 		except ConnectionError as e:
 			logger.error(str(e))
 			exit(1)
+		if args.info:
+			info = read_scheme_info(args.database)
+			if not info:
+				print(MISSING_TEXT)
+			for key in ordered_keys(info):
+				## an empty value, such as known_issues of a scheme without any, is printed as none
+				print("{key}\t{value}".format(key=key, value=info[key] if info[key] not in (None, "") else "none"))
+			exit()
+	elif args.info:
+		logger.error("--info prints what an existing database records, it cannot be combined with --create!")
+		exit(1)
 	if args.remove:
 		'''--remove was documented but no code ever read the flag, so it silently did nothing (issue #147)'''
 		if args.create:
@@ -211,14 +321,10 @@ def main():
 		if not args.parent:
 			logger.error("--remove needs the branch to remove, give the branch root with --parent!")
 			exit(1)
-		try:
-			ModifyCanSNPer2Database(**vars(args)).remove_branch(args.parent)
-		except InputError as e:
-			logger.error(str(e))
-			exit(1)
-		exit()
+		exit(modify(args, logger))
 	if args.export: ## Dump database to file
 		outdir = args.outdir or "." ## without -o the export goes to the current directory (issue #132)
+		log_scheme_notice(args.database, logger) ## the scheme_info table itself is not exported
 		if args.export_format == "newick":
 			logger.info("Export Newick tree!")
 			NT = NewickTree(args.database, outdir=outdir)
@@ -243,30 +349,10 @@ def main():
 			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
-		'''This should be reprogrammed so that one can add annotations without supplying a mod file!'''
-		try:
-			CanSNPer2Mod_DB = ModifyCanSNPer2Database(**vars(args))
-			CanSNPer2Mod_DB.update_database()
-		except InputError as e:
-			'''a modification without a mod_file or mod_database is a usage error, not a crash (issue #150)'''
-			logger.error(str(e))
-			exit(1)
-		if args.annotation:
-			'''Update for snp annotations supplied, run load annotation file function'''
-			logger.info("Load new SNP annotations!")
-			try:
-				CanSNPer2Mod_DB.load_annotation_file(args.annotation)
-			except SourceFileError as e:
-				'''a source file without the expected columns would otherwise crash the loader (issue #154)'''
-				logger.error(str(e))
-				exit(1)
-		if args.references:
-			logger.info("Load new genomes!")
-			try:
-				CanSNPer2Mod_DB.load_genome_reference_file(args.references)
-			except SourceFileError as e:
-				logger.error(str(e))
-				exit(1)
+		'''This should be reprogrammed so that one can add annotations without supplying a mod file!
+			A modification without a mod_file is a usage error, not a crash (issue #150); a source
+			file without the expected columns is refused, not a crash in the loader (issue #154)'''
+		exit(modify(args, logger))
 	elif args.annotation or args.tree or args.references:
 		'''a database can also be created from only a tree or only a reference list (issue #129)'''
 		if not args.database:
@@ -286,16 +372,29 @@ def main():
 				"choose a new name or remove it first".format(db=args.database))
 			exit(1)
 		try:
-			CanSNPDB = CanSNPDatabase(**vars(args))
-		except (InputError,SourceFileError,DatabaseWriteError) as e:
+			CanSNPDB = CanSNPDatabase(scheme_info=scheme_info, **vars(args))
+		except (InputError,TreeFileError,SourceFileError,DatabaseWriteError,sqlite3.Error,OSError) as e:
+			'''a tree, node, link, reference or SNP that could not be written ends the build'''
 			logger.error(str(e))
 			if os.path.exists(args.database):
 				'''the file did not exist before this run, so a database that was started is incomplete'''
 				os.remove(args.database)
 			exit(1)
+		except Exception:
+			'''an unexpected error is reported by the top-level handler; the started database
+				is removed first, as for the known errors above'''
+			if os.path.exists(args.database):
+				os.remove(args.database)
+			raise
 	else:
 		logger.error("No datafile supplied, nothing to process!")
 		exit(1)
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if __name__ == "__main__":
 	'''without this guard "python -m CanSNPer2.SNPDatabase" parsed its arguments and then did nothing (issue #128)'''

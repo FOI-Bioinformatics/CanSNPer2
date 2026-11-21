@@ -18,7 +18,9 @@ The same layout is read from another GitHub repository (a fork, or a repository 
 schemes) with GitHubSchemeSource(repo="owner/name"), and from a local directory, such as a
 clone or a folder of custom schemes, with LocalSchemeSource. Only schemes/<name>/ with its
 three files is required; schemes.toml, the README with its Status and the manifest are used
-when they are present.
+when they are present. From GitHub, a verified scheme without a manifest, or with a file the
+manifest records no hash for, is refused unless allow_unverified is given; a draft and a
+local directory are built with a warning.
 '''
 
 import datetime
@@ -27,6 +29,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import subprocess
 import tempfile
 import tomllib
@@ -88,6 +91,8 @@ class SchemeSource(object):
 		an optional schemes.toml and optional manifests under database/. Subclasses say where the
 		files are read from (raw, paths) and how that place is recorded (location, provenance_fields)'''
 	manifest_mismatch_is_error = True
+	## a verified scheme whose files cannot be checked against a manifest is refused
+	missing_manifest_is_error = True
 
 	def __init__(self):
 		self._config = None
@@ -103,12 +108,42 @@ class SchemeSource(object):
 		'''the collection, as it is named in messages'''
 		raise NotImplementedError
 
+	def where(self):
+		'''the collection after a scheme name in a message, such as "on owner/name@ref"'''
+		raise NotImplementedError
+
+	def old_format_hint(self):
+		'''what to do with a scheme of this collection that has joined positions'''
+		raise NotImplementedError
+
 	def list_hint(self):
 		'''the command that lists the schemes of this collection'''
 		raise NotImplementedError
 
 	def provenance_fields(self, hashes):
 		raise NotImplementedError
+
+	def source_name(self):
+		'''the collection as the scheme_info table records it: owner/name or a folder'''
+		raise NotImplementedError
+
+	def known_issues(self, name):
+		'''The snp_ids that schemes.toml lists under known_issues for the scheme, as a
+			comma-separated string. A schemes.toml that cannot be read, or that has no entry
+			for the scheme, gives an empty string'''
+		try:
+			entry = self.config().get(name, {})
+		except SchemeError as e:
+			logger.warning("The known issues of {name} could not be read: {e}".format(name=name, e=e))
+			return ""
+		issues = entry.get("known_issues", []) if isinstance(entry, dict) else []
+		if isinstance(issues, str):
+			issues = issues.split(",")
+		elif not isinstance(issues, list):
+			logger.warning("known_issues of {name} in schemes.toml of {loc} is not a list of snp_ids, it is not recorded".format(
+				name=name, loc=self.location()))
+			return ""
+		return ",".join(str(snp).strip() for snp in issues if str(snp).strip())
 
 	def config(self):
 		'''The entries of schemes.toml; a scheme without an entry follows the naming convention'''
@@ -165,9 +200,10 @@ class SchemeSource(object):
 			schemes.append((name, self.status(self.scheme_files(name)["readme"])))
 		return schemes
 
-	def download(self, name, directory):
+	def download(self, name, directory, allow_unverified=False):
 		'''Copy the scheme files of name into directory and check them against the manifest.
-			Returns the local paths and the provenance record'''
+			Returns the local paths and the provenance record. allow_unverified: build a verified
+			scheme from GitHub without a manifest, or with files the manifest has no hash for'''
 		files = self.scheme_files(name)
 		local = {}
 		hashes = {}
@@ -179,12 +215,14 @@ class SchemeSource(object):
 				if role == "snp":
 					raise SchemeError("There is no scheme {name} in {loc}, {hint} lists those there are".format(name=name, loc=self.location(), hint=self.list_hint()))
 				raise SchemeError("The scheme {name} has no {path} in {loc}".format(name=name, path=path, loc=self.location()))
+			if role == "snp":
+				self.check_format(name, data)
 			local[role] = os.path.join(directory, os.path.basename(path))
 			with open(local[role], "wb") as out:
 				out.write(data)
 			hashes[path] = sha256(data)
-		self.verify(name, files["manifest"], hashes)
 		status = self.status(files["readme"])
+		self.verify(name, files["manifest"], hashes, status=status, allow_unverified=allow_unverified)
 		if status == "draft":
 			logger.warning("The scheme {name} is a draft: it is in {loc} but has not been verified yet".format(name=name, loc=self.location()))
 		provenance = {
@@ -198,15 +236,33 @@ class SchemeSource(object):
 		provenance.update(self.provenance_fields(hashes))
 		return local, provenance
 
-	def verify(self, name, manifest_path, hashes):
+	def check_format(self, name, data):
+		'''A branch from before 2.3.0 has SNP positions along the joined reference sequences.
+			The SNP file check would refuse it with the --convert hint, which is meant for a
+			source file of the user, not for a scheme fetched with --scheme'''
+		header = data.decode(errors="replace").split("\n", 1)[0].rstrip("\r").lstrip("#").split("\t")
+		if "position" in header and "sequence_position" not in header:
+			raise SchemeError("scheme {name} {where} uses positions on the joined reference (before 2.3.0); "
+				"{hint}".format(name=name, where=self.where(), hint=self.old_format_hint()))
+
+	def unverified(self, name, status, allow_unverified, problem):
+		'''A file that cannot be checked against the manifest. A verified scheme from GitHub is
+			refused, unless allow_unverified is given; otherwise the problem is a warning'''
+		if self.missing_manifest_is_error and status == "verified" and not allow_unverified:
+			raise SchemeError("{problem}; the files of the verified scheme {name} cannot be checked. "
+				"Give --allow_unverified to build it without this check".format(problem=problem, name=name))
+		logger.warning("{problem}, the files of {name} cannot be checked".format(problem=problem, name=name))
+
+	def verify(self, name, manifest_path, hashes, status=None, allow_unverified=False):
 		'''Compare the files with the SHA-256 the manifest records for them. Fetched from GitHub,
 			a difference means a damaged transfer or a scheme changed without a rebuild, and the
 			files are not used. In a local directory it means the files were edited after the
-			manifest was written, which is reported'''
+			manifest was written, which is reported. A missing manifest or hash: see unverified'''
 		try:
 			manifest = json.loads(self.raw(manifest_path).decode())
 		except NotFound:
-			logger.warning("{path} was not found, the files of {name} cannot be checked".format(path=manifest_path, name=name))
+			self.unverified(name, status, allow_unverified, "{path} was not found in {loc}".format(
+				path=manifest_path, loc=self.location()))
 			return
 		except ValueError as e:
 			raise SchemeError("{path} could not be read: {e}".format(path=manifest_path, e=e))
@@ -214,7 +270,9 @@ class SchemeSource(object):
 		matched = True
 		for path, digest in sorted(hashes.items()):
 			if path not in recorded:
-				logger.warning("{manifest} records no hash for {path}, it is not checked".format(manifest=manifest_path, path=path))
+				self.unverified(name, status, allow_unverified, "{manifest} records no hash for {path}".format(
+					manifest=manifest_path, path=path))
+				matched = False
 			elif recorded[path] != digest:
 				if self.manifest_mismatch_is_error:
 					raise SchemeError("{path} does not match the SHA-256 in {manifest}: the download is damaged or the scheme was changed without being rebuilt".format(path=path, manifest=manifest_path))
@@ -281,9 +339,18 @@ class GitHubSchemeSource(SchemeSource):
 	def location(self):
 		return "{ref} of {repo}".format(ref=self.ref, repo=self.repo)
 
+	def where(self):
+		return "on {repo}@{ref}".format(repo=self.repo, ref=self.ref)
+
+	def old_format_hint(self):
+		return "use CanSNPer2 2.2 for it, or a branch converted for 2.3.0"
+
 	def list_hint(self):
 		repo = "" if self.repo == DATA_REPO else " --repo {repo}".format(repo=self.repo)
 		return "CanSNPer2-download --list_schemes{repo} --branch {ref}".format(repo=repo, ref=self.ref)
+
+	def source_name(self):
+		return self.repo
 
 	def provenance_fields(self, hashes):
 		return {
@@ -298,6 +365,7 @@ class LocalSchemeSource(SchemeSource):
 		custom schemes. Files are read as they are on disk; when the directory is a git
 		checkout, its commit and any scheme file with uncommitted changes are recorded'''
 	manifest_mismatch_is_error = False
+	missing_manifest_is_error = False
 
 	def __init__(self, directory):
 		super().__init__()
@@ -326,6 +394,12 @@ class LocalSchemeSource(SchemeSource):
 	def location(self):
 		return self.directory
 
+	def where(self):
+		return "in {d}".format(d=self.directory)
+
+	def old_format_hint(self):
+		return "use CanSNPer2 2.2 for it, or convert its SNP file with CanSNPer2-database --convert"
+
 	def list_hint(self):
 		return "CanSNPer2-download --list_schemes --data_dir {d}".format(d=self.directory)
 
@@ -336,6 +410,9 @@ class LocalSchemeSource(SchemeSource):
 		except OSError:
 			return None
 		return result.stdout if result.returncode == 0 else None
+
+	def source_name(self):
+		return self.directory
 
 	def provenance_fields(self, hashes):
 		fields = {"repository": self.directory, "ref": None, "commit": None}
@@ -359,32 +436,65 @@ def provenance_path(database):
 	return base + ".source.json"
 
 
-def build_scheme(name, database, ref="master", overwrite=False, source=None):
+def build_scheme(name, database, ref="master", overwrite=False, source=None, allow_unverified=False):
 	'''Fetch scheme name from CanSNPer2-data at ref and build it into database.
 		The database is built under a temporary name and moved into place only when complete,
-		so a failed build leaves no partial database behind'''
+		so a failed build leaves no partial database behind. An sqlite error or an OSError
+		while the database is built, moved into place or recorded is raised as SchemeError'''
 	from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
+	from CanSNPer2.modules.DatabaseConnection import ConnectionError as DatabaseConnectionError
 	if os.path.exists(database) and not overwrite:
 		raise SchemeError("{db} already exists, use --overwrite to replace it".format(db=database))
 	if source is None:
 		source = GitHubSchemeSource(ref=ref)
 	target_dir = os.path.dirname(os.path.abspath(database))
-	os.makedirs(target_dir, exist_ok=True)
+	try:
+		os.makedirs(target_dir, exist_ok=True)
+	except OSError as e:
+		raise SchemeError("The folder {d} for {db} could not be made: {e}".format(d=target_dir, db=database, e=e))
 	with tempfile.TemporaryDirectory(prefix="cansnper2_scheme_") as tmpdir:
-		local, provenance = source.download(name, tmpdir)
-		fd, partial = tempfile.mkstemp(suffix=".db.part", dir=target_dir)
-		os.close(fd)
-		os.remove(partial) ## the database loader creates the file itself
+		local, provenance = source.download(name, tmpdir, allow_unverified=allow_unverified)
+		commit = provenance.get("commit") or "unknown"
+		if provenance.get("commit") and provenance.get("uncommitted_sources"):
+			## the commit alone does not describe scheme files with uncommitted changes
+			commit += "+uncommitted"
+		scheme_info = {
+			"scheme": name,
+			"status": provenance["status"] or "unknown",
+			"source": source.source_name(),
+			"ref": provenance.get("ref"),
+			"commit": commit,
+			"known_issues": source.known_issues(name),
+		}
+		if scheme_info["known_issues"]:
+			logger.warning("schemes.toml lists known issues for {name}: {snps}; calls at these SNPs may be unreliable".format(
+				name=name, snps=scheme_info["known_issues"].replace(",", ", ")))
+		partial = None
 		try:
-			CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["snp"],
-							references=local["references"], source_type=provenance["source_type"], verbose=False)
-			os.replace(partial, database)
+			try:
+				fd, partial = tempfile.mkstemp(suffix=".db.part", dir=target_dir)
+				os.close(fd)
+				os.remove(partial) ## the database loader creates the file itself
+				CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["snp"],
+								references=local["references"], source_type=provenance["source_type"], verbose=False,
+								scheme_info=scheme_info)
+			except (sqlite3.Error, OSError, DatabaseConnectionError) as e:
+				raise SchemeError("The database {db} could not be built from the scheme {name}: {e}".format(
+					db=database, name=name, e=e))
+			try:
+				os.replace(partial, database)
+			except OSError as e:
+				raise SchemeError("The database {db} could not be written: {e}".format(db=database, e=e))
 		finally:
-			if os.path.exists(partial):
+			if partial is not None and os.path.exists(partial):
 				os.remove(partial)
-	with open(provenance_path(database), "w") as out:
-		json.dump(provenance, out, indent=2, sort_keys=True)
-		out.write("\n")
+	try:
+		with open(provenance_path(database), "w") as out:
+			json.dump(provenance, out, indent=2, sort_keys=True)
+			out.write("\n")
+	except OSError as e:
+		raise SchemeError("The database {db} was built, but its provenance file {path} could not be written: {e}".format(
+			db=database, path=provenance_path(database), e=e))
 	logger.info("Built {db} from {name} in {loc} ({commit})".format(db=database, name=name,
 				loc=source.location(), commit=provenance["commit"] or "commit unknown"))
 	return provenance

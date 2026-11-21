@@ -2,6 +2,7 @@ import logging
 logger = logging.getLogger(__name__)
 from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
 from CanSNPer2.modules.SourceCheck import check_sources
+from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from importlib import import_module
 from datetime import date
 
@@ -100,6 +101,10 @@ class CanSNPDatabase(DatabaseFunctions):
 		if kwargs["annotation"]:
 			logger.info("Load annotation file!")
 			self.load_cansnp_annotation(kwargs["annotation"])
+		if kwargs["create"]:
+			'''a new database records the format, the CanSNPer2 version and the date it was built,
+				and what is known of the scheme: scheme_info is a dict of the keys of SchemeInfo'''
+			write_scheme_info(self.conn, build_info(**(kwargs.get("scheme_info") or {})))
 
 	def add_annotation(self, data, id=False,genome_i=False):
 		'''Add snp annotation to annotation table'''
