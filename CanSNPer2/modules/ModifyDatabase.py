@@ -3,7 +3,7 @@
 '''
 
 from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
-from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
 from CanSNPer2.modules.SourceCheck import register_genome_names
 from datetime import date
 import logging
@@ -91,7 +91,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 					genomes[key] = genome_i
 		genomes.update(self.genomes)
 		self.genomes = genomes
-		with open(annotation_file) as af:
+		with open_source(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
@@ -135,7 +135,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 
 	def load_genome_reference_file(self,reference_file):
 		'''Add new reference genomes from file!'''
-		with open(reference_file) as af:
+		with open_source(reference_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,GENOME_SOURCE_COLUMNS,reference_file)

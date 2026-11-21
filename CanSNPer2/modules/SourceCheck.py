@@ -18,12 +18,11 @@ check_modification() checks the files given to modify an existing database again
 nodes and the reference genomes that database already holds.
 '''
 
-import gzip
 import re
 import sqlite3
 from collections import Counter, OrderedDict
 
-from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT, SourceFileError
+from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT, SourceFileError, open_source
 
 BASES = ("A", "C", "G", "T")
 ## ASCII digits only: str.isdigit() also accepts characters such as superscripts
@@ -35,9 +34,7 @@ ACCESSION_RE = re.compile(r"^GC[AF]_[0-9]{9}\.[0-9]+$")
 
 
 def _open(path):
-	if str(path).endswith(".gz"):
-		return gzip.open(path, "rt")
-	return open(path)
+	return open_source(path)
 
 
 def check_tree(path, problems):
@@ -116,7 +113,7 @@ def check_references(path, problems, known=None, database=None, known_accessions
 	names = {}
 	genomes = Counter()
 	accessions = {}
-	with open(path) as references:
+	with open_source(path) as references:
 		headers = _header(references)
 		missing = [column for column in GENOME_SOURCE_COLUMNS if column not in headers]
 		if missing:
@@ -177,7 +174,7 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 		already holds, which a new row must not repeat'''
 	snp_ids = Counter()
 	positions = Counter()
-	with open(path) as snps:
+	with open_source(path) as snps:
 		headers = _header(snps)
 		if "position" in headers and "sequence_position" not in headers:
 			problems.append("{0}:1: this SNP file cannot be used. {1}".format(path, JOINED_FORMAT_HINT))

@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, gzip
 import sqlite3
 
 '''
@@ -46,6 +46,15 @@ class DatabaseWriteError(Exception):
 		taxonomy connection only logs a failed insert and returns the exception, so the
 		loaders check the result and raise this instead of finishing with exit status 0'''
 	pass
+
+def open_source(path):
+	'''open a tree, SNP, references or modification source file as text. The encoding is
+		utf-8-sig, so a byte order mark at the start of the file (saved by some editors as
+		"UTF-8 with BOM") is dropped instead of becoming part of the first name; a .gz file
+		is read compressed'''
+	if str(path).endswith(".gz"):
+		return gzip.open(path, "rt", encoding="utf-8-sig")
+	return open(path, encoding="utf-8-sig")
 
 def check_source_headers(headers,required,filename):
 	'''source files are read by column name, a file without the header row, or with renamed columns,
@@ -243,7 +252,7 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 		if not annotation or not os.path.exists(annotation):
 			raise SourceFileError("The annotation file {file} does not exist, no annotations could be loaded!".format(file=annotation))
 
-		with open(annotation) as f:
+		with open_source(annotation) as f:
 			headers = f.readline().strip().lstrip("#").split("\t")
 			'''Define new headers as they must match the database'''
 			headers = ["node_id", "snp_id", "sequence", "sequence_position", "ancestral_base","derived_base","reference","date","genome_i"]

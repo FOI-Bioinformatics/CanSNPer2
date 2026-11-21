@@ -7,7 +7,7 @@ Ported from flextaxd.modules.ModifyTree to remove the flextaxd dependency (ISSUE
 using CanSNPer2's own database functions.
 '''
 
-from CanSNPer2.modules.DatabaseConnection import ModifyFunctions, NameNotFoundError
+from CanSNPer2.modules.DatabaseConnection import ModifyFunctions, NameNotFoundError, open_source
 import logging,os
 logger = logging.getLogger(__name__)
 import math,time
@@ -264,7 +264,7 @@ class ModifyTree(object):
 		'''Handle file modification'''
 		logger.debug(modfile)
 		logger.info("Parse modification file...")
-		with open(modfile, "r") as f:
+		with open_source(modfile) as f:
 			headers = f.readline().strip().split(self.sep)
 			if replace_parent:
 				new_root = [field.strip() for field in f.readline().strip().split(self.sep)]
@@ -382,7 +382,7 @@ class ModifyTree(object):
 			logger.info("Modification type is file...")
 			if self.replace_parent:  ## Update the name of the parent to match with parent of "incoming" file
 				logger.info("Replace parent option initiated,  change the name of parent in the database to allow merge")
-				with open(self.modfile, "r") as f:
+				with open_source(self.modfile) as f:
 					headers = f.readline().strip().split(self.sep)
 					branchroot = f.readline().strip().split(self.sep)
 					if not branchroot[0].strip(): ## replace_parent needs the branch root name in the first data row (issue #83/#84)
@@ -414,7 +414,7 @@ class ModifyTree(object):
 		updated = 0
 		added = 0
 		skipped = []
-		with open(genomeid2taxid) as f:
+		with open_source(genomeid2taxid) as f:
 			for row in f:
 				try:
 					if len(row.strip().split(self.sep)) > 2:
@@ -534,7 +534,7 @@ class ModifyTree(object):
 		logger.info("Update node names in the database from {refdict}".format(refdict=refdict))
 		updated = 0
 		added = 0
-		with open(refdict) as f:
+		with open_source(refdict) as f:
 			for row in f:
 				try:
 					old_name,name = row.strip().split(self.sep)

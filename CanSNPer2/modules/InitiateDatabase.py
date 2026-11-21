@@ -1,6 +1,6 @@
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
 from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from importlib import import_module
@@ -154,7 +154,7 @@ class CanSNPDatabase(DatabaseFunctions):
 	def load_genome_annotation_file(self,annotation_file):
 		self.genomes = {}
 		owners = {}
-		with open(annotation_file) as f:
+		with open_source(annotation_file) as f:
 			headers = f.readline().lstrip("#").strip().split("\t")
 			#dataArr = []
 			logging.debug(headers)
@@ -190,7 +190,7 @@ class CanSNPDatabase(DatabaseFunctions):
 			for genome_i, genome in self.conn.execute("SELECT id,genome FROM snp_references"):
 				self.genomes[genome] = genome_i
 		logger.debug(self.genomes)
-		with open(annotation_file) as af:
+		with open_source(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)

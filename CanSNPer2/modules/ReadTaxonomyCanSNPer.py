@@ -16,7 +16,7 @@ __email__ = "bioinformatics@foi.se"
 __date__ = "2020-01-17"
 __status__ = "Production"
 
-from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions, DatabaseWriteError, open_source
 import logging
 import gzip
 import sys
@@ -53,7 +53,10 @@ class ReadTaxonomyBase(object):
 		self.ids = 0
 
 	def zopen(self, path,*args, **kwargs):
-		'''Redefine open to handle zipped files automatically'''
+		'''Redefine open to handle zipped files automatically; a file read as text is read
+			with open_source, so a byte order mark is dropped'''
+		if not kwargs and (not args or args == ("r",)):
+			return open_source(path)
 		if path.endswith(".gz"):
 			if str(*args) in ["r","w"] and sys.version_info.major >= 3:
 				## Python version three and above interprets binary formats as binary, add t (rt) to get text returned
