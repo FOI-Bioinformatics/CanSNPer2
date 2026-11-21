@@ -13,6 +13,9 @@
 #
 # Data it needs from the project (issue #185, the data lives next to the repository):
 #   ../CanSNPer2-data/schemes/francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
+#   (the normal CanSNPer2-data checkout, which holds the converted schemes once they are merged;
+#   override the folder with DATA=/path/to/CanSNPer2-data. Before that merge, run the gate
+#   against the converted worktree: DATA=$ROOT/CanSNPer2-data-perseq bash tests/release_test.sh)
 #   references/*.fna in this repository, and ../../test_data/*.fasta for the known answers
 # Override the root with ROOT=/path/to/project when the layout is different.
 
@@ -23,7 +26,9 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 ROOT=${ROOT:-$(cd "$REPO/.." && pwd)}
 PKG=$REPO
-SRC=$ROOT/CanSNPer2-data/schemes/francisella_tularensis
+# CanSNPer2-data with the converted schemes (per-sequence positions, 2.3.0)
+DATA=${DATA:-$ROOT/CanSNPer2-data}
+SRC=$DATA/schemes/francisella_tularensis
 PY=${PYTHON:-python}
 OUT=${OUT:-$ROOT/test-run/release_gate}
 
@@ -225,20 +230,20 @@ fi
 say "== real alignments: the known answers"
 cmd align-query ok "5 alignments written" "$PY" -m CanSNPer2.modules.runMauve "$OUT/inputs/query.fna" \
     --refdir "$OUT/refs" --tmpdir "$OUT/tmp_align" --logs "$OUT/logs/align" --outdir "$OUT/align" --keep_temp
-expect "five alignments" "5" "$(ls "$OUT/align" | wc -l | tr -d ' ')"
+expect "five alignments" "5" "$(ls "$OUT"/align/*.xmfa | wc -l | tr -d ' ')"
+expect "five sequence tables" "5" "$(ls "$OUT"/align/*.xmfa.sequences | wc -l | tr -d ' ')"
 expect "mauve left no sslist in the input folders" "0" "$(find "$OUT/refs" "$OUT/inputs" -name '*.sslist' | wc -l | tr -d ' ')"
 cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
 expect "query_snps.txt lines" "20" "$(wc -l < "$OUT/res_query/query_snps.txt")"
 expect "query_not_called.txt lines" "313" "$(wc -l < "$OUT/res_query/query_not_called.txt")"
-# issue #23: both tables carry the query trace columns (Name, Reference, Pos, QuerySeq,
-# QueryPosition, Ancestral base, Derived base, Target base, Edge flag, ReferenceSeq,
-# ReferenceSeqPosition)
-expect "snps table columns (#23)" "11" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
-expect "not_called table columns (#23)" "11" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
-BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($4=="" || $5=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+# issue #23: both tables carry the query trace columns (Name, Reference,
+# Sequence, Pos, QuerySeq, QueryPosition, Ancestral base, Derived base, Target base, Edge flag)
+expect "snps table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
+expect "not_called table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
+BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 expect "query trace columns filled in every SNP row" "0" "$BADQ"
-QPNUM=$(awk -F'\t' 'NR>1 && $5 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+QPNUM=$(awk -F'\t' 'NR>1 && $6 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 if [ "$QPNUM" -gt 0 ]; then
     printf '  ok    %-52s %s rows with a numeric QueryPosition\n' "query coordinates traced (#23)" "$QPNUM"
     PASSED=$((PASSED+1))
@@ -252,7 +257,7 @@ else
     printf '  FAIL  %-52s missing or empty\n' "query_tree.html written"; FAILED=$((FAILED+1))
 fi
 
-mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT/tmp_skip/CanSNPer2/"
+mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT"/align/*.xmfa.sequences "$OUT/tmp_skip/CanSNPer2/"
 cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
 expect "same snps through --skip_mauve" "20" "$(wc -l < "$OUT/res_skip/query_snps.txt")"
@@ -263,7 +268,7 @@ expect "same not-called through --skip_mauve" "313" "$(wc -l < "$OUT/res_skip/qu
 # tree html and the log (#27). The wide mask pushes those positions in artificially.
 cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_mask" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/mask" --skip_mauve --mask 20000
-NODATA=$(awk -F'\t' 'NR>1 && $8=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
+NODATA=$(awk -F'\t' 'NR>1 && $9=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
 COVERED=$("$PY" -c "
 nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_not_called.txt')) if i)
 sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('SNP path', 'Final SNP', 'Query file')))

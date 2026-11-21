@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 ## as it is. The database keeps no strain per SNP: the strain of the SNP's reference genome is
 ## written, as CanSNPCreator does. The date column is not written, it is not part of that
 ## header; a database built from the export gets the build date.
-SNP_COLUMNS = ("snp_id", "strain", "reference", "genome", "position", "derived_base", "ancestral_base")
+SNP_COLUMNS = ("snp_id", "strain", "reference", "genome", "sequence", "sequence_position", "derived_base",
+	"ancestral_base")
 
 
 class ExportError(Exception):
@@ -84,8 +85,8 @@ def export_source(database, outdir, name=None):
 		paths = tree_paths(conn)
 		references = conn.execute("SELECT {cols} FROM snp_references ORDER BY id".format(
 			cols=",".join(GENOME_SOURCE_COLUMNS))).fetchall()
-		snps = conn.execute("""SELECT a.snp_id, g.strain, a.reference, g.genome, a.position, a.derived_base,
-				a.ancestral_base
+		snps = conn.execute("""SELECT a.snp_id, g.strain, a.reference, g.genome, a.sequence, a.sequence_position,
+				a.derived_base, a.ancestral_base
 			FROM snp_annotation a LEFT JOIN snp_references g ON g.id = a.genome_i
 			ORDER BY a.node_id""").fetchall()
 	finally:

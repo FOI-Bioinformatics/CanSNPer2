@@ -12,25 +12,22 @@ import sqlite3
 
 import pytest
 
+import helpers
 from CanSNPer2.modules.NewickTree import NewickTree, load_annotations
 
 
 def make_db(path):
 	conn = sqlite3.connect(path)
-	conn.executescript("""
+	conn.executescript(helpers.SNP_ANNOTATION_TABLE + helpers.REFERENCES_TABLE + """
 		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
 		CREATE TABLE tree (parent integer, child integer, rank_i integer, unique (parent, child, rank_i));
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
-			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);
-		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6), strain varchar(200));
 		INSERT INTO snp_references (id, genome, strain) VALUES (5, 'REF', 'ref strain');
 		INSERT INTO nodes (id, name) VALUES (1, 'root'), (2, 'A.1'), (3, 'B.1'), (4, 'B.2'), (5, 'C.1');
 		INSERT INTO tree (parent, child, rank_i) VALUES (1, 1, 1), (1, 2, 1), (2, 3, 1), (2, 4, 1), (4, 5, 1);
 	""")
 	for node_id, snp_id, pos in ((2, "A.1", 10), (3, "B.1", 20), (4, "B.2", 30), (5, "C.1", 40)):
-		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, position, ancestral_base, derived_base,"
-			" reference, date, genome_i) VALUES (?, ?, ?, 'C', 'T', 'REF', '06/11/26', 5)", (node_id, snp_id, pos))
+		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, sequence, sequence_position, ancestral_base, derived_base,"
+			" reference, date, genome_i) VALUES (?, ?, 'chrI', ?, 'C', 'T', 'REF', '06/11/26', 5)", (node_id, snp_id, pos))
 	conn.commit()
 	conn.close()
 

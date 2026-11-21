@@ -33,7 +33,8 @@ class ModifyCanSNPer2Database(ModifyTree):
 			data["date"] = self.today.strftime("%d/%m/%y")
 		info = {
 				"snp_id":            data["snp_id"],
-				"position":         data["position"],
+				"sequence":          data["sequence"],
+				"sequence_position": data["sequence_position"],
 				"ancestral_base":     data["ancestral_base"],
 				"derived_base":        data["derived_base"],
 				"reference":         data["reference"],

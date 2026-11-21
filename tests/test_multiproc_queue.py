@@ -8,42 +8,47 @@ Two directions of the queue handling are checked:
     forever (that infinite join is what made the whole command freeze)."""
 import os
 import signal
-import sqlite3
 import time
 
 import pytest
 
+from helpers import make_db
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
+from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX
+from CanSNPer2.modules.ParsePAF import ParsePAF
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 
 
 def make_big_db(path, nsnp):
-	'''a database with nsnp custom SNPs registered against one reference (REF)'''
-	conn = sqlite3.connect(path)
-	conn.executescript("""
-		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
-		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
-			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);
-		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6));
-		INSERT INTO snp_references (id, genome) VALUES (5, 'REF');
-	""")
+	'''a database with nsnp custom SNPs registered against one reference (REF), all on its
+		sequence chr'''
 	positions = list(range(10, 10 + 40 * nsnp, 40))
-	for i, snp_id in enumerate("C.{0}".format(n) for n in range(1, nsnp + 1)):
-		conn.execute("INSERT INTO nodes (id, name) VALUES (?, ?)", (i + 1, snp_id))
-		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, position, ancestral_base, derived_base,"
-			" reference, date, genome_i) VALUES (?, ?, ?, 'A', 'T', 'REF', '06/11/26', 5)",
-			(i + 1, snp_id, positions[i]))
-	conn.commit()
-	conn.close()
+	make_db(path, [("C.{0}".format(n + 1), "chr", pos, "A", "T") for n, pos in enumerate(positions)])
 	return positions
 
 
+def make_paf(path, positions):
+	'''one minimap2 alignment covering every registered SNP, the query carries the derived base;
+		the reader of a PAF file is the AlignmentReader the queue handling is tested with'''
+	last = positions[-1] + 10
+	cs, at = [], 1
+	for pos in positions:
+		if pos > at:
+			cs.append("=" + "C" * (pos - at))
+		cs.append("*at")
+		at = pos + 1
+	cs.append("=" + "C" * (last - at + 1))
+	fields = ["query", last, 0, last, "+", "chr", last, 0, last, last, last, 60, "tp:A:P", "cs:Z:" + "".join(cs)]
+	with open(path, "w") as handle:
+		handle.write("\t".join(str(f) for f in fields) + "\n")
+
+
 def make_xmfa(path, positions):
-	'''one alignment block covering every registered SNP, target carries the derived base'''
-	last = positions[-1]
-	ref = ["C"] * (last + 10)
+	'''one progressiveMauve block covering every registered SNP, the query carries the derived
+		base; the reference sequence table that ProgressiveMauve.prepare writes is written next
+		to it'''
+	last = positions[-1] + 10
+	ref = ["C"] * last
 	target = list(ref)
 	for pos in positions:
 		ref[pos - 1] = "A"
@@ -51,23 +56,33 @@ def make_xmfa(path, positions):
 	with open(path, "w") as handle:
 		handle.write("#FormatVersion Mauve1\n============\n")
 		for seq in (ref, target):
-			handle.write("> 1:1-{0} + seq\n{1}\n".format(len(ref), "\n".join("".join(seq[i:i + 60]) for i in range(0, len(ref), 60))))
+			handle.write("> 1:1-{0} + seq\n{1}\n".format(last, "\n".join("".join(seq[i:i + 60]) for i in range(0, last, 60))))
+	with open(path + SEQUENCES_SUFFIX, "w") as handle:
+		handle.write("chr\t{0}\n".format(last))
 
 
-def test_large_custom_database_is_collected_completely(tmp_path):
+## the readers the queue handling is tested with: (reader class, alignment writer, file ending)
+READERS = [
+	pytest.param(ParsePAF, make_paf, "paf", id="minimap2"),
+	pytest.param(ParseXMFA, make_xmfa, "xmfa", id="progressiveMauve"),
+]
+
+
+@pytest.mark.parametrize("reader, write_alignment, suffix", READERS)
+def test_large_custom_database_is_collected_completely(tmp_path, reader, write_alignment, suffix):
 	'''>2000 SNPs per reference over four alignments: every queue item must be taken,
 		the queues may not fill up and drop workers (issue #41)'''
 	nsnp, nalign = 2500, 4
 	db = str(tmp_path / "big.db")
 	positions = make_big_db(db, nsnp)
-	xmfas = []
+	alignments = []
 	for n in range(nalign):
-		alignment = str(tmp_path / "REF_big{0}.xmfa".format(n))
-		make_xmfa(alignment, positions)
-		xmfas.append(alignment)
+		alignment = str(tmp_path / "REF_big{0}.{1}".format(n, suffix))
+		write_alignment(alignment, positions)
+		alignments.append(alignment)
 
 	obj = CanSNPer2(["query.fna"], workdir=str(tmp_path), tmpdir="tmp", logdir="logs", outdir="out")
-	snps, snp_info, called = obj.find_snps_multiproc(xmfa_obj=ParseXMFA(database=db), xmfa_files=xmfas)
+	snps, snp_info, called = obj.find_snps_multiproc(xmfa_obj=reader(database=db), xmfa_files=alignments)
 	assert len(snps) == nsnp
 	assert len(snp_info) == nsnp * nalign
 	assert len(called) == nsnp * nalign
@@ -182,15 +197,16 @@ def test_failed_alignment_is_not_typed_from(tmp_path):
 	assert "alignment could not be read to its end" in message
 
 
-def test_worker_opens_its_own_database_connection(tmp_path):
-	'''ParseXMFA carries the database path and connects inside run(), so the parent never
-		holds a cursor that its forked workers would read through (issue #49)'''
+@pytest.mark.parametrize("reader, write_alignment, suffix", READERS)
+def test_worker_opens_its_own_database_connection(tmp_path, reader, write_alignment, suffix):
+	'''an AlignmentReader carries the database path and connects inside run(), so the parent
+		never holds a cursor that its forked workers would read through (issue #49)'''
 	db = str(tmp_path / "one.db")
 	positions = make_big_db(db, 3)
-	alignment = str(tmp_path / "REF_one.xmfa")
-	make_xmfa(alignment, positions)
+	alignment = str(tmp_path / "REF_one.{0}".format(suffix))
+	write_alignment(alignment, positions)
 
-	parser = ParseXMFA(database=db)
+	parser = reader(database=db)
 	assert parser.database is False, "the parent connected to the database it hands to the workers"
 	obj = CanSNPer2(["query.fna"], workdir=str(tmp_path), tmpdir="tmp", logdir="logs", outdir="out")
 	snps, snp_info, called = obj.find_snps_multiproc(xmfa_obj=parser, xmfa_files=[alignment])

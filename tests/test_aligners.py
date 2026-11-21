@@ -9,30 +9,11 @@ import sys
 
 import pytest
 
+from helpers import make_db
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER, Aligner, ProgressiveMauve, get_aligner
 from CanSNPer2.modules.AlignmentReader import AlignmentReader
-from CanSNPer2.modules.CanSNPer2 import AlignmentError, CanSNPer2, MauveError
+from CanSNPer2.modules.CanSNPer2 import AlignmentError, CanSNPer2, MauveError, SNP_FILE_COLUMNS
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
-
-
-def make_db(path, genome, rows):
-	'''rows: (snp_id, position, ancestral_base, derived_base) against reference genome'''
-	conn = sqlite3.connect(path)
-	conn.executescript("""
-		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
-		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
-			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);
-		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6), strain varchar(6));
-	""")
-	conn.execute("INSERT INTO snp_references (id, genome, strain) VALUES (5, ?, ?)", (genome, genome))
-	for i, (snp_id, pos, anc, der) in enumerate(rows):
-		conn.execute("INSERT INTO nodes (id, name) VALUES (?, ?)", (i + 1, snp_id))
-		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, position, ancestral_base, derived_base, reference, date, genome_i)"
-			" VALUES (?, ?, ?, ?, ?, 'test', '06/11/26', 5)", (i + 1, snp_id, pos, anc, der))
-	conn.commit()
-	conn.close()
 
 
 def test_progressivemauve_is_the_default_aligner():
@@ -83,22 +64,25 @@ def test_mauve_alignment_files_and_reference_names(tmp_path):
 	assert obj.skip_mauve is True and obj.xmfa_files == files, "old attribute names still work"
 
 
-'''A toy aligner: the "alignment" is a list of "position<TAB>query base" lines for an
-ungapped query of the same length as the reference, written by a python one-liner.'''
+'''A toy aligner: the "alignment" is a list of "reference sequence<TAB>position<TAB>query base"
+lines for an ungapped query of the same length as a single-sequence reference, written by a
+python one-liner.'''
 TOY_SCRIPT = (
 	"import sys\n"
 	"ref, query, out, code = sys.argv[1:5]\n"
+	"name = open(ref).readline()[1:].split()[0]\n"
 	"seq = lambda p: ''.join(l.strip() for l in open(p) if not l.startswith('>'))\n"
-	"open(out, 'w').write(''.join('{0}\\t{1}\\n'.format(i + 1, b) for i, b in enumerate(seq(query))))\n"
+	"open(out, 'w').write(''.join('{0}\\t{1}\\t{2}\\n'.format(name, i + 1, b) for i, b in enumerate(seq(query))))\n"
 	"sys.exit(int(code))\n")
 
 
 class ToyReader(AlignmentReader):
 	def read_alignment(self, path):
 		rows = [line.split() for line in open(path)]
-		for position in self.snps_in(1, len(rows)):
-			pos, base = rows[position - 1]
-			self.observe(int(pos), base, int(pos), len(rows), query_name="q", query_pos=pos)
+		sequence = rows[0][0]
+		for position in self.snps_in(sequence, 1, len(rows)):
+			_name, pos, base = rows[position - 1]
+			self.observe(sequence, int(pos), base, int(pos), len(rows), query_name="q", query_pos=pos)
 
 
 class ToyAligner(Aligner):
@@ -118,8 +102,16 @@ class ToyAligner(Aligner):
 
 
 def toy_case(tmp_path, exitcode=0, **kwargs):
+	'''a root with A.1 below it and A.2 below A.1; the query carries the derived base of A.1
+		and the ancestral base of A.2. NewickTree roots the tree at the lowest node id, so the
+		root node is given id 0, below the ids make_db gives the SNPs'''
 	db = str(tmp_path / "toy.db")
-	make_db(db, "REF_A", [("A.1", 3, "G", "T"), ("A.2", 6, "C", "A")])
+	make_db(db, [("A.1", "chr", 3, "G", "T"), ("A.2", "chr", 6, "C", "A")], genome="REF_A")
+	conn = sqlite3.connect(db)
+	conn.execute("INSERT INTO nodes (id, name) VALUES (0, 'root')")
+	conn.executemany("INSERT INTO tree (parent, child, rank_i) VALUES (?, ?, 1)", [(0, 0), (0, 1), (1, 2)])
+	conn.commit()
+	conn.close()
 	refdir = tmp_path / "refs"
 	refdir.mkdir()
 	(refdir / "REF_A.fna").write_text(">chr\nACGTACGT\n")
@@ -140,9 +132,35 @@ def test_another_aligner_runs_through_the_whole_alignment_step(tmp_path):
 		references=obj.alignment_references)
 	assert snps == {"A.1": 1, "A.2": 2}
 	assert called == ["A.1"]
-	assert [row[:5] + row[7:] for row in snp_info] == [
-		["A.1", "REF_A", "3", "q", "3", "T", "edge"],
-		["A.2", "REF_A", "6", "q", "6", "C", "edge"]]
+	assert [row[:6] + row[8:] for row in snp_info] == [
+		["A.1", "REF_A", "chr", "3", "q", "3", "T", "edge"],
+		["A.2", "REF_A", "chr", "6", "q", "6", "C", "edge"]]
+
+
+def test_result_columns(tmp_path):
+	'''the result tables give the reference sequence and the position on that sequence'''
+	assert SNP_FILE_COLUMNS == ["Name", "Reference", "Sequence", "Pos", "QuerySeq", "QueryPosition",
+		"Ancestral base", "Derived base", "Target base", "Edge flag"]
+	obj, db, query = toy_case(tmp_path, export=True, min_required_hits=1)
+	obj.run(database=db)
+	lines = open(os.path.join(obj.outdir, "sample_snps.txt")).read().splitlines()
+	assert lines[0].split("\t") == SNP_FILE_COLUMNS
+	row = lines[1].split("\t")
+	assert row[0] == "A.1" and row[2] == "chr" and row[3] == "3"
+	assert len(row) == len(SNP_FILE_COLUMNS)
+	not_called = open(os.path.join(obj.outdir, "sample_not_called.txt")).read().splitlines()
+	assert not_called[0].split("\t") == SNP_FILE_COLUMNS
+	assert not_called[1].split("\t")[:4] == ["A.2", "REF_A", "chr", "6"]
+
+
+def test_dashboard_keeps_edge_reasons(tmp_path):
+	'''A.1 is observed at block_offset 3 of an 8 base block, within EDGE_MARGIN of the edge:
+		the dashboard row must list it, whatever column the edge flag is in'''
+	obj, db, query = toy_case(tmp_path, export=True, min_required_hits=1)
+	obj.run(database=db)
+	report = obj.sample_reports["sample"]
+	assert "A.1" in report["edge"]
+	assert any("alignment edge" in reason and "A.1" in reason for reason in report["reasons"])
 
 
 def test_a_failing_aligner_stops_the_run_or_skips_the_sample(tmp_path):

@@ -1,9 +1,26 @@
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
 from CanSNPer2.modules.SourceCheck import check_sources
 from importlib import import_module
 from datetime import date
+
+def snp_annotation_sql(table="snp_annotation"):
+	'''the CREATE statement of the snp_annotation table of the current format; the conversion
+		of a database from the format before 2.3.0 builds it under another name first'''
+	return """CREATE TABLE IF NOT EXISTS {table} (
+									node_id INTEGER PRIMARY KEY,
+									snp_id VARCHAR(6) ,
+									sequence VARCHAR(40),
+									sequence_position INTEGER,
+									ancestral_base VARCHAR(1),
+									derived_base VARCHAR(1),
+									reference VARCHAR(20),
+									date DATETIME,
+									genome_i INTEGER,
+									FOREIGN KEY (genome_i) REFERENCES genomes (genome_i)
+								);
+							""".format(table=table)
 
 def dynamic_import(abs_module_path, class_name):
 	module = import_module(".".join([abs_module_path,class_name]))
@@ -27,18 +44,7 @@ class CreateSNPDatabase(CreateDatabase):
 			self.create_cansnp_table()
 
 	def create_cansnp_table(self):
-		sql_create_SNP_table =      """CREATE TABLE IF NOT EXISTS snp_annotation (
-									node_id INTEGER PRIMARY KEY,
-									snp_id VARCHAR(6) ,
-									position INTEGER,
-									ancestral_base VARCHAR(1),
-									derived_base VARCHAR(1),
-									reference VARCHAR(20),
-									date DATETIME,
-									genome_i INTEGER,
-									FOREIGN KEY (genome_i) REFERENCES genomes (genome_i)
-								);
-							"""
+		sql_create_SNP_table = snp_annotation_sql()
 		sql_create_snp_references_table =  """CREATE TABLE IF NOT EXISTS snp_references (
 									id INTEGER PRIMARY KEY,
 									genome VARCHAR(6),
@@ -103,7 +109,8 @@ class CanSNPDatabase(DatabaseFunctions):
 			data["date"] = self.today.strftime("%d/%m/%y")
 		info = {
 				"snp_id":            data["snp_id"],
-				"position":         data["position"],
+				"sequence":          data["sequence"],
+				"sequence_position": data["sequence_position"],
 				"ancestral_base":     data["ancestral_base"],
 				"derived_base":        data["derived_base"],
 				"reference":         data["reference"],
@@ -114,6 +121,11 @@ class CanSNPDatabase(DatabaseFunctions):
 		if id is not False: ## the twin of issue #203 in the create path: an id of 0 is a real id
 			info["node_id"] = id
 		taxid_base = self.insert(info, table="snp_annotation")
+		if isinstance(taxid_base, Exception):
+			'''a failed insert was only logged as a warning, and --create then ended with exit
+				status 0 and a database that lacks the SNP'''
+			raise DatabaseWriteError("The SNP {snp} could not be written to {db}: {error}".format(
+				snp=data["snp_id"], db=self.database, error=taxid_base))
 		return taxid_base
 
 	def add_genome(self,data):
@@ -128,7 +140,11 @@ class CanSNPDatabase(DatabaseFunctions):
 				"assembly_name":         data["assembly_name"],
 				#"comment":             data["comment"]
 		}
-		return self.insert(info, table="snp_references")
+		genome_i = self.insert(info, table="snp_references")
+		if isinstance(genome_i, Exception):
+			raise DatabaseWriteError("The reference genome {genome} could not be written to {db}: {error}".format(
+				genome=data["genome"], db=self.database, error=genome_i))
+		return genome_i
 
 	def load_genome_annotation_file(self,annotation_file):
 		self.genomes = {}

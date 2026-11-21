@@ -10,18 +10,19 @@ import sys
 
 import pytest
 
+import helpers
 from CanSNPer2.modules.ExportDatabase import ExportError, export_source
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS
 from CanSNPer2.modules.SourceCheck import check_sources
 
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tA.1\tA.3\nR\tB.1\nR\tB.1\tB.2\n"
-SNPS = ("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\tdate\n"
-	"R\tsp\tPaper2020\tREF1\t10\tA\tG\t01/02/20\n"
-	"A.1\tsp\tPaper2020\tREF1\t100\tT\tC\t01/02/20\n"
-	"A.2\tsp\tPaper2021\tREF2\t200\tG\tA\t03/04/21\n"
-	"A.3\tsp\tPaper2021\tREF1\t300\tC\tT\t03/04/21\n"
-	"B.1\tsp\tPaper2020\tREF2\t400\tA\tC\t01/02/20\n")
+SNPS = ("\t".join(helpers.SNP_HEADER) + "\tdate\n"
+	"R\tsp\tPaper2020\tREF1\tCP000001.1\t10\tA\tG\t01/02/20\n"
+	"A.1\tsp\tPaper2020\tREF1\tCP000001.1\t100\tT\tC\t01/02/20\n"
+	"A.2\tsp\tPaper2021\tREF2\tCP000002.1\t200\tG\tA\t03/04/21\n"
+	"A.3\tsp\tPaper2021\tREF1\tCP000001.1\t300\tC\tT\t03/04/21\n"
+	"B.1\tsp\tPaper2020\tREF2\tCP000002.1\t400\tA\tC\t01/02/20\n")
 # REF2 has no assembly name: its row ends with an empty field
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
 	"REF1\tstrain one\tGCA_1.1\tGCF_1.1\tASM1v1\n"
@@ -34,11 +35,9 @@ def create(db, tree, snp, references):
 
 
 def source_db(tmp_path):
-	files = {}
-	for key, content in (("tree", TREE), ("snp", SNPS), ("references", REFERENCES)):
-		files[key] = str(tmp_path / ("src_" + key + ".txt"))
-		with open(files[key], "w") as out:
-			out.write(content)
+	header, _, body = SNPS.partition("\n")
+	files = helpers.write_sources(tmp_path, body.splitlines(), tree=TREE, references=REFERENCES,
+		name="src", header=header)
 	db = str(tmp_path / "scheme.db")
 	create(db, files["tree"], files["snp"], files["references"])
 	return db
@@ -50,7 +49,7 @@ def content(db):
 		"nodes": conn.execute("SELECT id,name FROM nodes ORDER BY id").fetchall(),
 		"links": conn.execute("""SELECT c.name, p.name, r.rank FROM tree t JOIN nodes c ON c.id=t.child
 			JOIN nodes p ON p.id=t.parent JOIN rank r ON r.rank_i=t.rank_i ORDER BY c.name""").fetchall(),
-		"snps": conn.execute("""SELECT a.node_id, a.snp_id, a.position, a.ancestral_base, a.derived_base,
+		"snps": conn.execute("""SELECT a.node_id, a.snp_id, a.sequence, a.sequence_position, a.ancestral_base, a.derived_base,
 			a.reference, g.genome FROM snp_annotation a JOIN snp_references g ON g.id=a.genome_i
 			ORDER BY a.node_id""").fetchall(),
 		"references": conn.execute("""SELECT genome,strain,genbank_id,refseq_id,assembly_name
@@ -81,16 +80,16 @@ def test_the_files_have_the_source_format(tmp_path):
 	files = export_source(source_db(tmp_path), str(tmp_path / "export"))
 	assert open(files["tree"]).read() == TREE
 	snp = open(files["snp"]).read().splitlines()
-	assert snp[0] == "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base"
+	assert snp[0] == "\t".join(helpers.SNP_HEADER)
 	# the strain is that of the SNP's reference genome; the date is not exported
-	assert snp[2] == "A.1\tstrain one\tPaper2020\tREF1\t100\tT\tC"
-	assert snp[3] == "A.2\tstrain two\tPaper2021\tREF2\t200\tG\tA"
+	assert snp[2] == "A.1\tstrain one\tPaper2020\tREF1\tCP000001.1\t100\tT\tC"
+	assert snp[3] == "A.2\tstrain two\tPaper2021\tREF2\tCP000002.1\t200\tG\tA"
 	assert open(files["references"]).read() == REFERENCES
 
 
 # the header that CanSNPer2-data/validate.py requires of a scheme's SNP file
-CANSNPER2_DATA_SNP_HEADER = ["snp_id", "strain", "reference", "genome", "position",
-	"derived_base", "ancestral_base"]
+CANSNPER2_DATA_SNP_HEADER = ["snp_id", "strain", "reference", "genome", "sequence",
+	"sequence_position", "derived_base", "ancestral_base"]
 
 
 def test_the_snp_header_is_the_one_CanSNPer2_data_requires(tmp_path):
@@ -116,6 +115,8 @@ def test_an_export_passes_CanSNPer2_data_validate(tmp_path):
 	spec = importlib.util.spec_from_file_location("cansnper2_data_validate", script)
 	validate = importlib.util.module_from_spec(spec)
 	spec.loader.exec_module(validate)
+	if "sequence_position" not in getattr(validate, "SNP_HEADER", ()):
+		pytest.skip("the CanSNPer2-data checkout still validates joined positions")
 	# a scheme as published there: accessions of the checked form, an assembly name on every
 	# reference (an empty last column is trailing whitespace to validate.py) and a SNP on
 	# every node (B.2 has none in the shared fixture)

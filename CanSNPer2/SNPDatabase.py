@@ -12,7 +12,7 @@ import logging
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.ModifyTree import InputError
-from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError
+from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError, DatabaseWriteError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
@@ -63,6 +63,10 @@ def get_arguments():
 	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="build a database from the source files written by --export (--tree --annotation --references), written to --database")
 
 
+	convert_database = parser.add_argument_group("Convert from the format before 2.3.0")
+	convert_database.add_argument('--convert',   action='store_true',                           help="convert a SNP source file (--annotation) or a database (--database) from positions along the joined reference sequences to positions on each reference sequence, written to -o")
+	convert_database.add_argument('--refdir',    metavar='',                                    help="folder with the reference files <genome>.fna used by --convert; missing files are downloaded")
+
 	modify_database = parser.add_argument_group("Database modifications")
 	modify_database.add_argument('--mod_file',     metavar='',                                 	help="File with modifications/update to the tree")
 	modify_database.add_argument('--parent',         metavar='',                                 	help="Node (or nodes matching tree file) from which to update/replace/remove")
@@ -110,11 +114,57 @@ def get_logger(args):
 	return logging.getLogger(__name__)
 
 
+def convert(args, logger):
+	'''--convert: a SNP source file or a database with positions along the joined reference
+		sequences (the format before 2.3.0) is converted to positions on each reference sequence.
+		It is handled before the database checks, which refuse the old format. Returns the exit code.'''
+	from CanSNPer2.modules.ConvertPositions import (ConversionError, convert_table, convert_database,
+		genome_files, table_genomes, database_genomes, references_from_file, references_from_database, check_target)
+	if bool(args.annotation) == bool(args.database):
+		logger.error("--convert converts either a SNP source file (--annotation) or a database (--database), give one of them!")
+		return 1
+	if not args.outdir:
+		logger.error("--convert writes the converted file to a folder, give it with -o/--outdir!")
+		return 1
+	if not args.refdir:
+		logger.error("--convert checks each SNP against its reference, give the folder with the reference files <genome>.fna with --refdir!")
+		return 1
+	source = args.annotation or args.database
+	target = os.path.join(args.outdir, os.path.basename(source))
+	sequences = set()
+	try:
+		check_target(source, target)
+		if args.annotation:
+			references = references_from_file(args.references) if args.references else None
+			files = genome_files(args.refdir, table_genomes(source), references)
+			count = convert_table(source, target, files, sequences=sequences)
+		else:
+			try:
+				check_database(source, current_format=False)
+			except ConnectionError as e:
+				raise ConversionError(str(e))
+			references = references_from_database(source)
+			if args.references:
+				references.update(references_from_file(args.references))
+			files = genome_files(args.refdir, database_genomes(source), references)
+			count = convert_database(source, target, files, sequences=sequences)
+	except (ConversionError, ConnectionError, sqlite3.Error, OSError) as e:
+		'''every failure of the conversion is one error message and exit code 1, not a traceback'''
+		logger.error(str(e))
+		return 1
+	print("converted {n} {snps} of {name} to positions on {m} reference {noun}, written to {target}".format(
+		n=count, snps="SNP" if count == 1 else "SNPs", name=os.path.basename(source), m=len(sequences),
+		noun="sequence" if len(sequences) == 1 else "sequences", target=target))
+	return 0
+
+
 def main():
 	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
 	args = get_arguments()
 	logger = get_logger(args)
 	logger.debug(args)
+	if args.convert:
+		exit(convert(args, logger))
 	if args.do_import:
 		'''import is the counterpart of --export: it reads the source triple and writes a
 			current-format database, so it is handled before the database checks below,
@@ -219,10 +269,29 @@ def main():
 				exit(1)
 	elif args.annotation or args.tree or args.references:
 		'''a database can also be created from only a tree or only a reference list (issue #129)'''
+		if not args.database:
+			logger.error("--create needs the new database to write, give it with --database!")
+			exit(1)
+		if os.path.exists(args.database):
+			'''--create into an existing file added the tree, the references and the SNPs a second
+				time; into a database from before 2.3.0 every SNP insert also failed and the
+				command still ended with exit status 0. An existing file is refused, as --import does,
+				and a database from before 2.3.0 is named as such with the conversion hint.'''
+			try:
+				check_database(args.database)
+			except ConnectionError as e:
+				logger.error(str(e))
+				exit(1)
+			logger.error("The database {db} already exists, --create builds a new database, "
+				"choose a new name or remove it first".format(db=args.database))
+			exit(1)
 		try:
 			CanSNPDB = CanSNPDatabase(**vars(args))
-		except (InputError,SourceFileError) as e:
+		except (InputError,SourceFileError,DatabaseWriteError) as e:
 			logger.error(str(e))
+			if os.path.exists(args.database):
+				'''the file did not exist before this run, so a database that was started is incomplete'''
+				os.remove(args.database)
 			exit(1)
 	else:
 		logger.error("No datafile supplied, nothing to process!")

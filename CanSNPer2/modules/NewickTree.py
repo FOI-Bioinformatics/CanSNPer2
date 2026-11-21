@@ -1182,7 +1182,7 @@ class NewickTree(object):
 
 	def get_no_data_info(self,snp_ids):
 		'''Look up the database annotation of the SNP nodes that no alignment carried a base for, in the
-			same columns as the SNP_info rows (Name, Reference, Pos, QuerySeq, QueryPosition, Ancestral
+			same columns as the SNP_info rows (Name, Reference, Sequence, Pos, QuerySeq, QueryPosition, Ancestral
 			base, Derived base, Target base, Edge flag), so the per sample output can list the positions
 			that were never compared instead of leaving them out of both result files (issue #27). The
 			target base is "N/A": there is no base there at all, which is different from a base that was
@@ -1195,19 +1195,20 @@ class NewickTree(object):
 		for i in range(0, len(names), 400):
 			chunk = names[i:i+400]
 			QUERY = '''SELECT snp_annotation.snp_id, COALESCE(snp_references.genome, snp_annotation.reference),
-							snp_annotation.position, snp_annotation.ancestral_base, snp_annotation.derived_base
+							snp_annotation.sequence, snp_annotation.sequence_position, snp_annotation.ancestral_base,
+							snp_annotation.derived_base
 						FROM snp_annotation
 						LEFT JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)
 						WHERE snp_annotation.snp_id IN ({marks})'''.format(marks=",".join(["?"]*len(chunk)))
-			for snp_id,genome,position,ancestral,derived in self.database.query(QUERY,insert_val=tuple(chunk),getres=True).fetchall():
+			for snp_id,genome,sequence,position,ancestral,derived in self.database.query(QUERY,insert_val=tuple(chunk),getres=True).fetchall():
 				'''the empty last column keeps the rows in the shape of SNP_FILE_COLUMNS, whose
 					edge flag cannot be computed for a position that no alignment carried; the
 					query columns are N/A for the same reason (issue #23)'''
-				rows.append([str(snp_id),str(genome),str(position),"N/A","N/A",str(ancestral),str(derived),"N/A",""])
+				rows.append([str(snp_id),str(genome),str(sequence),str(position),"N/A","N/A",str(ancestral),str(derived),"N/A",""])
 		found = set([row[0] for row in rows])
 		for name in names:
 			if name not in found:
 				'''a tree node without any annotation row: still a node the alignments never covered,
 					list it rather than hide it again'''
-				rows.append([name,"-","-","N/A","N/A","-","-","N/A",""])
+				rows.append([name,"-","-","-","N/A","N/A","-","-","N/A",""])
 		return sorted(rows, key=lambda row: row[0])
