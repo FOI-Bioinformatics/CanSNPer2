@@ -11,27 +11,25 @@ import sys
 
 import pytest
 
-from CanSNPer2.modules.ExportDatabase import export_source
+import helpers
+from CanSNPer2.modules.ExportDatabase import SNP_COLUMNS, export_source
 from CanSNPer2.modules.ImportDatabase import DatabaseImportError, import_from_sources
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tB.1\nR\tB.1\tB.2\n"
-SNPS = ("snp_id\treference\tgenome\tposition\tderived_base\tancestral_base\n"
-	"R\tPaper2020\tREF1\t10\tA\tG\n"
-	"A.1\tPaper2020\tREF1\t100\tT\tC\n"
-	"A.2\tPaper2021\tREF1\t200\tG\tA\n"
-	"B.1\tPaper2020\tREF2\t400\tA\tC\n")
+SNP_HEADER = ("snp_id", "reference", "genome", "sequence", "sequence_position", "derived_base", "ancestral_base")
+SNP_ROWS = [("R", "Paper2020", "REF1", "chrI", 10, "A", "G"),
+	("A.1", "Paper2020", "REF1", "chrII", 10, "T", "C"),
+	("A.2", "Paper2021", "REF1", "chrI", 200, "G", "A"),
+	("B.1", "Paper2020", "REF2", "CP000002.1", 400, "A", "C")]
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
 	"REF1\ts1\tGCA_1.1\tGCF_1.1\tASM1v1\n"
 	"REF2\ts2\tGCA_2.1\tGCF_2.1\t\n")
 
 
 def sources(tmp_path):
-	files = {}
-	for key, content in (("tree", TREE), ("snp", SNPS), ("references", REFERENCES)):
-		files[key] = str(tmp_path / ("src_" + key + ".txt"))
-		open(files[key], "w").write(content)
-	return files
+	return helpers.write_sources(tmp_path, SNP_ROWS, tree=TREE, references=REFERENCES, name="src",
+		header=SNP_HEADER)
 
 
 def clean_db(tmp_path):
@@ -49,7 +47,7 @@ def content(db):
 		"links": sorted((ch, p) for ch, p in conn.execute(
 			"SELECT c.name, p.name FROM tree t JOIN nodes c ON c.id=t.child JOIN nodes p ON p.id=t.parent "
 			"WHERE t.child<>t.parent")),
-		"snps": sorted((s, pos) for s, pos in conn.execute("SELECT snp_id, position FROM snp_annotation")),
+		"snps": sorted(conn.execute("SELECT snp_id, sequence, sequence_position FROM snp_annotation")),
 		"refs": sorted(g for (g,) in conn.execute("SELECT genome FROM snp_references")),
 	}
 	conn.close()
@@ -68,6 +66,22 @@ def test_export_then_import_round_trips(tmp_path):
 	assert content(target) == content(db)
 	assert roots(target) == 1
 	assert counts["snp_annotation"] == 4 and counts["snp_references"] == 2
+
+
+def test_export_import_round_trip_keeps_sequences(tmp_path):
+	'''two SNPs at position 10, one on chrI and one on chrII, survive export, import and a
+		second export unchanged'''
+	db = clean_db(tmp_path)
+	first = export_source(db, str(tmp_path / "first"), name="scheme")
+	target = str(tmp_path / "imported.db")
+	import_from_sources(first["tree"], first["snp"], first["references"], target)
+	second = export_source(target, str(tmp_path / "second"), name="scheme")
+	for key in ("tree", "snp", "references"):
+		assert open(first[key], "rb").read() == open(second[key], "rb").read(), key
+	lines = open(first["snp"]).read().splitlines()
+	assert tuple(lines[0].split("\t")) == SNP_COLUMNS
+	assert {tuple(line.split("\t")[4:6]) for line in lines[1:]} >= {("chrI", "10"), ("chrII", "10")}
+	assert ("A.1", "chrII", 10) in content(target)["snps"]
 
 
 def test_import_of_the_source_files_equals_create(tmp_path):

@@ -30,7 +30,8 @@ class CreateSNPDatabase(CreateDatabase):
 		sql_create_SNP_table =      """CREATE TABLE IF NOT EXISTS snp_annotation (
 									node_id INTEGER PRIMARY KEY,
 									snp_id VARCHAR(6) ,
-									position INTEGER,
+									sequence VARCHAR(40),
+									sequence_position INTEGER,
 									ancestral_base VARCHAR(1),
 									derived_base VARCHAR(1),
 									reference VARCHAR(20),
@@ -103,7 +104,8 @@ class CanSNPDatabase(DatabaseFunctions):
 			data["date"] = self.today.strftime("%d/%m/%y")
 		info = {
 				"snp_id":            data["snp_id"],
-				"position":         data["position"],
+				"sequence":          data["sequence"],
+				"sequence_position": data["sequence_position"],
 				"ancestral_base":     data["ancestral_base"],
 				"derived_base":        data["derived_base"],
 				"reference":         data["reference"],

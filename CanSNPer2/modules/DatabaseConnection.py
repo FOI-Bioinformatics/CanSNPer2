@@ -28,7 +28,13 @@ class ConnectionError(Exception):
 CANSNP_TABLES = ("nodes","tree","snp_annotation","snp_references")
 
 GENOME_SOURCE_COLUMNS = ("genome","strain","genbank_id","refseq_id","assembly_name")
-ANNOTATION_SOURCE_COLUMNS = ("snp_id","reference","genome","position","derived_base","ancestral_base")
+ANNOTATION_SOURCE_COLUMNS = ("snp_id","reference","genome","sequence","sequence_position","derived_base","ancestral_base")
+
+## a database or SNP source file from before 2.3.0 has one position along the joined sequences
+## of the reference fasta file, which depends on the order of those sequences; it is refused
+## with this sentence instead of being read
+JOINED_FORMAT_HINT = ("It stores SNP positions along the joined reference sequences (the format before 2.3.0). "
+	"Convert it with CanSNPer2-database --convert, or download the current database with CanSNPer2-download --scheme.")
 
 class SourceFileError(ValueError):
 	'''a source file could not be used at all, reported instead of crashing inside a loader'''
@@ -42,21 +48,27 @@ def check_source_headers(headers,required,filename):
 		raise SourceFileError("The source file {file} has no column(s) {missing}, a header row with {required} is required".format(file=filename,missing=", ".join(missing),required=", ".join(required)))
 	return True
 
-def check_database(path):
+def check_database(path, current_format=True):
 	'''Check that a path is an existing CanSNP database before anything is run against it,
 		sqlite3.connect() would otherwise happily create an empty file and the run would only
-		fail later with "no such table" errors (issue #125)
+		fail later with "no such table" errors (issue #125).
+		With current_format (the default) a database whose snp_annotation table has no
+		sequence_position column is refused with JOINED_FORMAT_HINT; only the conversion
+		of such a database passes current_format=False.
 	'''
 	if not os.path.exists(path):
 		raise ConnectionError("The database {path} does not exist, download it or create it with CanSNPer2-database --create".format(path=path))
 	conn = sqlite3.connect(path)
 	try:
 		tables = set([row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()])
+		columns = set([row[1] for row in conn.execute("PRAGMA table_info(snp_annotation)").fetchall()])
 	finally:
 		conn.close()
 	missing = [table for table in CANSNP_TABLES if table not in tables]
 	if missing:
 		raise ConnectionError("{path} is not a CanSNP database, the table(s) {missing} are missing".format(path=path,missing=", ".join(missing)))
+	if current_format and "sequence_position" not in columns:
+		raise ConnectionError("The database {path} cannot be used. {hint}".format(path=path,hint=JOINED_FORMAT_HINT))
 	return True
 
 class DatabaseConnection(object):
@@ -220,7 +232,7 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 		with open(annotation) as f:
 			headers = f.readline().strip().lstrip("#").split("\t")
 			'''Define new headers as they must match the database'''
-			headers = ["node_id", "snp_id", "position", "ancestral_base","derived_base","reference","date","genome_i"]
+			headers = ["node_id", "snp_id", "sequence", "sequence_position", "ancestral_base","derived_base","reference","date","genome_i"]
 			for row in f:
 				if row.strip() == "" or row.strip().startswith("#"):
 					'''# lines are comments in the annotation file (issue #22)'''
@@ -1181,25 +1193,26 @@ class XMFAFunctions(DatabaseConnection):
 		XMFAfunctions
 	'''
 	def get_results(self,snp_string,reference):
+		'''Return {(sequence, position): (ancestral_base, derived_base, snp_id)} for the SNPs of reference'''
 		SNPs = {}
 		res = self.query(snp_string, (reference,),getres=True)
-		for strain, pos,tbase,rbase,SNP in res.fetchall():
-			# check if this position was already added and if so throw an error (cansnper does not save SNPs by their ID but rather by their position in each reference)
-			if pos in SNPs:
-				logger.error("Error: there was a duplicate CanSNP in your CanSNPer database at position "+str(pos)+" in reference "+reference)
+		for genome, sequence, pos, tbase, rbase, SNP in res.fetchall():
+			# a site is a position on one reference sequence; two SNPs on the same site cannot be told apart
+			if (sequence, pos) in SNPs:
+				logger.error("Error: there was a duplicate CanSNP in your CanSNPer database at position {pos} on sequence {sequence} in reference {reference}".format(
+					pos=pos, sequence=sequence, reference=reference))
 				logger.error("Please check your database input files")
 				raise Exception("Multiple SNPs with same position")
-			#/
-			SNPs[pos] = tuple([pos,rbase, tbase,SNP])
+			SNPs[(sequence, pos)] = (rbase, tbase, SNP)
 		return SNPs
 
 	def get_snps(self, reference="SCHUS4.2"):
-		'''Returns a list of all SNPs and their positions.
+		'''Returns all SNPs of a reference genome and their positions.
 		Keyword arguments:
-		returns: results as a dictionary with tuple SNP for each position {pos: (pos, refBase, TargetBase, SNPid)}
-				 and a list of positions sorted ASC
+		returns: the SNPs as a dictionary {(sequence, position): (ancestral_base, derived_base, snp_id)}
+				 and the positions per sequence {sequence: [position, ...]} sorted ASC
 		'''
-		snp_string = """SELECT genome, position, derived_base, ancestral_base, snp_id
+		snp_string = """SELECT genome, sequence, sequence_position, derived_base, ancestral_base, snp_id
 										FROM snp_annotation
 										LEFT JOIN snp_references on (snp_references.id = snp_annotation.genome_i)
 										WHERE genome = ?
@@ -1209,6 +1222,9 @@ class XMFAFunctions(DatabaseConnection):
 			logger.error("No SNPs could be found in database check your database connection!")
 			logger.debug(snp_string)
 			raise ValueError("No SNP's was found in the database for reference: {reference}".format(reference=reference))
-		snp_positions = list(SNPs.keys())
-		snp_positions.sort()
+		snp_positions = {}
+		for sequence, pos in SNPs:
+			snp_positions.setdefault(sequence, []).append(pos)
+		for positions in snp_positions.values():
+			positions.sort()
 		return SNPs,snp_positions

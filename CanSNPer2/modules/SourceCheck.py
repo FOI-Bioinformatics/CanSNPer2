@@ -117,6 +117,10 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 	positions = Counter()
 	with open(path) as snps:
 		headers = _header(snps)
+		if "position" in headers and "sequence_position" not in headers:
+			problems.append("{0}:1: joined positions (the format before 2.3.0); convert with "
+				"CanSNPer2-database --convert".format(path))
+			return
 		missing = [column for column in ANNOTATION_SOURCE_COLUMNS if column not in headers]
 		if missing:
 			problems.append("{0}:1: the header has no column(s) {1}, it must name {2}".format(
@@ -138,7 +142,8 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(path, number, expected, len(data)))
 				continue
 			row = dict(zip(headers, data))
-			snp_id, genome, position = row["snp_id"], row["genome"], row["position"]
+			snp_id, genome = row["snp_id"], row["genome"]
+			sequence, position = row["sequence"], row["sequence_position"]
 			derived, ancestral = row["derived_base"], row["ancestral_base"]
 			snp_ids[snp_id] += 1
 			if tree_nodes is not None and snp_id not in tree_nodes:
@@ -149,10 +154,13 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 						path, number, genome, references_path))
 				else:
 					genome = genomes[genome]
+			if sequence.strip() == "":
+				problems.append("{0}:{1}: sequence is empty, it must name a sequence of the reference genome".format(
+					path, number))
 			if not POSITION_RE.match(position) or int(position) < 1:
-				problems.append("{0}:{1}: position '{2}' is not a positive integer".format(path, number, position))
-			else:
-				positions[(genome, int(position))] += 1
+				problems.append("{0}:{1}: sequence_position '{2}' is not a positive integer".format(path, number, position))
+			elif sequence.strip() != "":
+				positions[(genome, sequence, int(position))] += 1
 			for column, base in (("derived_base", derived), ("ancestral_base", ancestral)):
 				if base not in BASES:
 					problems.append("{0}:{1}: {2} '{3}' is not one of A, C, G, T".format(path, number, column, base))
@@ -161,9 +169,10 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 	for snp_id, count in snp_ids.items():
 		if count > 1:
 			problems.append("{0}: snp_id '{1}' is listed {2} times".format(path, snp_id, count))
-	for (genome, position), count in positions.items():
+	for (genome, sequence, position), count in positions.items():
 		if count > 1:
-			problems.append("{0}: position {1} on '{2}' is annotated {3} times".format(path, position, genome, count))
+			problems.append("{0}: position {1} on sequence '{2}' of '{3}' is annotated {4} times".format(
+				path, position, sequence, genome, count))
 
 
 def check_sources(tree=None, annotation=None, references=None):

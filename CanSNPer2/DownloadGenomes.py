@@ -292,7 +292,7 @@ def main():
 	try:
 		check_database(args.database)
 	except ConnectionError as e:
-		print(e)
+		print(e, file=sys.stderr) ## an error message, so a script that reads stdout does not take it as output
 		exit(1)
 
 	# create a database connection

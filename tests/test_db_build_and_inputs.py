@@ -15,6 +15,7 @@ import sys
 
 import pytest
 
+import helpers
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase, CreateSNPDatabase
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
@@ -27,24 +28,24 @@ def tree_file(separator):
 	return "R\nR{0}A.1\nR{0}A.1{0}B.1\n".format(separator)
 
 def annotation_file(extra_comment_column=True):
-	head = "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base"
+	head = "\t".join(helpers.SNP_HEADER)
 	lines = [head + ("\tcomment" if extra_comment_column else "")]
 	if extra_comment_column:
-		lines.append("A.1\tfrancisella\tBirdsell2014\tREF1\t100\tT\tC\ta named branch")
+		lines.append("A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\ta named branch")
 	else:
-		lines.append("A.1\tfrancisella\tBirdsell2014\tREF1\t100\tT\tC")
+		lines.append("A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC")
 	return "\n".join(lines) + "\n"
 
 
 def build_db(tmp_path, name, tree, annotation, references=REFERENCES_FILE):
 	db = str(tmp_path / name)
-	paths = {}
-	for key, content in (("tree", tree), ("annotation", annotation), ("references", references)):
-		path = str(tmp_path / (name + "." + key))
-		with open(path, "w") as handle:
-			handle.write(content)
-		paths[key] = path
-	CanSNPDatabase(database=db, create=True, tree=paths["tree"], annotation=paths["annotation"],
+	header, _, body = annotation.partition("\n")
+	rows = body.split("\n")
+	if rows and rows[-1] == "":
+		rows.pop()
+	paths = helpers.write_sources(tmp_path, rows, tree=tree, references=references,
+		name=name.rsplit(".", 1)[0], header=header)
+	CanSNPDatabase(database=db, create=True, tree=paths["tree"], annotation=paths["snp"],
 	               references=paths["references"], source_type="CanSNPer", verbose=False)
 	return db
 
@@ -53,7 +54,7 @@ def tables(db):
 	conn = sqlite3.connect(db)
 	nodes = conn.execute("SELECT id,name FROM nodes ORDER BY id").fetchall()
 	links = conn.execute("SELECT parent,child FROM tree ORDER BY parent,child").fetchall()
-	ann = conn.execute("SELECT snp_id,position FROM snp_annotation ORDER BY snp_id").fetchall()
+	ann = conn.execute("SELECT snp_id,sequence,sequence_position FROM snp_annotation ORDER BY snp_id").fetchall()
 	conn.close()
 	return nodes, links, ann
 
@@ -66,7 +67,7 @@ def test_created_database_has_one_root_not_an_extra_named_root(tmp_path):
 	assert nodes == [(1, "R"), (2, "A.1"), (3, "B.1")], nodes
 	assert "root" not in [name for _, name in nodes], "no phantom root node"
 	assert (1, 1) in links and [lc for lc in links if lc[0] == lc[1]] == [(1, 1)]
-	assert ann == [("A.1", 100)]
+	assert ann == [("A.1", "CP000001.1", 100)]
 
 
 def test_semicolon_separated_tree_builds_the_same_database(tmp_path, caplog):
@@ -86,11 +87,11 @@ def test_annotation_file_comments_and_trailing_comment_column(tmp_path, caplog):
 	# #22: # lines are comments, blank lines are ignored, and a row may leave out the
 	# trailing free-text comment column; a row short in a real column is refused
 	# (tests/test_create_input_checks.py)
-	ann = ("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\tcomment\n"
+	ann = ("\t".join(helpers.SNP_HEADER) + "\tcomment\n"
 	       "#A.1 is one of the major branches\n"
 	       "\n"
-	       "A.1\tfrancisella\tBirdsell2014\tREF1\t100\tT\tC\ta named branch\n"
-	       "B.1\tfrancisella\tVogler2009\tREF1\t200\tT\tG\n")
+	       "A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\ta named branch\n"
+	       "B.1\tfrancisella\tVogler2009\tREF1\tCP000001.1\t200\tT\tG\n")
 	db = build_db(tmp_path, "comment.db", tree_file("\t"), ann)
 	nodes, links, rows = tables(db)
 	assert [r[0] for r in rows] == ["A.1", "B.1"], rows
@@ -155,3 +156,53 @@ def test_extra_references_in_the_folder_are_tolerated(tmp_path):
 	selected = obj.get_references()
 	logging.disable(logging.NOTSET)
 	assert selected == ["LVS.fna", "OSU18.fna"], selected
+
+
+# sequence and position on that sequence ------------------------------------------------
+
+def test_get_snps_keys_by_sequence(tmp_path):
+	# two SNPs at position 50, one on each chromosome, are two different sites
+	from CanSNPer2.modules.DatabaseConnection import XMFAFunctions
+	db = helpers.make_db(tmp_path / "two.db", [("A.1", "chrI", 50, "C", "T"), ("A.2", "chrII", 50, "G", "A"),
+		("A.3", "chrII", 20, "A", "C")])
+	conn = XMFAFunctions(db)
+	snps, positions = conn.get_snps("REF")
+	conn.disconnect()
+	assert snps == {("chrI", 50): ("C", "T", "A.1"), ("chrII", 50): ("G", "A", "A.2"), ("chrII", 20): ("A", "C", "A.3")}
+	assert positions == {"chrI": [50], "chrII": [20, 50]}
+
+
+def test_get_snps_refuses_the_same_site_twice(tmp_path):
+	from CanSNPer2.modules.DatabaseConnection import XMFAFunctions
+	db = helpers.make_db(tmp_path / "dup.db", [("A.1", "chrII", 50, "C", "T"), ("A.2", "chrII", 50, "G", "A")])
+	conn = XMFAFunctions(db)
+	with pytest.raises(Exception, match="Multiple SNPs"):
+		conn.get_snps("REF")
+	conn.disconnect()
+
+
+def test_joined_database_is_refused(tmp_path):
+	from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
+	db = helpers.make_db(tmp_path / "joined.db", [("A.1", "chrI", 50, "C", "T")], joined=True)
+	with pytest.raises(ConnectionError) as error:
+		check_database(db)
+	assert "--convert" in str(error.value)
+	assert check_database(db, current_format=False)
+	assert check_database(helpers.make_db(tmp_path / "current.db", [("A.1", "chrI", 50, "C", "T")]))
+
+
+@pytest.mark.parametrize("module,arguments", [
+	("CanSNPer2.CanSNPerTree", ["query.fna", "--logdir", "logs"]),
+	("CanSNPer2.DownloadGenomes", ["--logs", "logs"]),
+	("CanSNPer2.SNPDatabase", ["--export", "--logs", "logs"]),
+])
+def test_cli_refuses_joined_database(tmp_path, module, arguments):
+	import subprocess
+	db = helpers.make_db(tmp_path / "joined.db", [("A.1", "chrI", 50, "C", "T")], joined=True)
+	env = dict(os.environ)
+	root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+	env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
+	result = subprocess.run([sys.executable, "-m", module, "--database", db] + arguments,
+		capture_output=True, text=True, cwd=str(tmp_path), env=env)
+	assert result.returncode != 0, result.stdout + result.stderr
+	assert "--convert" in result.stderr, (result.stdout, result.stderr)

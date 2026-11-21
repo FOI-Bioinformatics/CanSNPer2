@@ -14,9 +14,9 @@ from CanSNPer2.modules.FetchScheme import (API_URL, DATA_REPO, RAW_URL, NotFound
 
 COMMIT = "a" * 40
 
-SNP = ("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\n"
-       "A.1\ttest\tTest2026\tREF1\t100\tT\tC\n"
-       "B.1\ttest\tTest2026\tREF1\t200\tG\tA\n")
+SNP = ("snp_id\tstrain\treference\tgenome\tsequence\tsequence_position\tderived_base\tancestral_base\n"
+       "A.1\ttest\tTest2026\tREF1\tCP000001.1\t100\tT\tC\n"
+       "B.1\ttest\tTest2026\tREF1\tCP000001.1\t200\tG\tA\n")
 TREE = "R\nR\tA.1\nR\tA.1\tB.1\n"
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
               "REF1\tref one\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n")
@@ -72,7 +72,7 @@ def test_build_scheme_makes_a_database_and_records_where_it_came_from(tmp_path):
 	fake = FakeRepo(scheme_repo())
 	provenance = build_scheme("test_scheme", db, source=GitHubSchemeSource(ref="master", fetcher=fake))
 	conn = sqlite3.connect(db)
-	assert conn.execute("SELECT snp_id,position FROM snp_annotation ORDER BY snp_id").fetchall() == [("A.1", 100), ("B.1", 200)]
+	assert conn.execute("SELECT snp_id,sequence,sequence_position FROM snp_annotation ORDER BY snp_id").fetchall() == [("A.1", "CP000001.1", 100), ("B.1", "CP000001.1", 200)]
 	assert conn.execute("SELECT genome,genbank_id FROM snp_references").fetchall() == [("REF1", "GCA_000000001.1")]
 	conn.close()
 	recorded = json.load(open(provenance_path(db)))
@@ -209,7 +209,7 @@ def test_a_local_file_changed_after_its_manifest_is_built_with_a_warning(tmp_pat
 	build_scheme("test_scheme", str(tmp_path / "t.db"), source=src)
 	assert "changed after the manifest was written" in caplog.text
 	assert sqlite3.connect(str(tmp_path / "t.db")).execute(
-		"SELECT position FROM snp_annotation WHERE snp_id='B.1'").fetchone() == (201,)
+		"SELECT sequence_position FROM snp_annotation WHERE snp_id='B.1'").fetchone() == (201,)
 
 
 def test_a_local_git_checkout_records_its_commit_and_uncommitted_files(tmp_path, caplog):
