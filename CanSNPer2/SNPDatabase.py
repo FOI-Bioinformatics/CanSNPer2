@@ -360,6 +360,12 @@ def command():
 				'''the file did not exist before this run, so a database that was started is incomplete'''
 				os.remove(args.database)
 			exit(1)
+		except Exception:
+			'''an unexpected error is reported by the top-level handler; the started database
+				is removed first, as for the known errors above'''
+			if os.path.exists(args.database):
+				os.remove(args.database)
+			raise
 	else:
 		logger.error("No datafile supplied, nothing to process!")
 		exit(1)

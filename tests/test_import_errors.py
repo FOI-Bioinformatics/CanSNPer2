@@ -413,6 +413,9 @@ CASES = [
 	case("top level: CanSNPer2-database --debug", "CanSNPer2-database", exported(extra=["--debug"]), 2,
 		["Traceback", "CanSNPer2 stopped: RuntimeError: boom"],
 		inject=BOOM + "import CanSNPer2.SNPDatabase\nCanSNPer2.SNPDatabase.export_source = boom\n", traceback=True),
+	case("top level: CanSNPer2-database --create removes the started database", "CanSNPer2-database", creation(), 2,
+		TOP_LEVEL, inject=BOOM + "from CanSNPer2.modules import InitiateDatabase\n"
+		"InitiateDatabase.CanSNPDatabase.load_cansnp_annotation = boom\n"),
 	case("top level: CanSNPer2-download", "CanSNPer2-download", download(), 2, TOP_LEVEL,
 		inject=BOOM + "import CanSNPer2.DownloadGenomes\nCanSNPer2.DownloadGenomes.DownloadGenomes.run = boom\n"),
 	case("top level: CanSNPer2", "CanSNPer2", typing(), 2, TOP_LEVEL,
