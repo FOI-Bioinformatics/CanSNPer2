@@ -16,6 +16,7 @@ then a positive d is a reference base with a gap in the query, a negative d a qu
 with a gap in the reference. S2 > E2 marks an alignment to the reverse strand of the query.
 '''
 
+import os
 import logging
 
 from CanSNPer2.modules.AlignmentReader import AlignmentReader
@@ -41,6 +42,20 @@ def read_fasta(path):
 	return records
 
 
+def query_path_of(line, fallback=None):
+	'''the query path of the first delta line, "<reference path> <query path>". Both paths can
+		contain spaces, so the line is split at each space in turn and the part to the right
+		is taken as the query path when it is an existing file; otherwise the query file the
+		caller gave (fallback), otherwise the second word'''
+	line = line.strip()
+	for i, char in enumerate(line):
+		if char == " " and os.path.isfile(line[i + 1:].strip()):
+			return line[i + 1:].strip()
+	if fallback and os.path.isfile(fallback):
+		return fallback
+	return line.split()[1]
+
+
 class ParseDelta(AlignmentReader):
 	"""Reader of MUMmer4 delta files"""
 	def __init__(self, verbose=False, **kwargs):
@@ -49,12 +64,15 @@ class ParseDelta(AlignmentReader):
 
 	def read_alignment(self, path):
 		with open(path) as fin:
-			header = fin.readline().split()
+			header_line = fin.readline()
+			header = header_line.split()
 			if len(header) < 2:
 				raise ValueError("{path} is not a delta file: the first line must name the reference and the query file".format(path=path))
 			fin.readline()                              ## NUCMER
+			query_path = query_path_of(header_line, self.query_file)
 			try:
-				self.query = dict(read_fasta(header[1]))
+				self.query = dict(read_fasta(query_path))
+				self.query_path = query_path
 			except FileNotFoundError as e:
 				raise FileNotFoundError("The query sequence file named in {path} is needed to read it: {e}".format(path=path, e=e)) from e
 			rname = qname = None
@@ -79,6 +97,9 @@ class ParseDelta(AlignmentReader):
 		wanted = self.snps_in(rname, s1, e1)
 		if not wanted:
 			return
+		if qname not in self.query:
+			raise ValueError("The query sequence {name} named in the delta file is not in {fasta}: the delta file and the query fasta file do not belong together".format(
+					name=qname, fasta=self.query_path))
 		qseq = self.query[qname]
 		step = 1 if s2 <= e2 else -1
 		block_length = e1 - s1 + 1
@@ -91,6 +112,12 @@ class ParseDelta(AlignmentReader):
 			while next_snp < len(wanted) and wanted[next_snp] < r + count:
 				k = wanted[next_snp] - r
 				qpos = q + step * k
+				if not 1 <= qpos <= len(qseq):
+					'''a position outside the query sequence has no base to report (a negative index would read from the other end)'''
+					logger.debug("Position {pos} of {name} is outside the query sequence (length {n}), SNP position {snp} of {ref} skipped".format(
+							pos=qpos, name=qname, n=len(qseq), snp=wanted[next_snp], ref=rname))
+					next_snp += 1
+					continue
 				base = qseq[qpos - 1]
 				if step < 0:
 					base = COMPLEMENT.get(base, "N")

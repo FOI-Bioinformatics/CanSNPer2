@@ -14,9 +14,16 @@ each observed position back before it is recorded.
 #__name__="ParseXMFA"
 from CanSNPer2.modules.AlignmentReader import AlignmentReader, EDGE_MARGIN, SEQUENCES_SUFFIX, read_sequence_table  # noqa: F401 (EDGE_MARGIN is imported from here by callers)
 import os
+import re
 import logging
 from bisect import bisect_left, bisect_right
 logger = logging.getLogger(__name__)
+
+# A block ends with a line that starts with "=" (the line is "=" in progressiveMauve output,
+# text may follow it); a sequence header starts a line with "> ". Both are matched at the start
+# of a line only, because the file paths in the headers can contain "=" or "> ".
+BLOCK_END = re.compile(r"^=.*$", re.M)
+SEQUENCE_START = re.compile(r"^> ", re.M)
 
 reference_genomes = ["FSC200","SCHUS4.1","SCHUS4.2","OSU18","LVS","FTNF002-00"]
 
@@ -154,7 +161,7 @@ class ParseXMFA(AlignmentReader):
 	def read_sequence(self,seqP):
 		'''Read one block of the xmfa file; blocks with only one of the two genomes are
 			unaligned sequence and carry no SNP information'''
-		seqLines = seqP.strip().split("> ") 	### Split pair into two sequences
+		seqLines = SEQUENCE_START.split(seqP.strip()) 	### Split pair into two sequences, at "> " at the start of a line only
 		if len(seqLines) > 2:  					### Both target and reference have sequence
 			refSeq = seqLines[1].split("\n")				## reference sequence
 			targetSeq = seqLines[2].split("\n")				## target sequence
@@ -223,7 +230,7 @@ class ParseXMFA(AlignmentReader):
 			text = fin.read()
 		self.load_joined_positions(f + SEQUENCES_SUFFIX)
 		self.load_query_map(text, f)
-		for seqP in text.strip().split("="):
+		for seqP in BLOCK_END.split(text.strip()):
 			self.read_sequence(seqP)
 
 	def read_alignment(self, path):

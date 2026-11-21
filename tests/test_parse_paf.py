@@ -157,3 +157,57 @@ def test_minimap2_through_the_whole_alignment_step(tmp_path):
 	assert where["B.1"] == ("q1", 1500)
 	assert where["B.2"] == ("q2", 7000 - 4500 + 1), "q2 is reverse complemented: query 4500 is its base 2501"
 	assert where["B.3"] == ("q3", 8000 - 7000)
+
+
+def short_form(cs):
+	"""the cs string in the short form: ":n" replaces each run of identical bases"""
+	import re
+	return re.sub(r"=([A-Za-z]+)", lambda m: ":" + str(len(m.group(1))), cs)
+
+
+def with_cs(line, old, new):
+	return line.replace("cs:Z:" + old, "cs:Z:" + new)
+
+
+def test_short_cs_form_gives_the_same_result_as_the_long_form(tmp_path):
+	long_cs = "=ACGT*cg=AAAA"
+	assert short_form(long_cs) == ":4*cg:4"
+	long_snps, long_info = read(tmp_path, [paf_line(long_cs)], ROWS, name="lng")
+	short_snps, short_info = read(tmp_path, [with_cs(paf_line(long_cs), long_cs, ":4*cg:4")], ROWS, name="shrt")
+	assert short_snps == long_snps == {"B.1": 1}
+	assert short_info["B.1"][2:] == long_info["B.1"][2:]
+
+
+@pytest.mark.parametrize("strand", ["+", "-"])
+def test_short_cs_form_with_indels_before_the_snp(tmp_path, strand):
+	# an insertion and a deletion before the SNPs, a match run after them
+	long_cs = "=AC+tt=GT-ga=CC*cg=AA"
+	assert short_form(long_cs) == ":2+tt:2-ga:2*cg:2"
+	rows = [("B.1", "chr2", 18, "C", "G"), ("B.2", "chr2", 12, "G", "A"),
+		("B.3", "chr2", 16, "C", "T"), ("B.4", "chr2", 14, "G", "A")]
+	tag = strand.replace("-", "r").replace("+", "f")
+	line = paf_line(long_cs, strand=strand)
+	long_snps, long_info = read(tmp_path, [line], rows, name="l" + tag)
+	short_snps, short_info = read(tmp_path, [with_cs(line, long_cs, ":2+tt:2-ga:2*cg:2")], rows, name="s" + tag)
+	assert set(long_snps) == {"B.1", "B.2", "B.3", "B.4"} and long_snps["B.1"] == 1
+	assert short_snps == long_snps
+	assert set(short_info) == set(long_info)
+	for key in long_info:
+		assert short_info[key][2:] == long_info[key][2:]
+
+
+def test_skipped_records_are_reported_when_none_is_used(tmp_path, caplog):
+	import logging
+	secondary = paf_line("=ACGT*cg=AAAA", tp="S")
+	truncated = "ctg1\t1000\t20"
+	with caplog.at_level(logging.WARNING):
+		snps, info = read(tmp_path, [secondary, truncated], ROWS, name="skp")
+	assert snps == {}
+	assert any("2 record" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+
+
+def test_no_warning_when_some_records_are_used(tmp_path, caplog):
+	import logging
+	with caplog.at_level(logging.WARNING):
+		read(tmp_path, [paf_line("=ACGT*cg=AAAA"), paf_line("=ACGT*cg=AAAA", tp="S")], ROWS, name="ok")
+	assert not any("skipped" in r.getMessage() for r in caplog.records)
