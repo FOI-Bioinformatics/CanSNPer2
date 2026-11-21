@@ -64,6 +64,23 @@ class CanSNPer2Error(Error):
 	"""docstring for CanSNPer2Error"""
 	pass
 
+def ensure_directory(path, option):
+	'''Create the folder when it is missing and check that it can be written to. A path that is a file,
+		or a folder without write permission, used to be found only after the alignments were made.
+		makedirs with exist_ok is safe when another run creates the same folder at the same time.
+		Raises CanSNPer2Error naming the option.'''
+	if os.path.exists(path) and not os.path.isdir(path):
+		raise CanSNPer2Error("{option} {path} is not a directory; give another path".format(option=option, path=path))
+	try:
+		os.makedirs(path, exist_ok=True)
+	except FileExistsError:
+		raise CanSNPer2Error("{option} {path} is not a directory; give another path".format(option=option, path=path))
+	except OSError as e:
+		raise CanSNPer2Error("{option} {path} cannot be created: {error}; give another path".format(option=option, path=path, error=e.strerror or e))
+	if not os.access(path, os.W_OK | os.X_OK):
+		raise CanSNPer2Error("{option} {path} is not writable; change its permissions or give another path".format(option=option, path=path))
+
+
 class CanSNPer2(object):
 	"""docstring for CanSNPer2"""
 	def __init__(self, query, mauve_path="",tmpdir=".tmp", refdir="references",database="CanSNPer.fdb", verbose=False,keep_going=False,**kwargs):
@@ -124,14 +141,24 @@ class CanSNPer2(object):
 		self.workdir = kwargs.get("workdir","./")
 		if not os.path.exists(self.workdir):
 			logger.info("Creating working directory {workdir}".format(workdir=self.workdir))
-			os.makedirs(self.workdir)
+		ensure_directory(self.workdir, "--workdir")
 
 		'''Resolve the working paths against workdir instead of changing the
 			process working directory, which is global state (issue #2)'''
 		self.tmpdir = os.path.join(self.workdir, tmpdir)
 		if not os.path.exists(self.tmpdir):
 			logger.info("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
-			os.makedirs(self.tmpdir)
+		ensure_directory(self.tmpdir, "--tmpdir")
+		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
+		if not os.path.exists(self.logdir):
+			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
+		ensure_directory(self.logdir, "--logdir")
+
+		self.outdir = os.path.join(self.workdir, kwargs.get("outdir","results"))
+		if not os.path.exists(self.outdir):
+			logger.info("Creating output directory {outdir}".format(outdir=self.outdir))
+		ensure_directory(self.outdir, "--outdir")
+
 		'''An aligning run works in its own run_* directory below the shared tmpdir. All runs
 			used to write their staged genomes and alignments straight into the shared folder
 			(by default /tmp/CanSNPer2), and cleanup() removed every file in it, so two runs on
@@ -147,16 +174,6 @@ class CanSNPer2(object):
 				pass
 			self.own_tmpdir = True
 			logger.info("Temporary files of this run are written to {tmpdir}".format(tmpdir=self.tmpdir))
-
-		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
-		if not os.path.exists(self.logdir):
-			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
-			os.makedirs(self.logdir)
-
-		self.outdir = os.path.join(self.workdir, kwargs.get("outdir","results"))
-		if not os.path.exists(self.outdir):
-			logger.info("Creating output directory {outdir}".format(outdir=self.outdir))
-			os.makedirs(self.outdir)
 
 		self.refdir = os.path.join(self.workdir, self.refdir)
 

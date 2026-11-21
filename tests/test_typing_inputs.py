@@ -129,3 +129,52 @@ def test_skip_alignment_needs_no_aligner(tmp_path):
 	q = write(tmp_path / "x.fasta")
 	obj, db = project(tmp_path, [q], aligner=Missing(), skip_alignment=True, keep_going=True)
 	obj.check_aligner()  # does not raise
+
+
+# 4. output folders
+
+def test_an_outdir_that_is_a_file_is_refused(tmp_path):
+	write(tmp_path / "out", "x")
+	with pytest.raises(CanSNPer2Error, match="--outdir .*out.* is not a directory"):
+		project(tmp_path, [])
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+def test_a_read_only_outdir_is_refused(tmp_path):
+	out = tmp_path / "out"
+	out.mkdir()
+	out.chmod(0o500)
+	try:
+		with pytest.raises(CanSNPer2Error, match="--outdir .*not writable"):
+			project(tmp_path, [])
+	finally:
+		out.chmod(0o700)
+
+
+def test_a_logdir_that_is_a_file_is_refused(tmp_path):
+	write(tmp_path / "logs", "x")
+	with pytest.raises(CanSNPer2Error, match="--logdir .*not a directory"):
+		project(tmp_path, [])
+
+
+def test_a_tmpdir_that_is_a_file_is_refused(tmp_path):
+	write(tmp_path / "shared", "x")
+	with pytest.raises(CanSNPer2Error, match="--tmpdir .*not a directory"):
+		project(tmp_path, [])
+
+
+# 5. folders created by two runs at once
+
+def test_folders_that_appear_during_creation_are_not_an_error(tmp_path, monkeypatch):
+	real = os.path.exists
+	made = []
+	def late(path):
+		# another run creates the folder just after this one saw it missing
+		if path.endswith(("out", "logs", "shared")) and path not in made:
+			made.append(path)
+			os.makedirs(path, exist_ok=True)
+			return False
+		return real(path)
+	monkeypatch.setattr(os.path, "exists", late)
+	project(tmp_path, [])
+	assert len(made) == 3 or len(made) >= 3

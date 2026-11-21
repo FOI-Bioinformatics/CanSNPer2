@@ -39,7 +39,7 @@ __email__ 		= ["bioinformatics@foi.se", "david.sundell@foi.se"]
 __date__ 		= "2020-04-23"
 __status__ 		= "Production"
 
-from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER
+from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER, ensure_directory
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging
@@ -158,7 +158,11 @@ def command():
 	logdircreated = False
 	if not os.path.exists(args.logdir):
 		logdircreated = True
-		os.makedirs(args.logdir)
+	try:
+		ensure_directory(args.logdir, "--logdir")
+	except CanSNPer2Error as e:
+		print(e.value, file=sys.stderr)
+		exit(1)
 	args.logdir = args.logdir.rstrip("/")+"/" ## a logdir without a trailing slash would glue straight onto the log file name (issue #71)
 
 
@@ -173,12 +177,17 @@ def command():
 	args.tmpdir = resolve_tmpdir(args.tmpdir)
 	if not os.path.exists(args.tmpdir):
 		logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
-		os.makedirs(args.tmpdir,exist_ok=True)
+	try:
+		ensure_directory(args.tmpdir, "--tmpdir")
+	except CanSNPer2Error as e:
+		logger.error(e.value)
+		exit(1)
 
 	## Add log level and log file path
 	logger.debug(args)
 
-	CanSNPer2_obj = CanSNPer2(args.query,
+	try:
+		CanSNPer2_obj = CanSNPer2(args.query,
 									refdir=args.refdir,
 									allow_missing_references=args.allow_missing_references,
 									verbose=args.verbose,
@@ -201,7 +210,10 @@ def command():
 									summary=args.summary,
 									annotations=args.annotations,
 									strictness=args.strictness
-	)
+		)
+	except CanSNPer2Error as e:
+		logger.error(e.value) ## an unusable output, log or tmp folder is reported before anything is aligned
+		exit(1)
 	print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))
 
 	'''Run CanSNPer2'''
