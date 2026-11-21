@@ -4,11 +4,10 @@ query base at every SNP position of the reference. The classification of the bas
 --mask filter, the edge flag and the result rows are shared with the other alignment
 readers, see AlignmentReader.
 
-The database positions run along the reference sequences joined end to end in file order
-(the progressiveMauve convention), while PAF gives positions within each reference
-sequence. The aligner writes the reference sequence table next to the alignment
-(<alignment>.sequences: name and length per line, in file order) so the alignment can be
-read again later (--skip_alignment) without the reference file.
+The database stores each SNP as a reference sequence and a position on it, which are the
+coordinates PAF gives for the target (columns 6 and 8-9, the start 0-based). The alignment
+is therefore read without the reference file or any other table, also when it is read
+again later (--skip_alignment). A target sequence without registered SNPs is passed over.
 
 Which alignments are used: only primary alignments (tp:A:P) with a mapping quality of at
 least min_mapq. A secondary alignment or a primary one with a low mapping quality is a
@@ -29,46 +28,14 @@ logger = logging.getLogger(__name__)
 	assembly presets, skipped as reference without query)'''
 CS_OP = re.compile(r"=([A-Za-z]+)|\*([a-z])([a-z])|\+([a-z]+)|-([a-z]+)|~[a-z]{2}(\d+)[a-z]{2}")
 
-SEQUENCES_SUFFIX = ".sequences"
-
-
-def write_sequence_table(fasta, path):
-	'''write name and length of the sequences of a fasta file, in file order'''
-	rows = []
-	with open(fasta) as fin:
-		for line in fin:
-			if line.startswith(">"):
-				rows.append([line[1:].split()[0] if line[1:].split() else "", 0])
-			elif rows:
-				rows[-1][1] += len(line.strip())
-	with open(path, "w") as out:
-		for name, length in rows:
-			out.write("{0}\t{1}\n".format(name, length))
-
 
 class ParsePAF(AlignmentReader):
 	"""Reader of minimap2 PAF files with the long cs tag; the reference is the target"""
 	def __init__(self, verbose=False, min_mapq=20, **kwargs):
 		super(ParsePAF, self).__init__(verbose=verbose, **kwargs)
 		self.min_mapq = int(min_mapq)
-		self.offsets = {}
-
-	def read_sequence_table(self, alignment):
-		'''start offset of each reference sequence in the joined reference'''
-		path = alignment + SEQUENCES_SUFFIX
-		offsets, total = {}, 0
-		try:
-			with open(path) as fin:
-				for line in fin:
-					name, length = line.rstrip("\n").split("\t")
-					offsets[name] = total
-					total += int(length)
-		except FileNotFoundError as e:
-			raise FileNotFoundError("The reference sequence table {path} of the alignment is missing, it is written when the alignment is made".format(path=path)) from e
-		return offsets
 
 	def read_alignment(self, path):
-		self.offsets = self.read_sequence_table(path)
 		used = skipped = 0
 		with open(path) as fin:
 			for line in fin:
@@ -82,8 +49,6 @@ class ParsePAF(AlignmentReader):
 				cs = next((tag[5:] for tag in tags if tag.startswith("cs:Z:")), None)
 				if cs is None:
 					raise ValueError("{path} has no cs tag, minimap2 must be run with -c --cs=long".format(path=path))
-				if fields[5] not in self.offsets:
-					raise ValueError("Reference sequence {name} of {path} is not in its sequence table".format(name=fields[5], path=path))
 				used += 1
 				self.read_record(fields, cs)
 		logger.debug("{path}: {used} alignments used, {skipped} secondary or below mapping quality {q} skipped".format(
@@ -94,9 +59,10 @@ class ParsePAF(AlignmentReader):
 			the forward strand of the reference, with the query bases complemented for a "-"
 			alignment, so its bases need no further complement'''
 		qname, qstart, qend, strand = fields[0], int(fields[2]), int(fields[3]), fields[4]
-		start = self.offsets[fields[5]] + int(fields[7]) + 1   ## 1-based, joined reference
-		end = self.offsets[fields[5]] + int(fields[8])
-		wanted = self.snps_in(start, end)
+		sequence = fields[5]
+		start = int(fields[7]) + 1   ## 1-based position on the reference sequence
+		end = int(fields[8])
+		wanted = self.snps_in(sequence, start, end)
 		if not wanted:
 			return
 		block_length = end - start + 1
@@ -123,9 +89,9 @@ class ParsePAF(AlignmentReader):
 				pos = wanted[next_snp]
 				k = pos - at
 				if query_bases is None:
-					self.observe(pos, "-", pos - start + 1, block_length, query_name=qname, query_pos="N/A")
+					self.observe(sequence, pos, "-", pos - start + 1, block_length, query_name=qname, query_pos="N/A")
 				else:
-					self.observe(pos, query_bases[k], pos - start + 1, block_length, query_name=qname, query_pos=query_pos(qdone + k))
+					self.observe(sequence, pos, query_bases[k], pos - start + 1, block_length, query_name=qname, query_pos=query_pos(qdone + k))
 				next_snp += 1
 			at += span
 			if query_bases is not None:

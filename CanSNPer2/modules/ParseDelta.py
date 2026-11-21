@@ -4,11 +4,11 @@ reports the query base at every SNP position of the reference. The classificatio
 bases, the --mask filter, the edge flag and the result rows are shared with the other
 alignment readers, see AlignmentReader.
 
-The delta format gives, per alignment, the reference and query coordinates and the
-positions of the indels, but no bases; the first line of the file names the reference and
-the query fasta files, which are read for the query bases and for the reference sequence
-order and lengths. The database positions run along the reference sequences joined end to
-end in file order (the progressiveMauve convention), while delta positions are per sequence.
+The delta format gives, per alignment, the reference sequence name, the reference and query
+coordinates and the positions of the indels, but no bases. The reference coordinates are
+positions on that reference sequence, as the database stores them, so only the query fasta
+file named in the first line of the file is read, for the query bases; the reference file
+named there is not needed.
 
 Each alignment record is "S1 E1 S2 E2 errors similarity_errors stops" followed by one
 integer per indel and a terminating 0. For an integer d, |d|-1 aligned pairs come first;
@@ -45,7 +45,6 @@ class ParseDelta(AlignmentReader):
 	"""Reader of MUMmer4 delta files"""
 	def __init__(self, verbose=False, **kwargs):
 		super(ParseDelta, self).__init__(verbose=verbose, **kwargs)
-		self.offsets = {}
 		self.query = {}
 
 	def read_alignment(self, path):
@@ -55,14 +54,9 @@ class ParseDelta(AlignmentReader):
 				raise ValueError("{path} is not a delta file: the first line must name the reference and the query file".format(path=path))
 			fin.readline()                              ## NUCMER
 			try:
-				reference = read_fasta(header[0])
 				self.query = dict(read_fasta(header[1]))
 			except FileNotFoundError as e:
-				raise FileNotFoundError("The sequence files named in {path} are needed to read it: {e}".format(path=path, e=e)) from e
-			self.offsets, total = {}, 0
-			for name, seq in reference:
-				self.offsets[name] = total
-				total += len(seq)
+				raise FileNotFoundError("The query sequence file named in {path} is needed to read it: {e}".format(path=path, e=e)) from e
 			rname = qname = None
 			for line in fin:
 				if line.startswith(">"):
@@ -82,8 +76,7 @@ class ParseDelta(AlignmentReader):
 
 	def read_record(self, rname, qname, s1, e1, s2, e2, indels):
 		'''report the query base at the SNP positions one alignment covers'''
-		offset = self.offsets[rname]
-		wanted = self.snps_in(offset + s1, offset + e1)
+		wanted = self.snps_in(rname, s1, e1)
 		if not wanted:
 			return
 		qseq = self.query[qname]
@@ -95,13 +88,13 @@ class ParseDelta(AlignmentReader):
 		def emit_pairs(count):
 			'''count aligned pairs starting at (r, q)'''
 			nonlocal next_snp
-			while next_snp < len(wanted) and wanted[next_snp] - offset < r + count:
-				k = wanted[next_snp] - offset - r
+			while next_snp < len(wanted) and wanted[next_snp] < r + count:
+				k = wanted[next_snp] - r
 				qpos = q + step * k
 				base = qseq[qpos - 1]
 				if step < 0:
 					base = COMPLEMENT.get(base, "N")
-				self.observe(wanted[next_snp], base, wanted[next_snp] - offset - s1 + 1, block_length, query_name=qname, query_pos=str(qpos))
+				self.observe(rname, wanted[next_snp], base, wanted[next_snp] - s1 + 1, block_length, query_name=qname, query_pos=str(qpos))
 				next_snp += 1
 
 		for d in indels:
@@ -110,8 +103,8 @@ class ParseDelta(AlignmentReader):
 			q += step * (abs(d) - 1)
 			if d > 0:
 				'''a reference base with a gap in the query'''
-				if next_snp < len(wanted) and wanted[next_snp] - offset == r:
-					self.observe(wanted[next_snp], "-", r - s1 + 1, block_length, query_name=qname, query_pos="N/A")
+				if next_snp < len(wanted) and wanted[next_snp] == r:
+					self.observe(rname, wanted[next_snp], "-", r - s1 + 1, block_length, query_name=qname, query_pos="N/A")
 					next_snp += 1
 				r += 1
 			else:

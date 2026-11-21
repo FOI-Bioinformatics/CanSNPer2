@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.Aligners import Aligner, get_aligner
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions, duplicate_names, reference_snps, sequence_table, locate
+from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions, duplicate_names, reference_snps
 from CanSNPer2 import __version__
 
 
@@ -34,21 +34,12 @@ import signal
 _MP_CTX = multiprocessing.get_context("fork")
 
 '''column header of the per sample SNP tables, both <sample>_snps.txt and
-	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
-	near an alignment edge (issue #48). Pos is the position on the reference sequences joined
-	end to end in file order; ReferenceSeq and ReferenceSeqPosition give the sequence it falls
-	on and the position on that sequence ("-" when the reference file is not at hand)'''
-SNP_FILE_COLUMNS = ["Name","Reference","Pos","QuerySeq","QueryPosition","Ancestral base","Derived base","Target base","Edge flag","ReferenceSeq","ReferenceSeqPosition"]
-
-
-def add_reference_sequence(rows, tables):
-	'''copies of the result rows (Name, Reference, Pos, ...) with the reference sequence and the
-		position on it appended; tables is {reference name: sequence_table of its file}'''
-	out = []
-	for row in rows:
-		seq, pos = locate(tables.get(row[1], []), row[2])
-		out.append(list(row) + [seq, str(pos)])
-	return out
+	<sample>_not_called.txt. Sequence is the reference sequence the SNP lies on and Pos the
+	1-based position on that sequence, as the database stores them; the last column carries
+	the "edge" flag for SNPs that sit near an alignment edge (issue #48)'''
+SNP_FILE_COLUMNS = ["Name","Reference","Sequence","Pos","QuerySeq","QueryPosition","Ancestral base","Derived base","Target base","Edge flag"]
+'''index of the edge flag in a result row'''
+EDGE_COLUMN = SNP_FILE_COLUMNS.index("Edge flag")
 
 '''file that marks a private run directory created by CanSNPer2 below --tmpdir; cleanup()
 	only removes a directory it created itself, and the command line uses a marked
@@ -125,8 +116,6 @@ class CanSNPer2(object):
 			never returns on some inputs, which used to hang the run'''
 		self.alignment_timeout = float(kwargs.get("alignment_timeout",60) or 0)*60
 		self.checked_references = {} ## reference file -> problem or None, checked once per run
-		self.reference_files = {}    ## reference name -> reference file, for the sequence columns of the results
-		self.reference_tables = {}   ## reference name -> sequence_table of its file, read once per run
 
 		'''Create log and tmpdir if they do not exist'''
 		self.workdir = kwargs.get("workdir","./")
@@ -446,20 +435,6 @@ class CanSNPer2(object):
 		logger.info("Replaced characters that are not ACGT with N and removed whitespace in {name} before alignment (gaps, ambiguous nucleotides and blank lines, issues #26, #28)".format(name=os.path.basename(path)))
 		return cleaned_path
 
-	def with_reference_sequence(self,rows):
-		'''the result rows with the reference sequence and the position on it appended; a
-			reference whose file cannot be read gets "-" (--skip_alignment without references)'''
-		for row in rows:
-			name = row[1]
-			if name not in self.reference_tables:
-				path = self.reference_files.get(name)
-				try:
-					self.reference_tables[name] = sequence_table(path) if path else []
-				except OSError as e:
-					logger.info("The reference sequences of {name} are not given in the results, its file cannot be read: {e}".format(name=name, e=e))
-					self.reference_tables[name] = []
-		return add_reference_sequence(rows, self.reference_tables)
-
 	def check_reference_file(self,path,name):
 		'''A reference shorter than the last SNP position the database places on it is truncated
 			or the wrong genome: its SNPs beyond the end had no data, which counts against a call,
@@ -491,7 +466,6 @@ class CanSNPer2(object):
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
-			self.reference_files[ref_name] = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
 			if not self.skip_alignment:
 				self.check_reference_file("{refdir}/{ref}".format(refdir=self.refdir, ref=ref), ref_name)
 			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
@@ -972,7 +946,7 @@ class CanSNPer2(object):
 						'''Print SNPs to tab separated file'''
 						with open(outputfile,"w") as snplist_out:
 							print("\t".join(SNP_FILE_COLUMNS),file=snplist_out)
-							for snp in self.with_reference_sequence(SNP_info):
+							for snp in SNP_info:
 								if snp[0] in called_snps:
 									self.csnpdict[snp[0]] = snp
 								else:
@@ -1010,7 +984,7 @@ class CanSNPer2(object):
 								called_rows = [row for row in SNP_info if row[0] in called_ids]
 								if called_rows:
 									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
-									for row in self.with_reference_sequence(called_rows):
+									for row in called_rows:
 										print("\t".join(row),file=called_out)
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
@@ -1022,7 +996,7 @@ class CanSNPer2(object):
 					if self.export and no_data_snps:
 						logger.info("Listing {n} SNP positions without any alignment data in {file}".format(n=len(no_data_snps),file=outputfile))
 						with open(outputfile,"a") as nodata_out:
-							for snp in self.with_reference_sequence(no_data_snps):
+							for snp in no_data_snps:
 								print("\t".join(snp),file=nodata_out)
 					'''remember the outcome per sample: the exit code is decided from this
 						(issue #191)'''
@@ -1035,7 +1009,7 @@ class CanSNPer2(object):
 						alignment edge, a competing unconfirmed path); states/called let the embedded
 						tree paint the sample when it is selected'''
 					called_path = [snp[1] for snp in called] if called else []
-					edge_flags = set(row[0] for row in SNP_info if len(row) > 8 and row[8] == "edge")
+					edge_flags = set(row[0] for row in SNP_info if len(row) > EDGE_COLUMN and row[EDGE_COLUMN] == "edge")
 					edge_on_path = [s for s in edge_flags if s in set(called_path)]
 					path_missing = final_snp[4] if final_snp and len(final_snp) > 4 else []
 					severity = "clean"

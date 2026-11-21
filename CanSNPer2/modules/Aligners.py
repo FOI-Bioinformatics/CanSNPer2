@@ -8,8 +8,7 @@ a reader (a subclass of AlignmentReader) and add it to ALIGNERS.
 
 What a reader must report is narrow: for every SNP position of the reference that the
 alignment covers, the query base on the forward strand of the reference, in the reference
-coordinates the database uses (sequences of a multi-sequence reference joined end to end
-in file order).
+coordinates the database uses (the reference sequence and the 1-based position on it).
 '''
 
 import os
@@ -18,7 +17,7 @@ import shutil
 import logging
 
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
-from CanSNPer2.modules.ParsePAF import ParsePAF, SEQUENCES_SUFFIX, write_sequence_table
+from CanSNPer2.modules.ParsePAF import ParsePAF
 from CanSNPer2.modules.ParseDelta import ParseDelta
 
 logger = logging.getLogger(__name__)
@@ -155,10 +154,6 @@ class Minimap2(Aligner):
 
 	def command(self, reference_file, query_file, output):
 		return [self.executable(), "-c", "--cs=long", "-x", self.preset] + list(self.options) + ["-o", output, reference_file, query_file]
-
-	def prepare(self, reference_file, query_file, output):
-		'''the reference sequence table that maps PAF positions to the joined reference'''
-		write_sequence_table(reference_file, output + SEQUENCES_SUFFIX)
 
 	def reader(self, **kwargs):
 		kwargs.setdefault("min_mapq", self.min_mapq)
