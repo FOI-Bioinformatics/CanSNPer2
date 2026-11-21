@@ -87,11 +87,12 @@ def _header(handle):
 	return handle.readline().lstrip("#").strip().split("\t")
 
 
-def check_references(path, problems, known=None, database=None):
+def check_references(path, problems, known=None, database=None, known_accessions=None):
 	'''Return the names a SNP may use for its genome (the genome column and both
 		accessions, as the loaders accept all three), mapped to the genome name.
 		known: the genome names a database already holds, which a new row must not repeat;
-		database: the name of that database in the messages'''
+		known_accessions: {genbank_id: genome} of that database, an accession a new row must
+		not give for another genome; database: the name of that database in the messages'''
 	names = {}
 	genomes = Counter()
 	accessions = {}
@@ -124,6 +125,10 @@ def check_references(path, problems, known=None, database=None):
 					path, number, accession, genome, accessions[accession][0], accessions[accession][1]))
 			else:
 				accessions[accession] = (genome, number)
+			if known_accessions and accession in known_accessions and known_accessions[accession] != genome:
+				problems.append("{0}:{1}: genbank_id '{2}' of genome '{3}' is already used by genome '{4}' in {5}; "
+					"a source file is written per accession, so two genomes cannot share one".format(
+					path, number, accession, genome, known_accessions[accession], database))
 			if known is not None and genome in known:
 				problems.append("{0}:{1}: genome '{2}' is already in {3}".format(path, number, genome, database))
 			for column in ("refseq_id", "genbank_id", "genome"):
@@ -224,7 +229,7 @@ def check_modification(database, annotation=None, references=None, name=None):
 		existing database, an empty list when they can be added. The SNPs are checked against
 		the nodes of the tree in the database and against the reference genomes of the database
 		and of the references file; a genome, a snp_id or a position the database already holds
-		is a problem. name: the database as it is named in the messages (default database)'''
+		is a problem, and so is a genbank_id the database holds for another genome. name: the database as it is named in the messages (default database)'''
 	name = name or database
 	problems = []
 	conn = sqlite3.connect(database)
@@ -232,10 +237,13 @@ def check_modification(database, annotation=None, references=None, name=None):
 		tree_nodes = set(row[0] for row in conn.execute(
 			"SELECT name FROM nodes WHERE id IN (SELECT child FROM tree UNION SELECT parent FROM tree)"))
 		genomes = {}
+		accessions = {}
 		for genome, genbank_id, refseq_id in conn.execute("SELECT genome, genbank_id, refseq_id FROM snp_references"):
 			for key in (refseq_id, genbank_id, genome):
 				if key:
 					genomes[key] = genome
+			if genbank_id:
+				accessions[genbank_id] = genome
 		snp_ids = set(row[0] for row in conn.execute("SELECT snp_id FROM snp_annotation"))
 		positions = set((genome, str(sequence), int(position)) for genome, sequence, position in conn.execute(
 			"""SELECT snp_references.genome, snp_annotation.sequence, snp_annotation.sequence_position
@@ -245,7 +253,8 @@ def check_modification(database, annotation=None, references=None, name=None):
 		conn.close()
 	known = set(genomes.values())
 	if references:
-		genomes.update(check_references(references, problems, known=known, database=name))
+		genomes.update(check_references(references, problems, known=known, database=name,
+			known_accessions=accessions))
 	if annotation:
 		check_snps(annotation, problems, tree_nodes=tree_nodes, genomes=genomes,
 			references_path=name if not references else "{0} or {1}".format(name, references),

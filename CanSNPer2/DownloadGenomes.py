@@ -36,8 +36,11 @@ def assembly_report_url(genome_url):
 def genbank_names(report_text):
 	'''{refseq_accn: genbank_accn} from the text of an NCBI assembly report. The columns are
 		found by name in the last comment line; rows without a GenBank or RefSeq accession
-		(value na) are skipped'''
-	header, names = None, {}
+		(value na) are skipped. Rows whose Relationship is <> are skipped as well, with one
+		warning that names them: the RefSeq and the GenBank sequence differ, so a position on
+		one need not hold on the other. Such a sequence keeps its RefSeq name, and the
+		reference check then refuses the genome when a SNP needs it, as CanSNPCreator does.'''
+	header, names, different = None, {}, []
 	for line in report_text.splitlines():
 		if line.startswith("#"):
 			fields = line.lstrip("#").strip().split("\t")
@@ -51,7 +54,14 @@ def genbank_names(report_text):
 			continue
 		genbank, refseq = row[header.index("GenBank-Accn")].strip(), row[header.index("RefSeq-Accn")].strip()
 		if genbank and refseq and genbank != "na" and refseq != "na":
+			if "Relationship" in header and row[header.index("Relationship")].strip() == "<>":
+				different.append(refseq)
+				continue
 			names[refseq] = genbank
+	if different:
+		logger.warning("{n} RefSeq sequence(s) differ from their GenBank sequence (Relationship <>) and keep "
+			"their RefSeq name: {names}; SNPs on them cannot be placed by their GenBank name".format(
+			n=len(different), names=", ".join(different)))
 	return names
 
 def rename_sequences(path, names):
