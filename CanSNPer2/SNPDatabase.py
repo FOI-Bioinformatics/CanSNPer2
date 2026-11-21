@@ -148,7 +148,8 @@ def convert(args, logger):
 				references.update(references_from_file(args.references))
 			files = genome_files(args.refdir, database_genomes(source), references)
 			count = convert_database(source, target, files, sequences=sequences)
-	except (ConversionError, OSError) as e:
+	except (ConversionError, ConnectionError, sqlite3.Error, OSError) as e:
+		'''every failure of the conversion is one error message and exit code 1, not a traceback'''
 		logger.error(str(e))
 		return 1
 	print("converted {n} SNPs of {name} to positions on {m} reference sequences, written to {target}".format(

@@ -205,3 +205,75 @@ def test_reads_accessions_from_the_references_file(tmp_path):
 	path = write(tmp_path / "old_references.txt",
 		"genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\nREF\tREF strain\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n")
 	assert references_from_file(path) == {"REF": ("GCA_000000001.1", "ASM1v1")}
+
+
+# failures partway through leave no output behind ---------------------------------------
+
+def test_a_failed_table_write_leaves_no_output(tmp_path, monkeypatch):
+	import CanSNPer2.modules.ConvertPositions as ConvertPositions
+	refs = {"REF": write_reference(tmp_path / "refs")}
+	source = write(tmp_path / "old_snp.txt", OLD_SNP)
+	def fail(src, dst):
+		raise OSError("disk full")
+	monkeypatch.setattr(ConvertPositions.os, "replace", fail)
+	with pytest.raises(OSError, match="disk full"):
+		convert_table(source, str(tmp_path / "out" / "old_snp.txt"), refs)
+	assert os.listdir(str(tmp_path / "out")) == []
+
+
+def test_a_failed_database_rebuild_leaves_no_output(tmp_path, monkeypatch):
+	import CanSNPer2.modules.ConvertPositions as ConvertPositions
+	source = old_database(tmp_path / "old.db")
+	refs = {"REF": write_reference(tmp_path / "refs")}
+	monkeypatch.setattr(ConvertPositions, "snp_annotation_sql", lambda table: "CREATE TABLE broken (")
+	with pytest.raises(ConversionError, match="nothing was written"):
+		convert_database(source, str(tmp_path / "out" / "old.db"), refs)
+	assert os.listdir(str(tmp_path / "out")) == []
+
+
+def test_an_existing_part_file_is_not_overwritten(tmp_path):
+	refs = {"REF": write_reference(tmp_path / "refs")}
+	source = write(tmp_path / "old_snp.txt", OLD_SNP)
+	os.makedirs(str(tmp_path / "out"))
+	part = write(tmp_path / "out" / "old_snp.txt.part", "keep\n")
+	db_part = write(tmp_path / "out" / "old.db.part", "keep\n")
+	assert convert_table(source, str(tmp_path / "out" / "old_snp.txt"), refs) == 2
+	assert convert_database(old_database(tmp_path / "old.db"), str(tmp_path / "out" / "old.db"), refs) == 3
+	for path in (part, db_part):
+		with open(path) as fin:
+			assert fin.read() == "keep\n"
+	assert sorted(os.listdir(str(tmp_path / "out"))) == ["old.db", "old.db.part", "old_snp.txt", "old_snp.txt.part"]
+
+
+def test_cli_reports_a_rebuilt_copy_that_fails_the_check(tmp_path, monkeypatch, caplog):
+	'''the check of the rebuilt copy and sqlite errors end in one message and exit 1'''
+	import CanSNPer2.modules.ConvertPositions as ConvertPositions
+	from CanSNPer2 import SNPDatabase
+	from CanSNPer2.modules.DatabaseConnection import ConnectionError as DBConnectionError
+	db = old_database(tmp_path / "old.db")
+	write_reference(tmp_path / "refs")
+	real = ConvertPositions.check_database
+	def check(path, current_format=True):
+		if current_format:
+			raise DBConnectionError("{0} is not a CanSNP database".format(path))
+		return real(path, current_format=current_format)
+	monkeypatch.setattr(ConvertPositions, "check_database", check)
+	monkeypatch.setattr(sys, "argv", ["CanSNPer2-database", "--convert", "--database", db, "--refdir",
+		str(tmp_path / "refs"), "-o", str(tmp_path / "out"), "--logs", str(tmp_path / "logs")])
+	with pytest.raises(SystemExit) as stop:
+		SNPDatabase.main()
+	assert stop.value.code == 1
+	errors = [record.getMessage() for record in caplog.records if record.levelname == "ERROR"]
+	assert len(errors) == 1 and "failed the database check" in errors[0]
+	assert os.listdir(str(tmp_path / "out")) == []
+
+
+def test_cli_reports_a_file_that_is_not_a_database(tmp_path):
+	write_reference(tmp_path / "refs")
+	db = write(tmp_path / "old.db", "this is not an sqlite database\n" * 100)
+	result = run_cli(tmp_path, "--convert", "--database", db, "--refdir", str(tmp_path / "refs"),
+		"-o", str(tmp_path / "out"))
+	assert result.returncode == 1
+	assert "Traceback" not in result.stderr
+	assert "not a database" in result.stderr
+	assert not os.path.exists(str(tmp_path / "out" / "old.db"))

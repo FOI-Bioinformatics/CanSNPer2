@@ -24,6 +24,7 @@ import bisect
 import os
 import shutil
 import sqlite3
+import tempfile
 import logging
 
 from CanSNPer2.modules.ReferenceCheck import read_sequences, listing
@@ -75,6 +76,23 @@ def check_target(source, target):
 		if os.path.realpath(source) == os.path.realpath(target) or (os.path.exists(source) and os.path.samefile(source, target)):
 			raise ConversionError("The output {target} is the input, give another output folder with -o".format(target=target))
 		raise ConversionError("The output {target} already exists, remove it or give another output folder with -o".format(target=target))
+
+
+def _temporary(target):
+	'''a new, empty file next to target that the output is written to before it is renamed to
+		target; mkstemp never opens an existing file, so no other file is overwritten'''
+	directory = os.path.dirname(target)
+	if directory:
+		os.makedirs(directory, exist_ok=True)
+	handle, path = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(target)),
+		suffix=".part", dir=directory or ".")
+	os.close(handle)
+	return path
+
+
+def _remove(path):
+	if os.path.exists(path):
+		os.remove(path)
 
 
 class _References(object):
@@ -180,13 +198,13 @@ def convert_table(source, target, genome_files, sequences=None):
 		raise ConversionError("{source} has no header row".format(source=source))
 	if refused:
 		raise ConversionError(_refusal(source, refused))
-	directory = os.path.dirname(target)
-	if directory:
-		os.makedirs(directory, exist_ok=True)
-	partial = target + ".part"
-	with open(partial, "w", newline="") as out:
-		out.write("".join(output))
-	os.replace(partial, target)
+	partial = _temporary(target)
+	try:
+		with open(partial, "w", newline="") as out:
+			out.write("".join(output))
+		os.replace(partial, target)
+	finally:
+		_remove(partial)
 	if sequences is not None:
 		sequences.update(placed)
 	return count
@@ -203,7 +221,10 @@ def convert_database(source_db, target_db, genome_files, sequences=None):
 	except ConnectionError as e:
 		raise ConversionError(str(e))
 	check_target(source_db, target_db)
-	rows = _joined_rows(source_db)
+	try:
+		rows = _joined_rows(source_db)
+	except sqlite3.Error as e:
+		raise ConversionError("The SNPs of {db} could not be read: {error}".format(db=source_db, error=e))
 	references = _References(genome_files)
 	refused = []
 	converted_rows = []
@@ -221,12 +242,9 @@ def convert_database(source_db, target_db, genome_files, sequences=None):
 		converted_rows.append((node_id, snp_id, converted[0], converted[1], ancestral, derived, reference, date, genome_i))
 	if refused:
 		raise ConversionError(_refusal(source_db, refused))
-	directory = os.path.dirname(target_db)
-	if directory:
-		os.makedirs(directory, exist_ok=True)
-	partial = target_db + ".part"
-	shutil.copyfile(source_db, partial)
+	partial = _temporary(target_db)
 	try:
+		shutil.copyfile(source_db, partial)
 		conn = sqlite3.connect(partial)
 		try:
 			conn.execute(snp_annotation_sql("snp_annotation_converted"))
@@ -238,11 +256,15 @@ def convert_database(source_db, target_db, genome_files, sequences=None):
 			conn.execute("VACUUM")
 		finally:
 			conn.close()
-		check_database(partial)
+		try:
+			check_database(partial)
+		except ConnectionError as e:
+			raise ConversionError("The converted copy of {db} failed the database check, nothing was written: {error}".format(db=source_db, error=e))
 		os.replace(partial, target_db)
+	except sqlite3.Error as e:
+		raise ConversionError("The database {db} could not be converted, nothing was written: {error}".format(db=source_db, error=e))
 	finally:
-		if os.path.exists(partial):
-			os.remove(partial)
+		_remove(partial)
 	if sequences is not None:
 		sequences.update(placed)
 	return len(converted_rows)
