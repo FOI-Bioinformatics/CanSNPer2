@@ -142,8 +142,11 @@ def test_extra_references_in_the_folder_are_tolerated(tmp_path):
 	db = str(tmp_path / "refs.db")
 	CreateSNPDatabase(db, create=True)
 	conn = CanSNPdbFunctions(db)
-	for genome in ("OSU18", "LVS"):
-		conn.insert({"genome": genome, "strain": genome}, "snp_references")
+	for node_id, genome in enumerate(("OSU18", "LVS"), start=1):
+		genome_i = conn.insert({"genome": genome, "strain": genome}, "snp_references")
+		## only reference genomes with SNPs are aligned against
+		conn.insert({"node_id": node_id, "snp_id": "S.{0}".format(node_id), "sequence": genome, "sequence_position": 1,
+			"ancestral_base": "A", "derived_base": "T", "genome_i": genome_i}, "snp_annotation")
 	conn.commit()
 	conn.disconnect()
 	refdir = tmp_path / "refdir"
@@ -153,8 +156,10 @@ def test_extra_references_in_the_folder_are_tolerated(tmp_path):
 	obj = CanSNPer2([], database=db, refdir=str(refdir), workdir=str(tmp_path))
 	import logging
 	logging.disable(logging.CRITICAL)
-	selected = obj.get_references()
-	logging.disable(logging.NOTSET)
+	try:
+		selected = obj.get_references()
+	finally:
+		logging.disable(logging.NOTSET)
 	assert selected == ["LVS.fna", "OSU18.fna"], selected
 
 

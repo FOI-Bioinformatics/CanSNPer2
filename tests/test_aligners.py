@@ -57,7 +57,10 @@ def test_mauve_alignment_files_and_reference_names(tmp_path):
 	(refdir / "Ames_ancestor.fna").write_text(">chr\nACGT\n")
 	query = tmp_path / "sample.fna"
 	query.write_text(">q\nACGT\n")
-	obj = CanSNPer2([str(query)], workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out", skip_alignment=True)
+	## the reference is checked against the SNPs of the database, here one SNP at chr:2 (C)
+	db = make_db(tmp_path / "t.db", [("S.1", "chr", 2, "A", "C")], genome="Ames_ancestor")
+	obj = CanSNPer2([str(query)], workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
+		skip_alignment=True, database=db)
 	files = obj.align(str(query), references=["Ames_ancestor.fna"])
 	assert files == [os.path.join(obj.tmpdir, "Ames_ancestor_sample.xmfa")]
 	assert obj.alignment_references == ["Ames_ancestor"]
