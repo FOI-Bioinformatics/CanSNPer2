@@ -289,3 +289,33 @@ def test_blank_lines_before_the_root_do_not_change_the_database(tmp_path, prefix
 	plain = build_db(tmp_path, "plain.db", tree_file("\t"), annotation_file())
 	blank = build_db(tmp_path, "blank.db", prefix + tree_file("\t").replace("\n", "\n\n", 1), annotation_file())
 	assert tables(blank) == tables(plain)
+
+
+def modify_arguments(db, mod_file, parent, **extra):
+	return ["-db", str(db), "--mod_file", str(mod_file), "--parent", parent]
+
+
+@pytest.mark.parametrize("rows", [
+	"R\tB.1\n",              # B.1 gets a second parent (it is under A.1)
+	"B.1\tA.1\n",            # a cycle through A.1 and B.1
+	"A.1\tA.1\n",            # a node linked to itself
+	"A.1\tR\n",              # a link to the root
+])
+def test_modification_that_breaks_the_tree_is_refused(tmp_path, rows):
+	# these were written without a message and left a database that could not be exported
+	db = build_db(tmp_path, "m.db", tree_file("\t"), annotation_file())
+	mod = tmp_path / "mod.txt"
+	mod.write_text("parent\tchild\n" + rows)
+	before = open(db, "rb").read()
+	result = run_database_cli(tmp_path, modify_arguments(db, mod, rows.split("\t")[0]))
+	assert result.returncode == 1, result.stderr
+	assert open(db, "rb").read() == before, "the database is left as it was"
+	assert "tree that is not valid" in result.stderr + result.stdout
+
+
+def test_modification_that_keeps_a_tree_is_accepted(tmp_path):
+	db = build_db(tmp_path, "m.db", tree_file("\t"), annotation_file())
+	mod = tmp_path / "mod.txt"
+	mod.write_text("parent\tchild\nB.1\tC.1\n")
+	result = run_database_cli(tmp_path, modify_arguments(db, mod, "B.1"))
+	assert result.returncode == 0, result.stderr

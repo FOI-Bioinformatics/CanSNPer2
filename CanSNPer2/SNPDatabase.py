@@ -19,7 +19,7 @@ from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.DatabaseConnection import TreeError as DatabaseTreeError
 from CanSNPer2.modules.SourceCheck import check_modification
 from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
-from CanSNPer2.modules.ExportDatabase import export_source, ExportError
+from CanSNPer2.modules.ExportDatabase import export_source, tree_paths, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.SchemeInfo import (STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice,
@@ -220,6 +220,16 @@ def modify(args, logger):
 		modifier.close()
 		modifier = None
 		check_database(work)
+		'''the modified tree must still be a tree: one root, one parent per node and every node
+			reachable from the root. Links that gave a node a second parent or made a cycle were
+			written, and the database then could not be exported'''
+		conn = sqlite3.connect(work)
+		try:
+			tree_paths(conn)
+		except ExportError as e:
+			raise TreeError("the modification would leave {db} with a tree that is not valid: {e}".format(db=database, e=e))
+		finally:
+			conn.close()
 		'''the changed database no longer matches the scheme files it was built from, so its
 			scheme_info is marked: status unknown, commit +modified, the date and the version'''
 		conn = sqlite3.connect(work)
