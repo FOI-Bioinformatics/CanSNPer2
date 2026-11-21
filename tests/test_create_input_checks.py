@@ -341,3 +341,27 @@ def test_the_schemes_of_CanSNPer2_data_build(tmp_path, name):
 	folder = os.path.join(DATA, "schemes", name)
 	files = {key: os.path.join(folder, "{0}_{1}.txt".format(name, key)) for key in ("tree", "snp", "references")}
 	create(tmp_path, files)
+
+
+def test_the_command_line_mod_file_refuses_an_old_header_with_the_conversion_hint(tmp_path):
+	'''--mod_file with --annotation reads the SNP file through check_source_headers, not
+		check_sources; a file with joined positions must still name the conversion command'''
+	db = create(tmp_path, write_sources(tmp_path))
+	mod = tmp_path / "mod.txt"
+	mod.write_text("child\tparent\nC.1\tR\n")
+	old = tmp_path / "old_snp.txt"
+	old.write_text("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\n"
+		"C.1\ts1\tPaper2020\tREF1\t500\tA\tC\n")
+	result = subprocess.run([sys.executable, "-m", "CanSNPer2.SNPDatabase", "--database", db,
+		"--mod_file", str(mod), "--parent", "R", "--annotation", str(old), "--logs", str(tmp_path / "logs")],
+		capture_output=True, text=True, cwd=str(tmp_path))
+	assert result.returncode == 1, result.stdout + result.stderr
+	assert "--convert" in result.stderr, result.stderr
+
+
+def test_check_source_headers_refuses_joined_positions_with_the_conversion_hint():
+	from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, JOINED_FORMAT_HINT, check_source_headers
+	headers = ["snp_id", "strain", "reference", "genome", "position", "derived_base", "ancestral_base"]
+	with pytest.raises(SourceFileError) as error:
+		check_source_headers(headers, ANNOTATION_SOURCE_COLUMNS, "old_snp.txt")
+	assert JOINED_FORMAT_HINT in str(error.value) and "old_snp.txt" in str(error.value)

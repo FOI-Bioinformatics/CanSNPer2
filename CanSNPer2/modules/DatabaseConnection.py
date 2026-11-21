@@ -42,8 +42,11 @@ class SourceFileError(ValueError):
 
 def check_source_headers(headers,required,filename):
 	'''source files are read by column name, a file without the header row, or with renamed columns,
-		crashed with a bare KeyError deep inside the loaders (issue #154)'''
-	missing = [column for column in required if column not in headers]
+		crashed with a bare KeyError deep inside the loaders (issue #154). A SNP file with joined
+		positions (a position column and no sequence_position) is refused with the conversion hint.'''
+	if "position" in headers and "sequence_position" not in headers:
+		raise SourceFileError("The source file {file} cannot be used. {hint}".format(file=filename,hint=JOINED_FORMAT_HINT))
+	missing =[column for column in required if column not in headers]
 	if missing:
 		raise SourceFileError("The source file {file} has no column(s) {missing}, a header row with {required} is required".format(file=filename,missing=", ".join(missing),required=", ".join(required)))
 	return True
