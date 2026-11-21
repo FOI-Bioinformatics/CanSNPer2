@@ -225,7 +225,8 @@ fi
 say "== real alignments: the known answers"
 cmd align-query ok "5 alignments written" "$PY" -m CanSNPer2.modules.runMauve "$OUT/inputs/query.fna" \
     --refdir "$OUT/refs" --tmpdir "$OUT/tmp_align" --logs "$OUT/logs/align" --outdir "$OUT/align" --keep_temp
-expect "five alignments" "5" "$(ls "$OUT/align" | wc -l | tr -d ' ')"
+expect "five alignments" "5" "$(ls "$OUT"/align/*.xmfa | wc -l | tr -d ' ')"
+expect "five sequence tables" "5" "$(ls "$OUT"/align/*.xmfa.sequences | wc -l | tr -d ' ')"
 expect "mauve left no sslist in the input folders" "0" "$(find "$OUT/refs" "$OUT/inputs" -name '*.sslist' | wc -l | tr -d ' ')"
 cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
@@ -252,7 +253,7 @@ else
     printf '  FAIL  %-52s missing or empty\n' "query_tree.html written"; FAILED=$((FAILED+1))
 fi
 
-mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT/tmp_skip/CanSNPer2/"
+mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT"/align/*.xmfa.sequences "$OUT/tmp_skip/CanSNPer2/"
 cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
 expect "same snps through --skip_mauve" "20" "$(wc -l < "$OUT/res_skip/query_snps.txt")"

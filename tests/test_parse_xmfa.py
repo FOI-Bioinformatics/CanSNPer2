@@ -11,7 +11,7 @@ import shutil
 import pytest
 
 from helpers import make_db
-from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX, read_sequence_table, write_sequence_table
+from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX, read_sequence_table
 from CanSNPer2.modules.Aligners import ProgressiveMauve
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
@@ -230,18 +230,20 @@ TWO_SEQUENCES = (("chr1", 600), ("chr2", 400))
 def test_xmfa_maps_joined_coordinates_to_sequences(tmp_path):
 	# progressiveMauve counts along the reference sequences joined end to end: with chr1 of
 	# 600 bases, joined 595 is chr1:595 and joined 615 is chr2:15. One block 590-620 spans
-	# the end of chr1 and the start of chr2 and holds both SNPs
-	rows = [("B.1", "chr1", 595, "C", "T"), ("B.2", "chr2", 15, "G", "A")]
-	ref, target = pair(31, {595 - 590: ("C", "T"), 615 - 590: ("G", "A")})
+	# the end of chr1 and the start of chr2 and holds both SNPs. The last base of chr1
+	# (joined 600) and the first base of chr2 (joined 601) test the edge between them
+	rows = [("B.1", "chr1", 595, "C", "T"), ("B.2", "chr2", 15, "G", "A"),
+		("E.1", "chr1", 600, "C", "A"), ("E.2", "chr2", 1, "C", "G")]
+	ref, target = pair(31, {595 - 590: ("C", "T"), 615 - 590: ("G", "A"), 600 - 590: ("C", "A"), 601 - 590: ("C", "G")})
 	snps, called, parser = run(tmp_path, rows, [(590, 620, ref, target)], sequences=TWO_SEQUENCES)
-	assert snps == {"B.1": 1, "B.2": 1}
-	assert called == ["B.1", "B.2"]
-	assert [(row[0], row[2], row[3]) for row in parser.get_snp_info()] == [
-		("B.1", "chr1", "595"), ("B.2", "chr2", "15")]
-	assert parser.joined == [595, 615]
-	assert parser.joined_keys == {595: ("chr1", 595), 615: ("chr2", 15)}
-	assert parser.joined_snps_in(590, 600) == [595]
-	assert parser.joined_snps_in(601, 620) == [615]
+	assert snps == {"B.1": 1, "B.2": 1, "E.1": 1, "E.2": 1}
+	assert called == ["B.1", "E.1", "E.2", "B.2"]
+	assert [(row[0], row[2], row[3], row[8]) for row in parser.get_snp_info()] == [
+		("B.1", "chr1", "595", "T"), ("E.1", "chr1", "600", "A"), ("E.2", "chr2", "1", "G"), ("B.2", "chr2", "15", "A")]
+	assert parser.joined == [595, 600, 601, 615]
+	assert parser.joined_keys == {595: ("chr1", 595), 600: ("chr1", 600), 601: ("chr2", 1), 615: ("chr2", 15)}
+	assert parser.joined_snps_in(590, 600) == [595, 600]
+	assert parser.joined_snps_in(601, 620) == [601, 615]
 
 
 def test_xmfa_reverse_block_on_second_sequence(tmp_path):
