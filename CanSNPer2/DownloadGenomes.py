@@ -94,10 +94,12 @@ class DownloadGenomes(object):
 			os.makedirs(self.directory)
 
 	def get_genomes(self, database=False,source="genbank"):
-		'''Get the list of genomes in the database'''
-		## This is a many to many relation, so all genomes has to be put in a set for each taxonomy id
-		genomeDict = {}
-		keys = []
+		'''The reference genomes of the database, one (accession, assembly name, genome) record per
+			row of snp_references; the accession is the refseq_id with source refseq, otherwise the
+			genbank_id. Accessions and assembly names used to share one dictionary, so two genomes
+			with the same assembly name were downloaded as one, and a genome without accession
+			and assembly name stopped the command with a KeyError'''
+		records = []
 		if not database:
 			raise ValueError("get_genomes needs a database connection, none was provided")
 		QUERY = '''SELECT id,genome,strain,refseq_id,genbank_id,assembly_name FROM {table}'''.format(table="snp_references")
@@ -105,16 +107,10 @@ class DownloadGenomes(object):
 		logger.debug("Selected source: {source}".format(source=source))
 		for id,genome_id,strain,refseq_id,genbank_id,assembly_name in database.query(QUERY).fetchall():
 			logging.debug([id,genome_id,strain,refseq_id,genbank_id,assembly_name])
-			logging.debug("Downloading {genome}".format(genome=genome_id))
-			if source == "refseq":
-				genomeDict[refseq_id] = assembly_name
-				keys.append(refseq_id)
-			else:
-				genomeDict[genbank_id] = assembly_name
-				keys.append(genbank_id)
-			genomeDict[assembly_name] = genome_id
-		logging.info(genomeDict)
-		return genomeDict,keys
+			accession = refseq_id if source == "refseq" else genbank_id
+			records.append((accession, assembly_name, genome_id))
+		logging.info(records)
+		return records
 
 	def retrieve(self, link, target, timeout=DOWNLOAD_TIMEOUT):
 		'''Fetch link into target; urlopen takes a timeout, urlretrieve never did (issue #218)'''
@@ -230,20 +226,19 @@ class DownloadGenomes(object):
 	def run(self):
 		'''Start download and collect what each worker actually managed to fetch (issue #218)'''
 		database = getattr(self, "database_path", None) or "the database"
-		self.genomes,keys = self.get_genomes(self.database,self.source)
-		if not keys:
+		records = self.get_genomes(self.database,self.source)
+		if not records:
 			'''this was a warning with exit status 0, so a script went on without references'''
 			logger.error("{db} lists no reference genomes, there is nothing to download; build the database "
 				"again with its references file".format(db=database))
 			return 1
 		targets = []
 		failed = []
-		for genome_id in keys:
-			assembly = self.genomes[genome_id]
+		for genome_id, assembly, refid in records:
 			if not genome_id:
-				failed.append("{refid}: {reason}".format(refid=self.genomes[assembly], reason=missing_accession(self.source)))
+				failed.append("{refid}: {reason}".format(refid=refid, reason=missing_accession(self.source)))
 				continue
-			targets.append((genome_id, assembly, self.genomes[assembly]))
+			targets.append((genome_id, assembly, refid))
 		'''the SNPs of each reference, which its downloaded genome is checked against; without
 			them the check of sequence names, lengths and bases was skipped with only a warning'''
 		try:
@@ -277,7 +272,7 @@ class DownloadGenomes(object):
 			if not success:
 				failed.append("{refid} ({genome_id} / {assembly}): {reason}".format(
 						refid=refid, genome_id=genome_id, assembly=assembly, reason=reason))
-		total = len(keys)
+		total = len(records)
 		logging.info("{n} of {m} references are now in {directory}".format(
 				n=total-len(failed), m=total, directory=self.directory))
 		if failed:

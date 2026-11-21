@@ -62,6 +62,8 @@ MOD_FILE = "child\tparent\nC.1\tR\n"
 ## a reference genome of 10,000 bases on one sequence, chr1
 GENOME = ">chr1 test\n" + "ACGT" * 2500 + "\n"
 
+MISSING_ACCESSION = "REF: the database has no genbank_id for this genome"
+
 BOOM = "def boom(*args, **kwargs):\n\traise RuntimeError('boom')\n"
 TOP_LEVEL = "CanSNPer2 stopped: RuntimeError: boom; run with --debug for details"
 
@@ -381,11 +383,14 @@ CASES = [
 	case("download --database: no reference genomes", "CanSNPer2-download",
 		download(sql=["DELETE FROM snp_references"]), 1, "nothing to download"),
 	case("download --database: NULL accession", "CanSNPer2-download",
-		download(sql=["UPDATE snp_references SET genbank_id=NULL"]), 1, ["REF", "has no genbank_id"],
+		download(sql=["UPDATE snp_references SET genbank_id=NULL"]), 1, MISSING_ACCESSION,
 		forbidden=["ended without reporting"]),
 	case("download --database: empty accession", "CanSNPer2-download",
-		download(sql=["UPDATE snp_references SET genbank_id=''"]), 1, ["REF", "has no genbank_id"],
+		download(sql=["UPDATE snp_references SET genbank_id=''"]), 1, MISSING_ACCESSION,
 		forbidden=["ended without reporting"]),
+	case("download --database: empty accession and assembly name", "CanSNPer2-download",
+		download(sql=["UPDATE snp_references SET genbank_id='', assembly_name=''"]), 1, MISSING_ACCESSION,
+		forbidden=["ended without reporting", "CanSNPer2 stopped"]),
 	case("download --database: SNPs cannot be read", "CanSNPer2-download",
 		download(sql=["UPDATE snp_annotation SET sequence_position='abc' WHERE node_id=2"]), 1,
 		"The SNP positions of"),
@@ -503,3 +508,60 @@ def test_a_repeated_tree_path_adds_no_second_node(tmp_path):
 	assert sorted(n for (n,) in conn.execute("SELECT name FROM nodes")) == ["A.1", "A.2", "B.1", "R"]
 	assert conn.execute("SELECT count(*) FROM tree").fetchone()[0] == 4
 	conn.close()
+
+
+def test_two_genomes_with_the_same_assembly_name_each_get_their_file(tmp_path, monkeypatch):
+	'''accessions and assembly names shared one dictionary, so the second genome with an assembly
+		name replaced the first: the download ended with exit 0 and only one <genome>.fna'''
+	import gzip
+	from CanSNPer2.DownloadGenomes import DownloadGenomes
+	db = typing_db(str(tmp_path / "download.db"), genomes=("REF", "REF2"))
+	conn = sqlite3.connect(db)
+	conn.execute("UPDATE snp_references SET assembly_name='ASM1v1'")
+	conn.commit()
+	conn.close()
+	def retrieve(self, link, target, timeout=None):
+		with open(target, "wb") as out:
+			out.write(gzip.compress(GENOME.encode()))
+	monkeypatch.setattr(DownloadGenomes, "retrieve", retrieve)
+	refs = tmp_path / "refs"
+	assert DownloadGenomes(db, directory=str(refs)).run() == 0
+	assert os.path.exists(str(refs / "REF.fna")) and os.path.exists(str(refs / "REF2.fna"))
+
+
+def test_a_database_given_as_a_symbolic_link_keeps_the_link(tmp_path):
+	'''the modified copy replaced the link with a regular file and left the file it pointed to unchanged'''
+	built = modification()(tmp_path)
+	db = built["unchanged"][0]
+	link = tmp_path / "link.db"
+	os.symlink(db, str(link))
+	args = [str(link) if arg == db else arg for arg in built["args"]]
+	result = run("CanSNPer2-database", args, tmp_path)
+	assert result.returncode == 0, result.stdout + result.stderr
+	assert os.path.islink(str(link)) and os.path.realpath(str(link)) == os.path.realpath(db)
+	conn = sqlite3.connect(db)
+	assert conn.execute("SELECT count(*) FROM snp_annotation WHERE snp_id='C.1'").fetchone()[0] == 1
+	conn.close()
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root can write to any folder")
+def test_a_database_in_a_folder_that_cannot_be_written_is_reported(tmp_path):
+	'''the copy is made beside the database; a folder without write permission ended with exit 2'''
+	built = modification()(tmp_path)
+	db = built["unchanged"][0]
+	folder = tmp_path / "readonly"
+	folder.mkdir()
+	moved = str(folder / "scheme.db")
+	os.rename(db, moved)
+	args = [moved if arg == db else arg for arg in built["args"]]
+	before = digest(moved)
+	os.chmod(str(folder), 0o555)
+	try:
+		result = run("CanSNPer2-database", args, tmp_path)
+	finally:
+		os.chmod(str(folder), 0o755)
+	output = result.stdout + result.stderr
+	assert result.returncode == 1, output
+	assert "Permission denied" in output and "was not changed" in output, output
+	assert "Traceback" not in result.stderr
+	assert digest(moved) == before and os.listdir(str(folder)) == ["scheme.db"]

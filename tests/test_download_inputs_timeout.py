@@ -107,7 +107,7 @@ def test_a_genome_shorter_than_its_snps_is_reported(tmp_path):
 
 def test_a_worker_that_dies_without_reporting_is_a_failure_not_a_crash(tmp_path, monkeypatch):
 	obj = downloader(tmp_path, {"data": GZ})
-	obj.get_genomes = lambda *args: ({"GCA_000007845.1": "ASM784v1", "ASM784v1": "Ames"}, ["GCA_000007845.1"])
+	obj.get_genomes = lambda *args: [("GCA_000007845.1", "ASM784v1", "Ames")]
 	monkeypatch.setattr(DownloadGenomes, "download", lambda self, *args, **kwargs: os._exit(3))
 	assert obj.run() == 1
 

@@ -179,15 +179,19 @@ def modify(args, logger):
 		tree is changed first, the SNP and references files are then checked against the tree
 		and the reference genomes of the copy (SourceCheck.check_modification), and the copy
 		replaces the database only when every step succeeded and it passes check_database.
-		A run that fails leaves the database byte-identical. Returns the exit code.'''
+		A run that fails leaves the database byte-identical. A database given as a symbolic link
+		is resolved first, so the file it points to is replaced and the link is kept. Returns
+		the exit code.'''
 	database = args.database
-	folder = os.path.dirname(os.path.abspath(database))
-	fd, work = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(database)), suffix=".part", dir=folder)
-	os.close(fd)
+	target = os.path.realpath(database)
+	work = None
 	modifier = None
 	try:
-		shutil.copyfile(database, work)
-		shutil.copymode(database, work) ## the database keeps its mode, not the 0600 of mkstemp
+		fd, work = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(target)), suffix=".part",
+			dir=os.path.dirname(target))
+		os.close(fd)
+		shutil.copyfile(target, work)
+		shutil.copymode(target, work) ## the database keeps its mode, not the 0600 of mkstemp
 		options = dict(vars(args))
 		options["database"] = work
 		modifier = ModifyCanSNPer2Database(**options)
@@ -210,18 +214,20 @@ def modify(args, logger):
 		modifier.close()
 		modifier = None
 		check_database(work)
-		os.replace(work, database)
+		os.replace(work, target)
 	except (InputError, TreeError, DatabaseTreeError, SourceFileError, DatabaseWriteError, ConnectionError,
 			sqlite3.Error, OSError) as e:
 		'''messages name the database, not the copy that was worked on'''
 		message = getattr(e, "message", None) or str(e)
-		logger.error(message.replace(work, database))
+		if work is not None:
+			message = message.replace(work, database)
+		logger.error(message)
 		logger.error("{db} was not changed".format(db=database))
 		return 1
 	finally:
 		if modifier is not None:
 			modifier.close()
-		if os.path.exists(work):
+		if work is not None and os.path.exists(work):
 			os.remove(work)
 	return 0
 
