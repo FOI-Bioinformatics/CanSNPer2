@@ -468,9 +468,11 @@ class CanSNPer2(object):
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
 			ref_path = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
-			'''with --skip_alignment the reference is checked when it is at hand: a renamed
-				reference gave NA calls and nothing in the log. Alignments can be read again
-				without the reference folder, the check is then left out.'''
+			'''the reference is also checked with --skip_alignment: a renamed reference gave
+				NA calls and nothing in the log. The references are listed from refdir and
+				opened by clean_input_fasta below, so the file is always present here and the
+				isfile test does not leave the check out; --skip_alignment without the
+				reference folder fails before this point (a known defect, tracked separately).'''
 			if not self.skip_alignment or os.path.isfile(ref_path):
 				self.check_reference_file(ref_path, ref_name)
 			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")

@@ -12,8 +12,10 @@
 # gate stays honest on machines that are not the reference one.
 #
 # Data it needs from the project (issue #185, the data lives next to the repository):
-#   ../CanSNPer2-data-perseq/schemes/francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
-#   (the converted CanSNPer2-data worktree; override the folder with DATA=/path/to/CanSNPer2-data-perseq)
+#   ../CanSNPer2-data/schemes/francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
+#   (the normal CanSNPer2-data checkout, which holds the converted schemes once they are merged;
+#   override the folder with DATA=/path/to/CanSNPer2-data. Before that merge, run the gate
+#   against the converted worktree: DATA=$ROOT/CanSNPer2-data-perseq bash tests/release_test.sh)
 #   references/*.fna in this repository, and ../../test_data/*.fasta for the known answers
 # Override the root with ROOT=/path/to/project when the layout is different.
 
@@ -24,8 +26,8 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 ROOT=${ROOT:-$(cd "$REPO/.." && pwd)}
 PKG=$REPO
-# worktree of CanSNPer2-data with the converted schemes (per-sequence positions, 2.3.0)
-DATA=${DATA:-$ROOT/CanSNPer2-data-perseq}
+# CanSNPer2-data with the converted schemes (per-sequence positions, 2.3.0)
+DATA=${DATA:-$ROOT/CanSNPer2-data}
 SRC=$DATA/schemes/francisella_tularensis
 PY=${PYTHON:-python}
 OUT=${OUT:-$ROOT/test-run/release_gate}

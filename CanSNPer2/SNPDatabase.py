@@ -152,8 +152,9 @@ def convert(args, logger):
 		'''every failure of the conversion is one error message and exit code 1, not a traceback'''
 		logger.error(str(e))
 		return 1
-	print("converted {n} SNPs of {name} to positions on {m} reference sequences, written to {target}".format(
-		n=count, name=os.path.basename(source), m=len(sequences), target=target))
+	print("converted {n} {snps} of {name} to positions on {m} reference {noun}, written to {target}".format(
+		n=count, snps="SNP" if count == 1 else "SNPs", name=os.path.basename(source), m=len(sequences),
+		noun="sequence" if len(sequences) == 1 else "sequences", target=target))
 	return 0
 
 

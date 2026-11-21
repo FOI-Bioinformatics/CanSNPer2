@@ -181,6 +181,16 @@ def test_cli_converts_a_snp_file_and_a_database(tmp_path):
 	assert "--outdir" in result.stderr + result.stdout
 
 
+def test_cli_names_one_reference_sequence_in_the_singular(tmp_path):
+	write_reference(tmp_path / "refs")
+	source = write(tmp_path / "old_snp.txt", "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\n"
+		"A.1\tREF\ttest\tREF\t10\tT\t{0}\n".format(base(10)))
+	result = run_cli(tmp_path, "--convert", "--annotation", source, "--refdir", str(tmp_path / "refs"),
+		"-o", str(tmp_path / "out"))
+	assert result.returncode == 0, result.stderr
+	assert "converted 1 SNP of old_snp.txt to positions on 1 reference sequence, written to" in result.stdout
+
+
 def test_downloads_missing_reference_once(tmp_path, monkeypatch):
 	fetched = []
 	def retrieve(self, link, target, timeout=None):

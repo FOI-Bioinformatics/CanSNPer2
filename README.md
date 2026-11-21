@@ -98,6 +98,8 @@ The source files are checked before a database is built, with the rules of
 [CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data)'s `validate.py`. Files
 that do not form one scheme are refused, every problem is listed with its file and line, and no
 database is written. The same checks apply to `--import` and `CanSNPer2-download --scheme`.
+`--create` builds a new database: an existing `--database` file is refused (a database from
+before 2.3.0 with the hint to convert it), and a build that fails part way leaves no file behind.
 
 | File | Refused |
 |---|---|
@@ -481,9 +483,10 @@ CanSNPer2-database --convert --database old.db --refdir references/ -o converted
 The reference files must have their sequences in the order in which the old positions were
 counted (the order of the NCBI assembly file). The sequence names written are the first
 words of their fasta headers; missing reference files are downloaded from GenBank, so the
-names are GenBank accessions. Alignments
-made by 2.2 must be made again, as `--skip_alignment` needs the sequence table that 2.3.0
-writes next to an alignment.
+names are GenBank accessions. progressiveMauve alignments made by 2.2 must be made again,
+as `--skip_alignment` needs the sequence table (`<alignment>.sequences`) that 2.3.0 writes
+next to an xmfa alignment. minimap2 and MUMmer4 alignments made by 2.2 are read as they
+are, because their reference coordinates were always positions on each sequence.
 
 ## Aligners
 
@@ -491,22 +494,25 @@ CanSNPer2 aligns each query genome against every reference genome of the databas
 and reads the query base at each SNP position from the alignment. Three aligners are
 available:
 
-* `progressiveMauve` (default), which writes xmfa alignments.
+* `progressiveMauve` (default), which writes xmfa alignments. The xmfa counts reference
+  positions along the reference sequences joined end to end, so the names and lengths of
+  those sequences are written next to each alignment (`<alignment>.sequences`), and
+  `--skip_alignment` reads them again. This table is written for progressiveMauve only.
 * `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k -N 50 -p 0.1` and
   written as PAF. Only primary alignments with a mapping quality of at least 20 are
   read: a secondary alignment, or a primary one with a lower mapping quality, can carry
   the base of another copy of a repeated region. The long-join bandwidth (`-r`) and the
   secondary chain settings (`-N`, `-p`) differ from the preset so that the short
   stretches between IS elements and rearrangements, which separate Francisella genomes
-  of different subspecies, are aligned as well. The reference sequence table
-  (`<alignment>.sequences`) is written next to each alignment, so `--skip_alignment`
-  can read it again.
+  of different subspecies, are aligned as well. PAF gives positions on each reference
+  sequence, so the alignment is read again with `--skip_alignment` without any other file.
 * `mummer4`, MUMmer4 `nucmer` with its default settings followed by `delta-filter -1`,
   written as delta. The 1-to-1 filter keeps, for every reference and query position,
   only the best alignment, allowing rearrangements. The delta file names the reference
-  and query fasta files it was made from; the reader takes the query bases and the
-  reference sequence order from them, so those files must still be in place when the
-  alignment is read again with `--skip_alignment`. `nucmer` and `delta-filter` must
+  and query fasta files it was made from. The reference coordinates are positions on each
+  reference sequence; the reader takes only the query bases from the query file, so that
+  file must still be in place when the alignment is read again with `--skip_alignment`,
+  and the reference file is not needed. `nucmer` and `delta-filter` must
   both be installed (bioconda package `mummer4`).
 
 On 937 F. tularensis genomes typed with the Francisella scheme, both minimap2 and
