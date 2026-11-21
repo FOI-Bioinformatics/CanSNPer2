@@ -10,7 +10,14 @@ import pytest
 
 import helpers
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
-from CanSNPer2.modules.Aligners import Aligner
+from CanSNPer2.modules.Aligners import Aligner, Minimap2
+
+
+class Installed(Minimap2):
+	'''minimap2 reported as found, so that runs reach the steps after the aligner check'''
+	def available(self):
+		return True
+
 
 GENOME = ">chr1 test\n" + "ACGT" * 250 + "\n"
 
@@ -39,7 +46,7 @@ def project(tmp_path, queries, **kwargs):
 	refdir = tmp_path / "refs"
 	refdir.mkdir(exist_ok=True)
 	(refdir / "REF.fna").write_text(GENOME)
-	kwargs.setdefault("aligner", "minimap2")
+	kwargs.setdefault("aligner", Installed())
 	kwargs.setdefault("export", True)
 	return CanSNPer2(queries, workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
 		database=db, **kwargs), db
@@ -101,3 +108,24 @@ def test_an_empty_file_is_a_query_not_a_list(tmp_path):
 	empty = write(tmp_path / "list.txt", "\n\n")
 	obj, db = project(tmp_path, [empty])
 	assert obj.resolve_queries([empty]) == [empty]
+
+
+# 3. the aligner
+
+class Missing(Aligner):
+	name = "missing"
+	program = "no_such_aligner_program"
+
+
+def test_a_missing_aligner_stops_before_the_first_sample(tmp_path):
+	q = write(tmp_path / "x.fasta")
+	obj, db = project(tmp_path, [q], aligner=Missing())
+	with pytest.raises(CanSNPer2Error, match="missing.*not found.*--aligner_path.*CanSNPer2-test"):
+		obj.run(database=db)
+	assert not obj.not_typed
+
+
+def test_skip_alignment_needs_no_aligner(tmp_path):
+	q = write(tmp_path / "x.fasta")
+	obj, db = project(tmp_path, [q], aligner=Missing(), skip_alignment=True, keep_going=True)
+	obj.check_aligner()  # does not raise

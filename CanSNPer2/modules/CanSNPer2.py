@@ -253,6 +253,16 @@ class CanSNPer2(object):
 				db=self.database, e=e))
 		return self.reference_snps
 
+	def check_aligner(self):
+		'''Stop before the first sample when the aligner program cannot be found: this used to show
+			up after the run had started, once for every sample, as a raw "No such file" error.
+			--skip_alignment reads alignments that exist and needs no aligner.'''
+		if self.skip_alignment or self.aligner.available():
+			return
+		raise CanSNPer2Error("The aligner {name} was not found (looked for {program}); install it, give its location with "
+			"--aligner_path, or choose another --aligner. CanSNPer2-test lists the aligners that are installed".format(
+			name=self.aligner.name, program=self.aligner.executable()))
+
 	def check_start(self):
 		'''Check the database, and the reference folder when the query is aligned, before any
 			sample is typed. Returns the reference files that are aligned against'''
@@ -987,6 +997,7 @@ class CanSNPer2(object):
 			self.query = self.check_sample_names(self.query)
 			'''the database and the reference folder are checked once, before the first sample'''
 			self.check_start()
+			self.check_aligner()
 
 			'''Main function of CanSNPer2
 					1. Align sequences with the selected aligner (progressiveMauve by default)

@@ -14,8 +14,17 @@ import pytest
 
 import helpers
 from CanSNPer2.DownloadGenomes import DownloadGenomes
+from CanSNPer2.modules.Aligners import ProgressiveMauve
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, sequence_names
+
+
+class InstalledMauve(ProgressiveMauve):
+	'''the run now stops up front when the aligner is not installed; these tests are about what
+		happens after that check, so the program is reported as found'''
+	def available(self):
+		return True
+
 
 GENOME = ">chr1 test\n" + "ACGT" * 250 + "\n"
 
@@ -36,6 +45,7 @@ def project(tmp_path, queries, **kwargs):
 	refdir = tmp_path / "refs"
 	refdir.mkdir(exist_ok=True)
 	(refdir / "REF.fna").write_text(GENOME)
+	kwargs.setdefault("aligner", InstalledMauve())
 	return CanSNPer2(queries, workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
 		database=db, **kwargs), db
 
