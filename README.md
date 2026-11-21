@@ -48,7 +48,9 @@ CanSNPer2-download --scheme francisella_tularensis      # builds francisella_tul
 The scheme files (SNPs, tree and references) are fetched and checked against the SHA-256
 recorded in the manifest of CanSNPer2-data, and the database is built locally by the installed
 CanSNPer2. `francisella_tularensis.source.json` beside the database records the repository
-commit and the hash of each file it was built from. `--branch dev` gives access to draft
+commit and the hash of each file it was built from. A verified scheme whose files cannot be
+checked (no manifest, or a file the manifest has no hash for) is refused unless
+`--allow_unverified` is given. `--branch dev` gives access to draft
 schemes that have not yet been verified; building one prints a warning. `--branch` also takes a
 commit, which makes a database reproducible from its `source.json`.
 
@@ -265,41 +267,47 @@ single-rooted and exportable.)
 ```
 usage: CanSNPer2-download [-h] [-db] [--scheme] [--branch] [--repo]
                           [--data_dir] [--list_schemes] [--overwrite]
-                          [--no_references] [-s] [-o] [--logs] [--verbose]
+                          [--no_references] [--allow_unverified] [-s] [-o]
+                          [--logs] [--verbose] [--debug]
 
 CanSNPer2-download - fetch the reference genomes a database needs from NCBI
 
 options:
-  -h, --help         show this help message and exit
+  -h, --help          show this help message and exit
 
 Database:
-  -db , --database   CanSNP database (with --scheme: the database to build,
-                     default <scheme>.db)
+  -db , --database    CanSNP database (with --scheme: the database to build,
+                      default <scheme>.db)
 
 CanSNPer2-data scheme options:
-  --scheme           Fetch this scheme from CanSNPer2-data and build its
-                     database
-  --branch           Branch, tag or commit of the repository; in
-                     CanSNPer2-data master holds verified schemes, dev also
-                     draft schemes (default master, with --repo the default
-                     branch of that repository)
-  --repo             GitHub repository laid out as CanSNPer2-data, as
-                     owner/name (default FOI-Bioinformatics/CanSNPer2-data)
-  --data_dir         Local directory laid out as CanSNPer2-data (a clone, or a
-                     folder of custom schemes) to read schemes from instead of
-                     GitHub
-  --list_schemes     List the schemes of the repository or --data_dir and exit
-  --overwrite        Replace an existing database when building from --scheme
-  --no_references    Build the database from --scheme without downloading its
-                     references
+  --scheme            Fetch this scheme from CanSNPer2-data and build its
+                      database
+  --branch            Branch, tag or commit of the repository; in
+                      CanSNPer2-data master holds verified schemes, dev also
+                      draft schemes (default master, with --repo the default
+                      branch of that repository)
+  --repo              GitHub repository laid out as CanSNPer2-data, as
+                      owner/name (default FOI-Bioinformatics/CanSNPer2-data)
+  --data_dir          Local directory laid out as CanSNPer2-data (a clone, or
+                      a folder of custom schemes) to read schemes from instead
+                      of GitHub
+  --list_schemes      List the schemes of the repository or --data_dir and
+                      exit
+  --overwrite         Replace an existing database when building from --scheme
+  --no_references     Build the database from --scheme without downloading its
+                      references
+  --allow_unverified  Build a verified scheme from GitHub although its files
+                      cannot be checked against a manifest (no manifest, or no
+                      hash for a file)
 
 Download options:
-  -s , --source      Source for download (genbank/refseq)
-  -o , --outdir      reference genomes folder
+  -s , --source       Source for download (genbank/refseq)
+  -o , --outdir       reference genomes folder
 
 Logging and debug options:
-  --logs             Specify log directory
-  --verbose          Verbose logging
+  --logs              Specify log directory
+  --verbose           Verbose logging
+  --debug             Debug logging, and the traceback of an unexpected error
 
 Give a database with --database, or name a scheme with --scheme to fetch it from CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step.
 available CanSNPer2 commands (installed together):
@@ -526,6 +534,46 @@ names are GenBank accessions. progressiveMauve alignments made by 2.2 must be ma
 as `--skip_alignment` needs the sequence table (`<alignment>.sequences`) that 2.3.0 writes
 next to an xmfa alignment. minimap2 and MUMmer4 alignments made by 2.2 are read as they
 are, because their reference coordinates were always positions on each sequence.
+
+### When something is wrong
+
+Every command checks its inputs before it starts to write or to align, and a problem ends
+the command with one message that names the file or the database and says what to do. The
+exit status tells the kind of stop:
+
+- 0: the command did what it was asked to do (warnings may have been printed);
+- 1: an input could not be used; the message says which and why;
+- 2: an unexpected error, printed as `CanSNPer2 stopped: <type>: <message>; run with --debug
+  for details`. Run the command again with `--debug` to see the traceback, and report it
+  together with the command line.
+
+A database is never left half changed: `--create`, `--import` and `CanSNPer2-download
+--scheme` remove a database they had started, and a modification (`--mod_file`,
+`--annotation`, `--references`, `--remove`) is made on a copy that replaces the database
+only when every step succeeded.
+
+| Message (beginning) | Command | What to do |
+|---|---|---|
+| `The source files cannot be built into a database, N problem(s):` followed by `<file>:<line>: ...` | `CanSNPer2-database --create`, `--import`, `CanSNPer2-download --scheme` | Correct the listed rows; all problems are listed together. |
+| `<file>:<line>: genbank_id '...' is not an assembly accession` | as above, and `--references` | Give the GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version, such as GCA_000008985.1. |
+| `The files cannot be added to <db>, N problem(s):` | `CanSNPer2-database --mod_file` with `--annotation` or `--references` | A SNP on a node that is not in the tree of the database or the modification file, on a genome that is not listed, a short row, or a genome, snp_id or position the database already holds. Correct the files; the database was not changed. |
+| `The selected parent node (X) could not be found`, `The node X could not be found`, `X is a root of the tree` | `CanSNPer2-database --mod_file`, `--remove` | Give a node of the database with `--parent`; the root cannot be removed. |
+| `The SNP X could not be written to <db>`, `The node X could not be written to <db>` | `CanSNPer2-database` | The disk is full or the database cannot be written to; free space or check the permissions, then run again. |
+| `scheme X on owner/name@ref uses positions on the joined reference (before 2.3.0)` | `CanSNPer2-download --scheme` | The branch holds the format before 2.3.0. Use CanSNPer2 2.2 for it, or a branch converted for 2.3.0. |
+| `... manifest.json was not found ...` or `... records no hash for ...`, `the files of the verified scheme X cannot be checked` | `CanSNPer2-download --scheme` | The files cannot be checked against the manifest of the repository. Report it to the repository, or give `--allow_unverified` when the source is trusted. |
+| `The database X could not be built from the scheme Y`, `The database X could not be written` | `CanSNPer2-download --scheme` | An sqlite error or a file system error; free space or check the permissions of the folder. No partial file is left behind. |
+| `X lists no reference genomes, there is nothing to download` | `CanSNPer2-download --database` | Build the database again with its references file. |
+| `REF: the database has no genbank_id for this genome` | `CanSNPer2-download --database` | Give the assembly accession of the genome in the references file and build the database again. |
+| `The SNP positions of X could not be read` | `CanSNPer2-download --database`, `CanSNPer2` | The database is damaged; export it with `CanSNPer2-database --export`, correct the files and build it again. |
+| `N reference genome(s) of X have no file <genome>.fna in DIR: ...` | `CanSNPer2` | Fetch them with `CanSNPer2-download --database X --outdir DIR`. Without them the SNPs on these genomes would not be compared. |
+| `The database X has no SNPs`, `The database X lists no reference genomes` | `CanSNPer2` | Build the database again with its SNP file and its references file. |
+| `The database X has N SNP(s) on node ids that are not in the nodes or tree table` | `CanSNPer2` | Export the database, correct the tree or SNP file and build it again. Nodes without SNPs are allowed. |
+
+These cases give a warning and keep exit status 0: a draft scheme or a scheme of unknown
+status; a reference whose base matches neither the ancestral nor the derived base at fewer
+than a fifth of its SNPs; reference files in `--refdir` that are not reference genomes with
+SNPs in the database; `--no_references`; and a draft scheme, or a scheme read with
+`--data_dir`, whose files cannot be checked against a manifest.
 
 ## Aligners
 
