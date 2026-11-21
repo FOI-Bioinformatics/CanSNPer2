@@ -76,6 +76,9 @@ jobs:
           CanSNPer2-download --help
 
       - name: Unit tests
+        env:
+          # the published-scheme tests read the CanSNPer2-data checkout above
+          CANSNPER2_DATA: ${{ github.workspace }}/cansnper2-data
         run: python -m pytest -q tests
 
       - name: Build and export a database
