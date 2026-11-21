@@ -359,8 +359,11 @@ def main():
 	except ConnectionError as e:
 		print(e, file=sys.stderr) ## an error message, so a script that reads stdout does not take it as output
 		exit(1)
-	from CanSNPer2.modules.SchemeInfo import log_scheme_notice
-	log_scheme_notice(args.database, logger) ## which scheme the references are fetched for
+	if not args.scheme:
+		'''which scheme the references are fetched for; a database just built from --scheme
+			was already reported by the build (draft status, known issues)'''
+		from CanSNPer2.modules.SchemeInfo import log_scheme_notice
+		log_scheme_notice(args.database, logger)
 
 	# create a database connection
 	DG = DownloadGenomes(args.database,args.source,args.outdir)

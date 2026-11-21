@@ -126,6 +126,10 @@ class SchemeSource(object):
 		issues = entry.get("known_issues", []) if isinstance(entry, dict) else []
 		if isinstance(issues, str):
 			issues = issues.split(",")
+		elif not isinstance(issues, list):
+			logger.warning("known_issues of {name} in schemes.toml of {loc} is not a list of snp_ids, it is not recorded".format(
+				name=name, loc=self.location()))
+			return ""
 		return ",".join(str(snp).strip() for snp in issues if str(snp).strip())
 
 	def config(self):
@@ -396,14 +400,21 @@ def build_scheme(name, database, ref="master", overwrite=False, source=None):
 	os.makedirs(target_dir, exist_ok=True)
 	with tempfile.TemporaryDirectory(prefix="cansnper2_scheme_") as tmpdir:
 		local, provenance = source.download(name, tmpdir)
+		commit = provenance.get("commit") or "unknown"
+		if provenance.get("commit") and provenance.get("uncommitted_sources"):
+			## the commit alone does not describe scheme files with uncommitted changes
+			commit += "+uncommitted"
 		scheme_info = {
 			"scheme": name,
 			"status": provenance["status"] or "unknown",
 			"source": source.source_name(),
 			"ref": provenance.get("ref"),
-			"commit": provenance.get("commit") or "unknown",
+			"commit": commit,
 			"known_issues": source.known_issues(name),
 		}
+		if scheme_info["known_issues"]:
+			logger.warning("schemes.toml lists known issues for {name}: {snps}; calls at these SNPs may be unreliable".format(
+				name=name, snps=scheme_info["known_issues"].replace(",", ", ")))
 		fd, partial = tempfile.mkstemp(suffix=".db.part", dir=target_dir)
 		os.close(fd)
 		os.remove(partial) ## the database loader creates the file itself

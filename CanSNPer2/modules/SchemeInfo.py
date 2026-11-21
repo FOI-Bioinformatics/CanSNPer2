@@ -11,7 +11,8 @@ when they are known:
 	status        verified, draft or unknown
 	source        the repository (owner/name) or folder the scheme files were read from
 	ref           the branch, tag or commit asked for
-	commit        the commit the files were read at, unknown when it could not be resolved
+	commit        the commit the files were read at, unknown when it could not be resolved;
+	              <sha>+uncommitted for a local checkout whose scheme files have uncommitted changes
 	known_issues  comma-separated snp_ids that schemes.toml lists as known issues
 
 The table is optional to read: a database built before 2.3.0 or by hand has none, and is
@@ -90,7 +91,8 @@ def describe(info):
 	if ref:
 		origin = "{origin} {ref}".format(origin=origin, ref=ref).strip()
 	if commit and commit != "unknown":
-		origin = "{origin}@{commit}".format(origin=origin, commit=commit[:7])
+		sha, plus, rest = commit.partition("+")
+		origin = "{origin}@{commit}".format(origin=origin, commit=sha[:7] + plus + rest)
 	elif commit == "unknown" and origin:
 		origin = "{origin} (commit unknown)".format(origin=origin)
 	if origin:

@@ -285,7 +285,7 @@ def test_cli_reports_a_file_that_is_not_a_database(tmp_path):
 		"-o", str(tmp_path / "out"))
 	assert result.returncode == 1
 	assert "Traceback" not in result.stderr
-	assert "not a database" in result.stderr
+	assert "is not an sqlite database" in result.stderr
 	assert not os.path.exists(str(tmp_path / "out" / "old.db"))
 
 

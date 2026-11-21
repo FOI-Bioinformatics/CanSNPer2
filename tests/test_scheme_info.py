@@ -262,3 +262,61 @@ def test_a_path_with_uri_characters_is_read(tmp_path):
 	write_scheme_info(conn, {"scheme": "s"})
 	conn.close()
 	assert read_scheme_info(db) == {"scheme": "s"}
+
+
+def test_info_of_a_file_that_is_not_a_database(tmp_path):
+	text = tmp_path / "notes.db"
+	text.write_text("this is not a database\n" * 20)
+	result = run(tmp_path, "CanSNPer2.SNPDatabase", ["--database", str(text), "--info", "--logs", "logs"])
+	assert result.returncode == 1
+	assert "is not an sqlite database" in result.stderr
+	assert "Traceback" not in result.stderr
+
+
+def test_known_issues_that_are_not_a_list_are_not_recorded(tmp_path, caplog):
+	files = scheme_repo()
+	files["schemes.toml"] += '[test_scheme]\nknown_issues = 5\n'
+	db = str(tmp_path / "t.db")
+	build_scheme("test_scheme", db, source=GitHubSchemeSource(ref="master", fetcher=FakeRepo(files)))
+	assert read_scheme_info(db)["known_issues"] == ""
+	assert "is not a list of snp_ids" in caplog.text
+
+
+def test_a_local_checkout_with_uncommitted_scheme_files_is_marked(tmp_path):
+	import shutil
+	from test_fetch_scheme import write_tree
+	from CanSNPer2.modules.FetchScheme import LocalSchemeSource
+	if not shutil.which("git"):
+		pytest.skip("git is not installed")
+	data = write_tree(tmp_path / "data", scheme_repo())
+	git = lambda *a: subprocess.run(["git", "-C", str(data)] + list(a), check=True, capture_output=True, text=True)
+	git("init", "-q")
+	git("add", ".")
+	git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "schemes")
+	head = git("rev-parse", "HEAD").stdout.strip()
+	build_scheme("test_scheme", str(tmp_path / "a.db"), source=LocalSchemeSource(str(data)))
+	assert read_scheme_info(str(tmp_path / "a.db"))["commit"] == head
+	(data / "schemes/test_scheme/test_scheme_tree.txt").write_text("R\nR\tA.1\nR\tA.1\tB.1\nR\tA.1\tC.1\n")
+	build_scheme("test_scheme", str(tmp_path / "b.db"), source=LocalSchemeSource(str(data)))
+	info = read_scheme_info(str(tmp_path / "b.db"))
+	assert info["commit"] == head + "+uncommitted"
+	assert "@{sha}+uncommitted".format(sha=head[:7]) in describe(info)
+
+
+DOWNLOAD_SCRIPT = '''import sys
+from CanSNPer2 import DownloadGenomes
+DownloadGenomes.DownloadGenomes.run = lambda self: 0  ## no reference is fetched from NCBI
+sys.argv[0] = "CanSNPer2-download"
+DownloadGenomes.main()
+'''
+
+
+def test_a_draft_scheme_download_reports_the_draft_once(tmp_path):
+	from test_fetch_scheme import write_tree
+	data = write_tree(tmp_path / "data", scheme_repo(status="draft"))
+	env = dict(os.environ)
+	env["PYTHONPATH"] = os.pathsep.join([ROOT, TESTS, env.get("PYTHONPATH", "")])
+	result = subprocess.run([sys.executable, "-c", DOWNLOAD_SCRIPT, "--scheme", "test_scheme", "--data_dir", str(data),
+		"--logs", "logs"], capture_output=True, text=True, cwd=str(tmp_path), env=env)
+	assert result.returncode == 0, result.stderr
+	assert result.stderr.count("is a draft") + result.stderr.count("(draft)") == 1, result.stderr
