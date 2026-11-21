@@ -280,3 +280,12 @@ def test_create_fails_when_a_snp_cannot_be_written(tmp_path):
 	assert result.returncode == 1, result.stdout + result.stderr
 	assert "The SNP A.1 could not be written" in result.stderr, (result.stdout, result.stderr)
 	assert not os.path.exists(db), "an incomplete database must not stay behind"
+
+
+@pytest.mark.parametrize("prefix", ["\n", "\n\n", "  \n", "\t\n"])
+def test_blank_lines_before_the_root_do_not_change_the_database(tmp_path, prefix):
+	# a leading blank line gave the root the name "" and a link to a node id 0 that is not
+	# in the nodes table, without a message from the source check
+	plain = build_db(tmp_path, "plain.db", tree_file("\t"), annotation_file())
+	blank = build_db(tmp_path, "blank.db", prefix + tree_file("\t").replace("\n", "\n\n", 1), annotation_file())
+	assert tables(blank) == tables(plain)

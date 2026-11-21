@@ -219,7 +219,11 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 	def get_root_name(self,fin):
 		'''Get the root name of the CanSNP file unless root is specified'''
 		with self.zopen(fin) as f:
-			firstline = f.readline()
+			firstline = ""
+			for row in f:           ## blank lines before the root are skipped, as check_tree skips them
+				if row.strip():
+					firstline = row
+					break
 			firstline = firstline.strip().replace("\t",";")
 			root = firstline.split(";") ## Root should be either the leftmost annotation in the tree or the only annotation on that row
 			if isinstance(root,list):
@@ -251,6 +255,8 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 		with self.zopen(self.taxonomy_file,"r") as f:
 			for row in f:
 				row = row.strip().replace("\t",";")  ## Also accept tab separated tree files
+				if not row:
+					continue
 				nodes = row.strip().split(";")  ## get node and all its parents in a list
 				logger.debug(nodes)
 				child = nodes[-1]  ## get name of child node
