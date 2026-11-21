@@ -155,3 +155,51 @@ def test_mummer4_through_the_whole_alignment_step(tmp_path):
 	assert where["B.1"] == ("q1", 1500)
 	assert where["B.2"] == ("q2", 7000 - 4500 + 1)
 	assert where["B.3"] == ("q3", 8000 - 7000)
+
+
+def test_query_path_with_a_space(tmp_path):
+	# the header line holds two paths; the query path contains a space (and so does the reference path)
+	snps, info = read(tmp_path, "GGGGTAAAAA", (11, 20, 1, 10, []), name="with space")
+	assert snps == {"B.1": 1}
+	assert info["B.1"][4:6] == ["ctg1", "5"]
+
+
+def test_query_path_from_the_query_option_when_the_header_is_ambiguous(tmp_path):
+	# the header names a query file that does not exist; the query file the caller gave is used
+	ref = tmp_path / "ref.fna"
+	ref.write_text(">chr2\n" + CHR2 + "\n")
+	qry = tmp_path / "real query.fna"
+	qry.write_text(">ctg1\nGGGGTAAAAA\n")
+	delta = tmp_path / "REF_q.delta"
+	delta.write_text("{0} /gone/some other/qry.fna\nNUCMER\n>chr2 ctg1 50 10\n11 20 1 10 1 1 0\n0\n".format(ref))
+	db = tmp_path / "q.db"
+	make_db(db, ROWS)
+	parser = ParseDelta(query=str(qry))
+	assert parser.run(str(delta), reference="REF", database=str(db)) == {"B.1": 1}
+
+
+def test_query_name_missing_from_the_fasta_is_a_clear_error(tmp_path):
+	ref = tmp_path / "ref.fna"
+	ref.write_text(">chr2\n" + CHR2 + "\n")
+	qry = tmp_path / "qry.fna"
+	qry.write_text(">other\nGGGGTAAAAA\n")
+	delta = tmp_path / "REF_m.delta"
+	delta.write_text("{0} {1}\nNUCMER\n>chr2 ctg1 50 10\n11 20 1 10 1 1 0\n0\n".format(ref, qry))
+	db = tmp_path / "m.db"
+	make_db(db, ROWS)
+	with pytest.raises(ValueError) as e:
+		ParseDelta().run(str(delta), reference="REF", database=str(db))
+	assert "ctg1" in str(e.value) and "qry.fna" in str(e.value)
+
+
+def test_position_past_the_end_of_the_query_is_no_data(tmp_path):
+	# the query has 3 bases, the alignment claims 10: the SNP at the 5th pair is not covered
+	snps, info = read(tmp_path, "GGG", (11, 20, 1, 10, []), name="short")
+	assert snps == {} and info == {}
+
+
+def test_negative_query_position_does_not_read_the_last_base(tmp_path):
+	# reverse alignment running below position 1 of the query; the SNP (5th pair) would be at
+	# query position 0, which must not be read as the last base of the query
+	snps, info = read(tmp_path, "GGGGTAAAAT", (11, 20, 4, -5, []), name="neg")
+	assert snps == {} and info == {}
