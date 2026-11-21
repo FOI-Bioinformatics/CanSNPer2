@@ -25,6 +25,52 @@ logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 120 ## seconds per connection, urlretrieve had no timeout at all (issue #218)
 
+def assembly_report_url(genome_url):
+	'''the assembly report in the same NCBI folder as the genomic fasta file'''
+	suffix = "_genomic.fna.gz"
+	base = genome_url[:-len(suffix)] if genome_url.endswith(suffix) else genome_url
+	return base + "_assembly_report.txt"
+
+def genbank_names(report_text):
+	'''{refseq_accn: genbank_accn} from the text of an NCBI assembly report. The columns are
+		found by name in the last comment line; rows without a GenBank or RefSeq accession
+		(value na) are skipped'''
+	header, names = None, {}
+	for line in report_text.splitlines():
+		if line.startswith("#"):
+			fields = line.lstrip("#").strip().split("\t")
+			if "GenBank-Accn" in fields and "RefSeq-Accn" in fields:
+				header = fields
+			continue
+		if header is None or not line.strip():
+			continue
+		row = line.split("\t")
+		if len(row) < len(header):
+			continue
+		genbank, refseq = row[header.index("GenBank-Accn")].strip(), row[header.index("RefSeq-Accn")].strip()
+		if genbank and refseq and genbank != "na" and refseq != "na":
+			names[refseq] = genbank
+	return names
+
+def rename_sequences(path, names):
+	'''rewrite the first word of each fasta header found in names, keeping the rest of the line.
+		The file is replaced through a temporary file in the same folder, which is removed
+		again if anything fails'''
+	fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".tmp")
+	try:
+		with os.fdopen(fd, "w") as out, open(path) as fin:
+			for line in fin:
+				if line.startswith(">"):
+					words = line[1:].rstrip("\n").split(None, 1)
+					if words and words[0] in names:
+						rest = (" " + words[1]) if len(words) > 1 else ""
+						line = ">" + names[words[0]] + rest + "\n"
+				out.write(line)
+		os.replace(tmp, path)
+	finally:
+		if os.path.exists(tmp):
+			os.remove(tmp)
+
 class DownloadGenomes(object):
 	"""docstring for DownloadGenomes."""
 	def __init__(self, database, source="genbank",directory="references",verbose=False):
@@ -123,6 +169,9 @@ class DownloadGenomes(object):
 			with gzip.open(tmpfile, "rb") as f_in, open(partial, "wb") as f_out:
 				shutil.copyfileobj(f_in, f_out)
 			os.replace(partial, ungzipped)
+			if source == "refseq":
+				'''the database names sequences by GenBank accession, the RefSeq assembly by NC_ or NZ_'''
+				self.rename_to_genbank(link_url, ungzipped)
 		except (HTTPError,URLError,OSError,EOFError,zlib.error) as e:
 			reason = "the download was incomplete ({error})".format(error=e) if isinstance(e, (EOFError, zlib.error)) else str(e)
 			logger.error("Could not download {refid} from {link}: {reason}".format(refid=refid,link=link_url,reason=reason))
@@ -139,6 +188,20 @@ class DownloadGenomes(object):
 			return
 		self.link_reference(ungzipped, link, refid)
 		report(True)
+
+	def rename_to_genbank(self, link_url, path):
+		'''fetch the assembly report of a RefSeq genome and rename its sequences to the GenBank accessions'''
+		report_file = tempfile.mkstemp(suffix=".txt")[1]
+		try:
+			self.retrieve(assembly_report_url(link_url), report_file)
+			with open(report_file) as fin:
+				names = genbank_names(fin.read())
+			rename_sequences(path, names)
+		except BaseException:
+			os.remove(path) ## a genome that keeps the RefSeq names would be reused as renamed by the next run
+			raise
+		finally:
+			os.remove(report_file)
 
 	def link_reference(self, ungzipped, link, refid):
 		'''the <refid>.fna link CanSNPer2 reads; a run that found the genome already unpacked
