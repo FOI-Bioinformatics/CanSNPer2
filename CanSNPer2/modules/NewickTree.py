@@ -921,6 +921,17 @@ class NewickTree(object):
 			entry = entries[entry["parent"]]
 		return None
 
+	def _chain_names(self,entry,entries):
+		'''the SNP names from the root of the tree down to the entry, the entry included; "-name-" label
+			nodes and the ROOT wrapper are not SNPs and are left out'''
+		names = []
+		while entry["name"] != "ROOT":
+			name = entry["name"]
+			if not (name.startswith("-") and name.endswith("-")):
+				names.append(name)
+			entry = entries[entry["parent"]]
+		return names[::-1]
+
 	def _confirm_path(self,entry,entries,called_snps,snplist):
 		'''Confirm the ACTUAL ancestor chain of the node, from the root of the tree down to the
 			node itself (issue #25). Every SNP on the chain is one of:
@@ -1099,8 +1110,9 @@ class NewickTree(object):
 					dist,tsnp,count,on_chain,missing = candidates[0]
 					'''on_chain and missing are appended for the results dashboard: a call that
 						needed the strictness tolerance over positions without data must stand
-						out for manual review; consumers that index 0-2 are unaffected'''
-					called = [dist,tsnp,(True,count),on_chain,missing]
+						out for manual review; the sixth item is the SNP chain from the root to the final SNP;
+						consumers that index 0-2 are unaffected'''
+					called = [dist,tsnp,(True,count),on_chain,missing,self._chain_names(entries[node_index[tsnp]],entries)]
 					msg = "Final SNP called: {snp} ({count}/{n} SNPs on the path called)".format(snp=tsnp,count=count,n=on_chain)
 					if missing:
 						'''a call that relies on the strictness tolerance says which SNPs had no data'''

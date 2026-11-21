@@ -519,6 +519,13 @@ The tables `x_snps.txt` and `x_not_called.txt` have the columns `Name`, `Referen
 position on it. The columns `ReferenceSeq` and `ReferenceSeqPosition` of version 2.2 are
 removed, as `Sequence` and `Pos` now carry that information.
 
+`x_snps.txt` has one table row for every called SNP, followed by the line `SNP path:`
+and the line `Final SNP:`. For a called sample the SNP path is the chain of the final SNP,
+the called SNPs from the root of the tree down to the final SNP. Derived SNPs that were
+called outside that chain, on a competing branch, are not in the path; the sample is marked
+`review` in `summary.html` with a reason that names them. For a sample that is not called
+the path lists all called SNPs.
+
 ### Upgrading from 2.2
 
 Version 2.3.0 changes how a SNP position is stored. Up to 2.2 it was one number along all

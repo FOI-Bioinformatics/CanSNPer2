@@ -1117,7 +1117,19 @@ class CanSNPer2(object):
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
 						tree_result = (False,"No SNP call was produced.",[],[])
 					final_snp,message,called,no_data_snps = tree_result
-					self.result_paths[self.query_name] = ";".join([snp[1] for snp in called]) if called else "NA"
+					'''The SNP path of a confirmed call is the chain of the final SNP: the called SNPs from the
+						root of the tree down to the final SNP. Derived SNPs that were called outside that chain
+						(a competing branch) are not part of the path, they are listed in the dashboard
+						report for review. The table of called SNPs keeps one row for every called SNP.
+						Without a confirmed call (NA) the path lists all called SNPs, as before.'''
+					called_names = [snp[1] for snp in called] if called else []
+					path_names = called_names
+					off_chain = []
+					if final_snp and final_snp[2][0] and len(final_snp) > 5:
+						chain = final_snp[5]
+						path_names = [name for name in chain if name in set(called_names)]
+						off_chain = sorted(name for name in called_names if name not in set(chain))
+					self.result_paths[self.query_name] = ";".join(path_names) if path_names else "NA"
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
@@ -1128,7 +1140,7 @@ class CanSNPer2(object):
 									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 									for snp in called:
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)
-								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
+								print("SNP path: {path}".format(path=";".join(path_names)),file=called_out)
 								print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
 								print(self.query_source_line(q),file=called_out)
 								print(self.settings_line(),file=called_out)
@@ -1146,7 +1158,7 @@ class CanSNPer2(object):
 									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 									for row in called_rows:
 										print("\t".join(row),file=called_out)
-								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
+								print("SNP path: {path}".format(path=";".join(path_names) if path_names else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 								print(self.query_source_line(q),file=called_out)
 								print(self.settings_line(),file=called_out)
@@ -1169,7 +1181,7 @@ class CanSNPer2(object):
 						manual look (positions on the path with no alignment data, SNPs flagged at an
 						alignment edge, a competing unconfirmed path); states/called let the embedded
 						tree paint the sample when it is selected'''
-					called_path = [snp[1] for snp in called] if called else []
+					called_path = path_names
 					edge_flags = set(row[0] for row in SNP_info if len(row) > EDGE_COLUMN and row[EDGE_COLUMN] == "edge")
 					edge_on_path = [s for s in edge_flags if s in set(called_path)]
 					path_missing = final_snp[4] if final_snp and len(final_snp) > 4 else []
@@ -1186,6 +1198,10 @@ class CanSNPer2(object):
 						if severity == "clean":
 							severity = "review"
 						reasons.append("SNPs flagged at an alignment edge on the called path: {ids}".format(ids=", ".join(sorted(edge_on_path))))
+					if off_chain and SNP != "NA":
+						if severity == "clean":
+							severity = "review"
+						reasons.append("{k} derived SNP(s) called outside the path to the final SNP, on another branch: {ids}".format(k=len(off_chain),ids=", ".join(off_chain)))
 					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
 							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),
 							no_data=[row[0] for row in no_data_snps])
