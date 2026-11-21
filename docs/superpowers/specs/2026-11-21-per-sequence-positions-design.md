@@ -153,7 +153,8 @@ dashboard follow the same columns.
 - `check_bases.py`: check each SNP on its named sequence; a missing sequence is a problem.
 - `schemes/README.md` and the scheme READMEs that describe joined positions (for example
   the Origin section of `brucella_classical`) are updated.
-- CI installs CanSNPer2 from master, so the CanSNPer2 change must be merged first.
+- CI installs CanSNPer2 from master; see Order of work for how the conversion is tested
+  against `dev_2.3.0`.
 
 ### CanSNPCreator
 
@@ -181,15 +182,21 @@ dashboard follow the same columns.
 
 ## Order of work
 
-My call on the order:
+All CanSNPer2 work for this change is merged into the branch `dev_2.3.0` on
+FOI-Bioinformatics/CanSNPer2 (decided by the user; created from master f6900e7), not into
+master.
 
-1. CanSNPer2 PR #67 and CanSNPer2-data PR #32 are merged first.
-2. CanSNPer2: the change on top of #67 (branch `per_sequence_positions`).
-3. CanSNPer2-data: convert, rebuild, PR to master. Its CI installs CanSNPer2 from master,
-   so the two PRs are merged back to back (CanSNPer2 first), which keeps CI and
-   `--scheme` downloads broken for minutes rather than days. Then master into dev.
-4. CanSNPer2 release 2.3.0 (the database format changes), only after the data is
-   converted.
+1. CanSNPer2 PR #67 (base check) is merged into `dev_2.3.0` (retargeted from master), and
+   CanSNPer2-data PR #32 into CanSNPer2-data master (it needs no CanSNPer2 change).
+2. CanSNPer2: the change on top of #67 (branch `per_sequence_positions`), PR into
+   `dev_2.3.0`.
+3. CanSNPer2-data: convert and rebuild on a branch of its own. Its CI installs CanSNPer2
+   from `dev_2.3.0` instead of master while it is open (my call), so it is tested against
+   the code that reads the new format.
+4. Release: `dev_2.3.0` into CanSNPer2 master as 2.3.0, then the CanSNPer2-data
+   conversion into its master with the CI install set back to master, back to back, so
+   `--scheme` downloads with the released version are broken for minutes, not days.
+   Then CanSNPer2-data master into dev.
 5. CanSNPCreator: export and audit, release.
 
 ## Left to the builder
@@ -203,7 +210,7 @@ My call on the order:
 - The conversion command also converts an existing `.db` file.
 - CanSNPCreator converts RefSeq contig names at export via `--contig-aliases` and the NCBI
   assembly report.
-- Merge order: #67 and #32 first, then the CanSNPer2 and CanSNPer2-data changes back to
-  back, then release 2.3.0.
+- CanSNPer2-data CI installs CanSNPer2 from `dev_2.3.0` while the conversion is open;
+  the conversion and the 2.3.0 release are merged back to back.
 - Result tables keep the column name `Pos` (now the position on `Sequence`); they are not
   read back by CanSNPer2, so the rename is not needed there.
