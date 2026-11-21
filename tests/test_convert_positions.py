@@ -277,3 +277,21 @@ def test_cli_reports_a_file_that_is_not_a_database(tmp_path):
 	assert "Traceback" not in result.stderr
 	assert "not a database" in result.stderr
 	assert not os.path.exists(str(tmp_path / "out" / "old.db"))
+
+
+@pytest.mark.parametrize("umask", [0o022, 0o002, 0o077])
+def test_outputs_get_the_mode_of_open(tmp_path, umask):
+	'''the outputs are written through mkstemp, which gives mode 0600; a converted file is meant
+		to be shared, so it gets the mode open() gives: 0666 masked by the umask'''
+	refs = {"REF": write_reference(tmp_path / "refs")}
+	source_table = write(tmp_path / "old_snp.txt", OLD_SNP)
+	source_db = old_database(tmp_path / "old.db")
+	previous = os.umask(umask)
+	try:
+		convert_table(source_table, str(tmp_path / "out" / "old_snp.txt"), refs)
+		convert_database(source_db, str(tmp_path / "out" / "old.db"), refs)
+	finally:
+		os.umask(previous)
+	for name in ("old_snp.txt", "old.db"):
+		mode = os.stat(str(tmp_path / "out" / name)).st_mode & 0o777
+		assert mode == 0o666 & ~umask, (name, oct(mode))

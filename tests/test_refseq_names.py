@@ -6,6 +6,8 @@ assembly report before the reference check."""
 import gzip
 import os
 
+import pytest
+
 from test_reference_sequences import CHR1, CHR2, PLASMID, Results, fasta, snp_rows
 from CanSNPer2.DownloadGenomes import DownloadGenomes, assembly_report_url, genbank_names, rename_sequences
 
@@ -100,3 +102,17 @@ def test_rename_sequences_leaves_no_temporary_file_on_error(tmp_path, monkeypatc
 	except OSError:
 		pass
 	assert os.listdir(str(tmp_path)) == ["g.fna"] and path.read_text() == GENOME
+
+
+@pytest.mark.parametrize("umask", [0o022, 0o002, 0o077])
+def test_renamed_genome_gets_the_mode_of_open(tmp_path, umask):
+	'''the renamed genome is written through mkstemp, which gives mode 0600; a reference folder
+		is often shared, so it gets the mode open() gives: 0666 masked by the umask'''
+	path = tmp_path / "g.fna"
+	path.write_text(GENOME)
+	previous = os.umask(umask)
+	try:
+		rename_sequences(str(path), {"NZ_CP007762.1": "chrI"})
+	finally:
+		os.umask(previous)
+	assert os.stat(str(path)).st_mode & 0o777 == 0o666 & ~umask

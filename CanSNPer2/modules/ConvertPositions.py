@@ -30,6 +30,7 @@ import logging
 from CanSNPer2.modules.ReferenceCheck import read_sequences, listing
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.InitiateDatabase import snp_annotation_sql
+from CanSNPer2.modules.FileMode import set_default_mode
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ def _temporary(target):
 	handle, path = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(target)),
 		suffix=".part", dir=directory or ".")
 	os.close(handle)
+	set_default_mode(path) ## the output gets the mode of open(), not the 0600 of mkstemp
 	return path
 
 

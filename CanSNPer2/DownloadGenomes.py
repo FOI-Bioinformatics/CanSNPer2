@@ -19,6 +19,7 @@ _MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, reference_snps
 from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.FileMode import set_default_mode
 from CanSNPer2 import COMMANDS_HELP
 import logging
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ def rename_sequences(path, names):
 		again if anything fails'''
 	fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".tmp")
 	try:
+		set_default_mode(tmp) ## the renamed genome gets the mode of open(), not the 0600 of mkstemp
 		with os.fdopen(fd, "w") as out, open(path) as fin:
 			for line in fin:
 				if line.startswith(">"):
