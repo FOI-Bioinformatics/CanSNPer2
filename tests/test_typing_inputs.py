@@ -211,3 +211,39 @@ def test_a_call_without_other_derived_snps_is_clean(tmp_path):
 	obj.run(database=db)
 	assert obj.sample_reports["x"]["severity"] == "clean"
 	assert "SNP path: A.1;B.1" in result_lines(obj, "x")
+
+
+# 7. the query fasta
+
+def check(tmp_path, content, mode="w", name="q.fasta"):
+	obj, db = project(tmp_path, [])
+	path = write(tmp_path / name, content, mode)
+	return obj, path
+
+
+def test_a_bom_is_removed(tmp_path):
+	obj, path = check(tmp_path, b"\xef\xbb\xbf>chr1 a\nACGT\n", "wb")
+	cleaned = obj.clean_input_fasta(path, "query")
+	assert cleaned != path
+	assert open(cleaned, "rb").read() == b">chr1 a\nACGT\n"
+
+
+def test_a_latin1_header_is_read(tmp_path):
+	obj, path = check(tmp_path, b">chr1 caf\xe9\nACGT\n", "wb")
+	cleaned = obj.clean_input_fasta(path, "query")
+	assert open(cleaned, "rb").read().startswith(b">chr1 caf")
+	assert b"ACGT" in open(cleaned, "rb").read()
+
+
+def test_a_gzipped_query_is_refused(tmp_path):
+	obj, path = check(tmp_path, gzip.compress(GENOME.encode()), "wb", "q.fasta.gz")
+	with pytest.raises(CanSNPer2Error, match="q.fasta.gz is gzip-compressed, decompress it first"):
+		obj.clean_input_fasta(path, "query")
+
+
+@pytest.mark.parametrize("content,message", [("", "is empty"), ("\n\n", "is empty"),
+		(">chr1\n", "no sequence"), ("ACGT\nACGT\n", "no FASTA header")])
+def test_an_empty_or_headerless_query_is_refused(tmp_path, content, message):
+	obj, path = check(tmp_path, content)
+	with pytest.raises(CanSNPer2Error, match=message):
+		obj.clean_input_fasta(path, "query")

@@ -512,8 +512,19 @@ class CanSNPer2(object):
 		dirty = False
 		lines = []
 		names = []
-		with open(path) as seq_in:
+		with open(path,"rb") as raw:
+			start = raw.read(3)
+		if start[:2] == b"\x1f\x8b":
+			raise CanSNPer2Error("{path} is gzip-compressed, decompress it first".format(path=path))
+		if start == b"\xef\xbb\xbf":
+			dirty = True ## a byte order mark is removed, aligners read it as part of the first header
+		'''utf-8-sig drops a byte order mark, and bytes that are not UTF-8 (a latin-1 character in a header)
+			become U+FFFD instead of stopping the run with a decoding error; sequence characters
+			that are not ACGT become N below in any case'''
+		with open(path,encoding="utf-8-sig",errors="replace") as seq_in:
 			for line in seq_in:
+				if "\ufffd" in line:
+					dirty = True
 				if line.startswith(">"):
 					lines.append(line)
 					words = line[1:].split()
@@ -533,6 +544,14 @@ class CanSNPer2(object):
 			a query with two sequences of the same name gave bases and positions of the wrong
 			contig. References are checked once per run in check_reference_file.'''
 		if kind == "query":
+			'''an empty file, a file without a header and a header without sequence gave a silent NA result'''
+			if not lines:
+				raise CanSNPer2Error("query {path} is empty; give a FASTA file".format(path=path))
+			if not any(line.startswith(">") for line in lines):
+				raise CanSNPer2Error("query {path} has no FASTA header (a line starting with \">\"); give a FASTA file, "
+					"or a list of file paths as the only query argument".format(path=path))
+			if not any(not line.startswith(">") for line in lines):
+				raise CanSNPer2Error("query {path} has a header but no sequence".format(path=path))
 			problem = duplicate_names(names)
 			if problem:
 				raise CanSNPer2Error("query {path} has {problem}; rename them, for example with seqkit rename".format(path=path, problem=problem))
