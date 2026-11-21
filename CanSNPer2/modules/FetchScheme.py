@@ -110,6 +110,24 @@ class SchemeSource(object):
 	def provenance_fields(self, hashes):
 		raise NotImplementedError
 
+	def source_name(self):
+		'''the collection as the scheme_info table records it: owner/name or a folder'''
+		raise NotImplementedError
+
+	def known_issues(self, name):
+		'''The snp_ids that schemes.toml lists under known_issues for the scheme, as a
+			comma-separated string. A schemes.toml that cannot be read, or that has no entry
+			for the scheme, gives an empty string'''
+		try:
+			entry = self.config().get(name, {})
+		except SchemeError as e:
+			logger.warning("The known issues of {name} could not be read: {e}".format(name=name, e=e))
+			return ""
+		issues = entry.get("known_issues", []) if isinstance(entry, dict) else []
+		if isinstance(issues, str):
+			issues = issues.split(",")
+		return ",".join(str(snp).strip() for snp in issues if str(snp).strip())
+
 	def config(self):
 		'''The entries of schemes.toml; a scheme without an entry follows the naming convention'''
 		if self._config is None:
@@ -285,6 +303,9 @@ class GitHubSchemeSource(SchemeSource):
 		repo = "" if self.repo == DATA_REPO else " --repo {repo}".format(repo=self.repo)
 		return "CanSNPer2-download --list_schemes{repo} --branch {ref}".format(repo=repo, ref=self.ref)
 
+	def source_name(self):
+		return self.repo
+
 	def provenance_fields(self, hashes):
 		return {
 			"repository": "https://github.com/{repo}".format(repo=self.repo),
@@ -337,6 +358,9 @@ class LocalSchemeSource(SchemeSource):
 			return None
 		return result.stdout if result.returncode == 0 else None
 
+	def source_name(self):
+		return self.directory
+
 	def provenance_fields(self, hashes):
 		fields = {"repository": self.directory, "ref": None, "commit": None}
 		commit = self.git("rev-parse", "HEAD")
@@ -372,12 +396,21 @@ def build_scheme(name, database, ref="master", overwrite=False, source=None):
 	os.makedirs(target_dir, exist_ok=True)
 	with tempfile.TemporaryDirectory(prefix="cansnper2_scheme_") as tmpdir:
 		local, provenance = source.download(name, tmpdir)
+		scheme_info = {
+			"scheme": name,
+			"status": provenance["status"] or "unknown",
+			"source": source.source_name(),
+			"ref": provenance.get("ref"),
+			"commit": provenance.get("commit") or "unknown",
+			"known_issues": source.known_issues(name),
+		}
 		fd, partial = tempfile.mkstemp(suffix=".db.part", dir=target_dir)
 		os.close(fd)
 		os.remove(partial) ## the database loader creates the file itself
 		try:
 			CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["snp"],
-							references=local["references"], source_type=provenance["source_type"], verbose=False)
+							references=local["references"], source_type=provenance["source_type"], verbose=False,
+							scheme_info=scheme_info)
 			os.replace(partial, database)
 		finally:
 			if os.path.exists(partial):

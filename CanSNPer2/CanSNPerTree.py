@@ -42,6 +42,7 @@ from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
 import os,sys
@@ -162,6 +163,7 @@ def main():
 	logpath = setup_logging(args.logdir, "CanSNPer2", level=logval) ## shared log naming for all commands (issue #217)
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
+	log_scheme_notice(args.database, logger) ## which scheme is typed against, before any work starts
 
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
 	if not args.tmpdir.rstrip("/"):

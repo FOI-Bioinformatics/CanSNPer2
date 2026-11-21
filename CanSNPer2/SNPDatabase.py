@@ -16,6 +16,7 @@ from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
+from CanSNPer2.modules.SchemeInfo import STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__, COMMANDS_HELP  ## __version__ used by the --version flag (issue #119)
 import CanSNPer2.modules
@@ -61,6 +62,12 @@ def get_arguments():
 														choices=supported_input, 				help="Select source file type")
 	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
 	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="build a database from the source files written by --export (--tree --annotation --references), written to --database")
+	create_database.add_argument('--scheme_name',   metavar='',                                 help="with --create or --import: the name of the scheme, recorded in the database")
+	create_database.add_argument('--scheme_status', metavar='',                                 help="with --create or --import: the status of the scheme, verified, draft or unknown, recorded in the database")
+	create_database.add_argument('--scheme_source', metavar='',                                 help="with --create or --import: where the scheme files came from (a repository or folder), recorded in the database")
+
+	info_database = parser.add_argument_group("Database information")
+	info_database.add_argument('--info',         action='store_true',                           help="print the scheme information the database records (scheme, status, source, CanSNPer2 version) and exit")
 
 
 	convert_database = parser.add_argument_group("Convert from the format before 2.3.0")
@@ -163,6 +170,18 @@ def main():
 	args = get_arguments()
 	logger = get_logger(args)
 	logger.debug(args)
+	scheme_options = [option for option, value in (("--scheme_name", args.scheme_name),
+		("--scheme_status", args.scheme_status), ("--scheme_source", args.scheme_source)) if value is not None]
+	if scheme_options and not (args.create or args.do_import):
+		logger.error("{options} {verb} recorded by --create and --import only, they cannot be "
+			"used with an existing database".format(options=", ".join(scheme_options),
+			verb="is" if len(scheme_options) == 1 else "are"))
+		exit(1)
+	if args.scheme_status is not None and args.scheme_status not in STATUSES:
+		logger.error("--scheme_status {status} is not a known status, give verified, draft or unknown".format(
+			status=args.scheme_status))
+		exit(1)
+	scheme_info = {"scheme": args.scheme_name, "status": args.scheme_status, "source": args.scheme_source}
 	if args.convert:
 		exit(convert(args, logger))
 	if args.do_import:
@@ -180,7 +199,7 @@ def main():
 			exit(1)
 		try:
 			counts = import_from_sources(args.tree, args.annotation, args.references,
-				args.database, tmpdir=args.tmpdir, verbose=args.verbose)
+				args.database, tmpdir=args.tmpdir, verbose=args.verbose, scheme_info=scheme_info)
 		except DatabaseImportError as e:
 			logger.error(str(e))
 			exit(1)
@@ -200,6 +219,16 @@ def main():
 		except ConnectionError as e:
 			logger.error(str(e))
 			exit(1)
+		if args.info:
+			info = read_scheme_info(args.database)
+			if not info:
+				print(MISSING_TEXT)
+			for key in ordered_keys(info):
+				print("{key}\t{value}".format(key=key, value=info[key]))
+			exit()
+	elif args.info:
+		logger.error("--info prints what an existing database records, it cannot be combined with --create!")
+		exit(1)
 	if args.remove:
 		'''--remove was documented but no code ever read the flag, so it silently did nothing (issue #147)'''
 		if args.create:
@@ -219,6 +248,7 @@ def main():
 		exit()
 	if args.export: ## Dump database to file
 		outdir = args.outdir or "." ## without -o the export goes to the current directory (issue #132)
+		log_scheme_notice(args.database, logger) ## the scheme_info table itself is not exported
 		if args.export_format == "newick":
 			logger.info("Export Newick tree!")
 			NT = NewickTree(args.database, outdir=outdir)
@@ -286,7 +316,7 @@ def main():
 				"choose a new name or remove it first".format(db=args.database))
 			exit(1)
 		try:
-			CanSNPDB = CanSNPDatabase(**vars(args))
+			CanSNPDB = CanSNPDatabase(scheme_info=scheme_info, **vars(args))
 		except (InputError,SourceFileError,DatabaseWriteError) as e:
 			logger.error(str(e))
 			if os.path.exists(args.database):

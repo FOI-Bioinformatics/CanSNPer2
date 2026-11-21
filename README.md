@@ -71,6 +71,28 @@ Listing schemes and resolving a branch to a commit use the GitHub API, which all
 anonymous requests an hour per address. On shared machines, set `GITHUB_TOKEN` (or `GH_TOKEN`)
 to a GitHub token to raise the limit; it is sent to the API only.
 
+From 2.3.0 the database also records which scheme it holds, in a `scheme_info` table: the
+scheme, its status (`verified`, `draft` or `unknown`), the repository or folder, the branch and
+commit (`unknown` when the GitHub API could not resolve it), the SNPs that `schemes.toml` lists
+as known issues, and the CanSNPer2 version and date of the build. `CanSNPer2-database --database
+<db> --info` prints the table. Typing, `CanSNPer2-download --database` and `--export` report
+the scheme once when they open the database; a draft or unknown status, known issues, or a
+database without the table (built before 2.3.0 or by hand) give a warning, and a verified scheme
+is reported only with `--verbose`. The table is informative only and never stops a run.
+
+```
+$ CanSNPer2-database --database brucella_suis.db --info
+scheme	brucella_suis
+status	draft
+source	FOI-Bioinformatics/CanSNPer2-data
+ref	dev
+commit	abc1234000000000000000000000000000000000
+known_issues	B.1
+format	2.3
+built_with	2.3.0
+built	2026-11-21
+```
+
 2. Alternatively, with a database you already have, download its references
 
 ```sh
@@ -114,10 +136,12 @@ trees and nodes without a SNP are accepted.
 
 ```
 usage: CanSNPer2-database [-h] [-db] [--tree] [--annotation] [--references]
-                      [--source_type] [--create] [--import] [--convert]
-                      [--refdir] [--mod_file] [--parent] [--remove]
-                      [--replace] [--export] [--export_format] [-o] [--tmpdir]
-                      [--logs] [--verbose] [--debug] [--supress]
+                          [--source_type] [--create] [--import]
+                          [--scheme_name] [--scheme_status] [--scheme_source]
+                          [--info] [--convert] [--refdir] [--mod_file]
+                          [--parent] [--remove] [--replace] [--export]
+                          [--export_format] [-o] [--tmpdir] [--logs]
+                          [--verbose] [--debug] [--supress]
 
 CanSNPer2-database - create, modify and export CanSNP databases
 
@@ -136,6 +160,16 @@ Load database:
   --import           build a database from the source files written by
                      --export (--tree --annotation --references), written to
                      --database
+  --scheme_name      with --create or --import: the name of the scheme,
+                     recorded in the database
+  --scheme_status    with --create or --import: the status of the scheme,
+                     verified, draft or unknown, recorded in the database
+  --scheme_source    with --create or --import: where the scheme files came
+                     from (a repository or folder), recorded in the database
+
+Database information:
+  --info             print the scheme information the database records
+                     (scheme, status, source, CanSNPer2 version) and exit
 
 Convert from the format before 2.3.0:
   --convert          convert a SNP source file (--annotation) or a database
@@ -212,6 +246,11 @@ the text, import back:
 CanSNPer2-database --import --database new_scheme.db --tree scheme/my_scheme_tree.txt \
     --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
 ```
+
+The source files carry no scheme information, so `--export` does not write the `scheme_info`
+table. `--import` and `--create` record the format, the CanSNPer2 version and the build date,
+and the scheme, its status and its source when they are given with `--scheme_name`,
+`--scheme_status` (`verified`, `draft` or `unknown`) and `--scheme_source`.
 
 The same loaders `--create` uses do the work, so the schema is always current, and the result
 is checked with the export validator before the database is kept: source files that do not
