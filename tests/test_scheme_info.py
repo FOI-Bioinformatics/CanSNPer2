@@ -206,12 +206,12 @@ def toy_database(tmp_path, status=None):
 	return db
 
 
-def type_toy(tmp_path, db):
+def type_toy(tmp_path, db, *extra):
 	env = dict(os.environ)
 	env["PYTHONPATH"] = os.pathsep.join([ROOT, TESTS, str(tmp_path), env.get("PYTHONPATH", "")])
 	return subprocess.run([sys.executable, "-c", TYPE_SCRIPT, "--database", db, "--aligner", "toy",
 		"--refdir", "refs", "--tmpdir", str(tmp_path / "tmp"), "--logdir", "logs", "-o", "out",
-		"--min_required_hits", "1", "sample.fna"], capture_output=True, text=True, cwd=str(tmp_path), env=env)
+		"--min_required_hits", "1", "sample.fna"] + list(extra), capture_output=True, text=True, cwd=str(tmp_path), env=env)
 
 
 def test_typing_warns_once_for_a_draft_database(tmp_path):
@@ -322,3 +322,111 @@ def test_a_draft_scheme_download_reports_the_draft_once(tmp_path):
 		"--logs", "logs"], capture_output=True, text=True, cwd=str(tmp_path), env=env)
 	assert result.returncode == 0, result.stderr
 	assert result.stderr.count("is a draft") + result.stderr.count("(draft)") == 1, result.stderr
+
+
+## a database changed after it was built ------------------------------------------------
+
+def verified_toy(tmp_path, commit="5b24118aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"):
+	'''the toy database recorded as a verified scheme of a repository'''
+	db = toy_database(tmp_path)
+	conn = sqlite3.connect(db)
+	## the modification commands read the rank table, which make_db does not write
+	conn.execute("CREATE TABLE rank (rank_i integer PRIMARY KEY, rank VARCHAR(15))")
+	conn.execute("INSERT INTO rank (rank_i, rank) VALUES (1, 'family')")
+	conn.commit()
+	info = {"scheme": "toy", "status": "verified", "source": "owner/data", "format": "2.3",
+		"built_with": "2.2.9", "built": "2026-01-01"}
+	if commit is not None:
+		info["commit"] = commit
+	write_scheme_info(conn, info)
+	conn.close()
+	return db
+
+
+def test_a_removal_marks_a_verified_database_as_modified(tmp_path):
+	db = verified_toy(tmp_path)
+	result = run(tmp_path, "CanSNPer2.SNPDatabase", ["--database", db, "--remove", "--parent", "A.2", "--logs", "logs"])
+	assert result.returncode == 0, result.stderr
+	result = run(tmp_path, "CanSNPer2.SNPDatabase", ["--database", db, "--info", "--logs", "logs"])
+	assert result.returncode == 0, result.stderr
+	lines = result.stdout.splitlines()
+	assert "status\tunknown" in lines, lines
+	assert "commit\t5b24118aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa+modified" in lines, lines
+	assert "modified\t{d}".format(d=datetime.date.today().isoformat()) in lines, lines
+	assert "built_with\t{v}".format(v=__version__) in lines, lines
+	assert "source\towner/data" in lines and "built\t2026-01-01" in lines, lines
+	result = type_toy(tmp_path, db)
+	assert result.returncode == 0, result.stdout + result.stderr
+	notices = [line for line in result.stderr.splitlines() if "toy (unknown)" in line]
+	assert len(notices) == 1 and "WARN" in notices[0], result.stderr
+	assert "@5b24118+modified" in notices[0] and "modified {d}".format(d=datetime.date.today().isoformat()) in notices[0]
+
+
+def test_a_mod_file_marks_a_database_without_a_commit_as_modified(tmp_path):
+	db = verified_toy(tmp_path, commit=None)
+	(tmp_path / "mod.txt").write_text("child\tparent\nC.1\tA.1\n")
+	result = run(tmp_path, "CanSNPer2.SNPDatabase", ["--database", db, "--mod_file", "mod.txt", "--parent", "A.1",
+		"--logs", "logs"])
+	assert result.returncode == 0, result.stderr
+	info = read_scheme_info(db)
+	assert info["status"] == "unknown" and info["commit"] == "modified", info
+	assert info["modified"] == datetime.date.today().isoformat() and info["built_with"] == __version__
+	assert "toy (unknown), owner/data@modified" in describe(info), describe(info)
+
+
+def test_a_failed_modification_leaves_the_scheme_info(tmp_path):
+	db = verified_toy(tmp_path)
+	before = read_scheme_info(db)
+	result = run(tmp_path, "CanSNPer2.SNPDatabase", ["--database", db, "--remove", "--parent", "NOT_A_NODE", "--logs", "logs"])
+	assert result.returncode == 1
+	assert read_scheme_info(db) == before
+
+
+def test_info_prints_none_for_an_empty_value(tmp_path):
+	db = verified_toy(tmp_path)
+	conn = sqlite3.connect(db)
+	write_scheme_info(conn, {"known_issues": ""})
+	conn.close()
+	result = run(tmp_path, "CanSNPer2.SNPDatabase", ["--database", db, "--info", "--logs", "logs"])
+	assert result.returncode == 0, result.stderr
+	assert "known_issues\tnone" in result.stdout.splitlines(), result.stdout
+
+
+## a database genome without its reference file -----------------------------------------
+
+def two_genome_toy(tmp_path):
+	'''the toy database with A.2 moved to a second genome REF_B, which has no file in refs'''
+	db = toy_database(tmp_path, status="verified")
+	conn = sqlite3.connect(db)
+	conn.execute("INSERT INTO snp_references (id, genome, strain) VALUES (?, 'REF_B', 'REF_B')", (helpers.GENOME_I + 1,))
+	conn.execute("UPDATE snp_annotation SET genome_i=? WHERE snp_id='A.2'", (helpers.GENOME_I + 1,))
+	conn.commit()
+	conn.close()
+	return db
+
+
+def test_a_missing_reference_file_stops_typing(tmp_path):
+	db = two_genome_toy(tmp_path)
+	result = type_toy(tmp_path, db)
+	assert result.returncode == 1, result.stdout + result.stderr
+	assert "REF_B" in result.stderr and "--allow_missing_references" in result.stderr, result.stderr
+	assert "Traceback" not in result.stderr
+
+
+def test_allow_missing_references_types_with_one_warning(tmp_path):
+	db = two_genome_toy(tmp_path)
+	result = type_toy(tmp_path, db, "--allow_missing_references")
+	assert result.returncode == 0, result.stdout + result.stderr
+	assert os.path.exists(tmp_path / "out" / "sample_snps.txt")
+	warnings = [line for line in result.stderr.splitlines() if "REF_B" in line]
+	assert len(warnings) == 1 and "WARN" in warnings[0], result.stderr
+	assert "not compared" in warnings[0], warnings
+
+
+def test_allow_missing_references_still_stops_when_no_genome_has_a_file(tmp_path):
+	db = two_genome_toy(tmp_path)
+	os.rename(str(tmp_path / "refs" / "REF_A.fna"), str(tmp_path / "refs" / "OTHER.fna"))
+	result = type_toy(tmp_path, db, "--allow_missing_references")
+	assert result.returncode == 1, result.stdout + result.stderr
+	assert "REF_A, REF_B" in result.stderr and "CanSNPer2-download --database" in result.stderr, result.stderr
+	assert "Traceback" not in result.stderr

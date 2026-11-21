@@ -22,7 +22,8 @@ from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
-from CanSNPer2.modules.SchemeInfo import STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice
+from CanSNPer2.modules.SchemeInfo import (STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice,
+	build_info, modified_info, write_scheme_info)
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__, COMMANDS_HELP  ## __version__ used by the --version flag (issue #119)
 import CanSNPer2.modules
@@ -160,7 +161,10 @@ def convert(args, logger):
 			if args.references:
 				references.update(references_from_file(args.references))
 			files = genome_files(args.refdir, database_genomes(source), references)
-			count = convert_database(source, target, files, sequences=sequences)
+			'''the converted database records that it was converted by this version; the
+				scheme and its status are not known from the old database'''
+			scheme_info = build_info(status="unknown", source="converted from {name}".format(name=os.path.basename(source)))
+			count = convert_database(source, target, files, sequences=sequences, scheme_info=scheme_info)
 	except (ConversionError, ConnectionError, sqlite3.Error, OSError) as e:
 		'''every failure of the conversion is one error message and exit code 1, not a traceback'''
 		logger.error(str(e))
@@ -179,7 +183,9 @@ def modify(args, logger):
 		tree is changed first, the SNP and references files are then checked against the tree
 		and the reference genomes of the copy (SourceCheck.check_modification), and the copy
 		replaces the database only when every step succeeded and it passes check_database.
-		A run that fails leaves the database byte-identical. A database given as a symbolic link
+		A run that fails leaves the database byte-identical. A run that succeeds marks the
+		scheme_info of the database as modified (SchemeInfo.modified_info), so a changed
+		database no longer claims to be the published scheme. A database given as a symbolic link
 		is resolved first, so the file it points to is replaced and the link is kept. Returns
 		the exit code.'''
 	database = args.database
@@ -214,6 +220,13 @@ def modify(args, logger):
 		modifier.close()
 		modifier = None
 		check_database(work)
+		'''the changed database no longer matches the scheme files it was built from, so its
+			scheme_info is marked: status unknown, commit +modified, the date and the version'''
+		conn = sqlite3.connect(work)
+		try:
+			write_scheme_info(conn, modified_info(read_scheme_info(work)))
+		finally:
+			conn.close()
 		os.replace(work, target)
 	except (InputError, TreeError, DatabaseTreeError, SourceFileError, DatabaseWriteError, ConnectionError,
 			sqlite3.Error, OSError) as e:
@@ -291,7 +304,8 @@ def command():
 			if not info:
 				print(MISSING_TEXT)
 			for key in ordered_keys(info):
-				print("{key}\t{value}".format(key=key, value=info[key]))
+				## an empty value, such as known_issues of a scheme without any, is printed as none
+				print("{key}\t{value}".format(key=key, value=info[key] if info[key] not in (None, "") else "none"))
 			exit()
 	elif args.info:
 		logger.error("--info prints what an existing database records, it cannot be combined with --create!")

@@ -12,8 +12,12 @@ when they are known:
 	source        the repository (owner/name) or folder the scheme files were read from
 	ref           the branch, tag or commit asked for
 	commit        the commit the files were read at, unknown when it could not be resolved;
-	              <sha>+uncommitted for a local checkout whose scheme files have uncommitted changes
+	              <sha>+uncommitted for a local checkout whose scheme files have uncommitted changes;
+	              followed by +modified (or modified alone) once the database was changed
 	known_issues  comma-separated snp_ids that schemes.toml lists as known issues
+	modified      the date of the last change made with --mod_file, --annotation, --references
+	              or --remove; the change also sets status to unknown and built_with to the
+	              version that made it
 
 The table is optional to read: a database built before 2.3.0 or by hand has none, and is
 used with a warning.
@@ -22,6 +26,7 @@ used with a warning.
 import datetime
 import logging
 import os
+import re
 import sqlite3
 from urllib.request import pathname2url
 
@@ -30,7 +35,8 @@ from CanSNPer2 import __version__
 FORMAT = "2.3"
 STATUSES = ("verified", "draft", "unknown")
 ## the order in which --info lists the keys; keys not listed here follow in name order
-KEY_ORDER = ("scheme", "status", "source", "ref", "commit", "known_issues", "format", "built_with", "built")
+KEY_ORDER = ("scheme", "status", "source", "ref", "commit", "known_issues", "format", "built_with", "built",
+	"modified")
 MISSING_TEXT = ("the database records no scheme information (built with CanSNPer2 before 2.3.0 or by hand); "
 	"check where it came from")
 
@@ -43,6 +49,21 @@ def build_info(**known):
 	info = {"format": FORMAT, "built_with": __version__, "built": datetime.date.today().isoformat()}
 	info.update({key: str(value) for key, value in known.items() if value is not None})
 	return info
+
+
+def modified_info(info):
+	'''The keys written when a database is changed after it was built (--mod_file,
+		--annotation, --references, --remove): the scheme no longer matches the files it was
+		built from, so its status becomes unknown, the commit is marked +modified, and the
+		date and the CanSNPer2 version of the change are recorded. info: the keys the
+		database recorded before the change'''
+	commit = info.get("commit") or ""
+	if not commit:
+		commit = "modified"
+	elif commit != "modified" and not commit.endswith("+modified"):
+		commit += "+modified"
+	return {"status": "unknown", "commit": commit, "modified": datetime.date.today().isoformat(),
+		"built_with": __version__}
 
 
 def write_scheme_info(conn, info):
@@ -92,7 +113,9 @@ def describe(info):
 		origin = "{origin} {ref}".format(origin=origin, ref=ref).strip()
 	if commit and commit != "unknown":
 		sha, plus, rest = commit.partition("+")
-		origin = "{origin}@{commit}".format(origin=origin, commit=sha[:7] + plus + rest)
+		if re.fullmatch("[0-9a-f]{8,}", sha):
+			sha = sha[:7]
+		origin = "{origin}@{commit}".format(origin=origin, commit=sha + plus + rest)
 	elif commit == "unknown" and origin:
 		origin = "{origin} (commit unknown)".format(origin=origin)
 	if origin:
@@ -100,9 +123,14 @@ def describe(info):
 	built = "built"
 	if info.get("built"):
 		built += " " + info["built"]
-	if info.get("built_with"):
+	if info.get("built_with") and not info.get("modified"):
 		built += " with CanSNPer2 " + info["built_with"]
 	parts.append(built)
+	if info.get("modified"):
+		modified = "modified " + info["modified"]
+		if info.get("built_with"):
+			modified += " with CanSNPer2 " + info["built_with"]
+		parts.append(modified)
 	line = ", ".join(parts)
 	issues = known_issues(info)
 	if issues:
@@ -125,6 +153,9 @@ def scheme_notice(path):
 		level = logging.WARNING
 	elif status != "verified":
 		text += ". The status of the scheme is unknown; it has not been verified"
+		level = logging.WARNING
+	if info.get("modified"):
+		text += ". The database was changed after it was built and no longer matches the scheme files"
 		level = logging.WARNING
 	if known_issues(info):
 		text += ". Calls at the SNPs listed as known issues may be unreliable"

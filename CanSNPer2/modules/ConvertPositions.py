@@ -31,6 +31,7 @@ from CanSNPer2.modules.ReferenceCheck import read_sequences, listing
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.InitiateDatabase import snp_annotation_sql
 from CanSNPer2.modules.FileMode import set_default_mode
+from CanSNPer2.modules.SchemeInfo import write_scheme_info
 
 logger = logging.getLogger(__name__)
 
@@ -212,10 +213,11 @@ def convert_table(source, target, genome_files, sequences=None):
 	return count
 
 
-def convert_database(source_db, target_db, genome_files, sequences=None):
+def convert_database(source_db, target_db, genome_files, sequences=None, scheme_info=None):
 	'''Copy a database from the format before 2.3.0 to target_db and rebuild its snp_annotation
 		table with sequence and sequence_position columns (create, copy, drop and rename; ALTER
 		TABLE DROP COLUMN needs sqlite 3.35). genome_files: {genome: reference fasta path}.
+		scheme_info: keys written to the scheme_info table of the converted copy.
 		Returns the number of converted SNPs. Raises ConversionError, and leaves no target_db,
 		when any SNP is refused.'''
 	try:
@@ -255,6 +257,8 @@ def convert_database(source_db, target_db, genome_files, sequences=None):
 			conn.execute("DROP TABLE snp_annotation")
 			conn.execute("ALTER TABLE snp_annotation_converted RENAME TO snp_annotation")
 			conn.commit()
+			if scheme_info:
+				write_scheme_info(conn, scheme_info)
 			conn.execute("VACUUM")
 		finally:
 			conn.close()

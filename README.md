@@ -81,6 +81,12 @@ as known issues, and the CanSNPer2 version and date of the build. `CanSNPer2-dat
 the scheme once when they open the database; a draft or unknown status, known issues, or a
 database without the table (built before 2.3.0 or by hand) give a warning, and a verified scheme
 is reported only with `--verbose`. The table is informative only and never stops a run.
+A database changed with `--mod_file`, `--annotation`, `--references` or `--remove` no longer
+matches the scheme files it was built from, so the change sets its status to `unknown`, adds
+`+modified` to the commit (or records `modified` when there was none), records the date in
+`modified` and the CanSNPer2 version in `built_with`; typing then gives a warning. A database
+converted with `--convert` records status `unknown` and the converted file as its source.
+`--info` prints `none` for an empty value, such as `known_issues` of a scheme without any.
 
 ```
 $ CanSNPer2-database --database brucella_suis.db --info
@@ -383,6 +389,11 @@ Output options:
 
 Run options:
   --refdir              Specify reference directory
+  --allow_missing_references
+                        Type even when reference genomes of the database have
+                        no <genome>.fna in --refdir; one warning names them,
+                        and their SNPs are not compared (default: stop with an
+                        error)
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
   --min_required_hits MIN_REQUIRED_HITS
@@ -485,8 +496,11 @@ expected base at a fifth of its SNPs or more is refused, fewer mismatches are re
 warning.
 
 `CanSNPer2-download --source refseq` renames each sequence of the downloaded RefSeq assembly
-to its GenBank accession, so that the file matches the database. `--source genbank` (the
-default) needs no renaming.
+to its GenBank accession, so that the file matches the database. A sequence that the NCBI
+assembly report marks as different from its GenBank sequence (Relationship `<>`) is not
+renamed, as a position on one need not hold on the other; one warning names these
+sequences, and the reference check refuses the genome when a SNP lies on one of them.
+`--source genbank` (the default) needs no renaming.
 
 The tables `x_snps.txt` and `x_not_called.txt` have the columns `Name`, `Reference`,
 `Sequence`, `Pos`, `QuerySeq`, `QueryPosition`, `Ancestral base`, `Derived base`,
@@ -556,6 +570,7 @@ only when every step succeeded.
 |---|---|---|
 | `The source files cannot be built into a database, N problem(s):` followed by `<file>:<line>: ...` | `CanSNPer2-database --create`, `--import`, `CanSNPer2-download --scheme` | Correct the listed rows; all problems are listed together. |
 | `<file>:<line>: genbank_id '...' is not an assembly accession` | as above, and `--references` | Give the GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version, such as GCA_000008985.1. |
+| `<file>:<line>: genbank_id '...' of genome '...' is already used by genome '...'` | as above, and `--references` on an existing database | Each genome needs its own assembly accession, as one reference file is written per accession. |
 | `The files cannot be added to <db>, N problem(s):` | `CanSNPer2-database --mod_file` with `--annotation` or `--references` | A SNP on a node that is not in the tree of the database or the modification file, on a genome that is not listed, a short row, or a genome, snp_id or position the database already holds. Correct the files; the database was not changed. |
 | `The selected parent node (X) could not be found`, `The node X could not be found`, `X is a root of the tree` | `CanSNPer2-database --mod_file`, `--remove` | Give a node of the database with `--parent`; the root cannot be removed. |
 | `The SNP X could not be written to <db>`, `The node X could not be written to <db>` | `CanSNPer2-database` | The disk is full or the database cannot be written to; free space or check the permissions, then run again. |
@@ -565,14 +580,15 @@ only when every step succeeded.
 | `X lists no reference genomes, there is nothing to download` | `CanSNPer2-download --database` | Build the database again with its references file. |
 | `REF: the database has no genbank_id for this genome` | `CanSNPer2-download --database` | Give the assembly accession of the genome in the references file and build the database again. |
 | `The SNP positions of X could not be read` | `CanSNPer2-download --database`, `CanSNPer2` | The database is damaged; export it with `CanSNPer2-database --export`, correct the files and build it again. |
-| `N reference genome(s) of X have no file <genome>.fna in DIR: ...` | `CanSNPer2` | Fetch them with `CanSNPer2-download --database X --outdir DIR`. Without them the SNPs on these genomes would not be compared. |
+| `N reference genome(s) of X have no file <genome>.fna in DIR: ...` | `CanSNPer2` | Fetch them with `CanSNPer2-download --database X --outdir DIR`. Without them the SNPs on these genomes would not be compared. To type without them on purpose, for example to test a scheme with a reference genome left out, give `--allow_missing_references`: the run then continues with one warning that names the missing genomes. It still stops when no genome of the database has a file. |
 | `The database X has no SNPs`, `The database X lists no reference genomes` | `CanSNPer2` | Build the database again with its SNP file and its references file. |
 | `The database X has N SNP(s) on node ids that are not in the nodes or tree table` | `CanSNPer2` | Export the database, correct the tree or SNP file and build it again. Nodes without SNPs are allowed. |
 
 These cases give a warning and keep exit status 0: a draft scheme or a scheme of unknown
 status; a reference whose base matches neither the ancestral nor the derived base at fewer
 than a fifth of its SNPs; reference files in `--refdir` that are not reference genomes with
-SNPs in the database; `--no_references`; and a draft scheme, or a scheme read with
+SNPs in the database; reference genomes without a file in `--refdir` when
+`--allow_missing_references` is given; a database changed after it was built; `--no_references`; and a draft scheme, or a scheme read with
 `--data_dir`, whose files cannot be checked against a manifest.
 
 ## Aligners
