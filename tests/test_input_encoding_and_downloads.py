@@ -159,15 +159,24 @@ def test_non_utf8_assembly_report_is_reported(tmp_path):
 	assert ok is True or reason ## reported, not an exception
 
 
+def open_descriptors():
+	count = 0
+	for fd in range(256):
+		try:
+			os.fstat(fd)
+			count += 1
+		except OSError:
+			pass
+	return count
+
+
 def test_download_closes_its_temporary_descriptors(tmp_path):
-	if not os.path.isdir("/dev/fd"):
-		pytest.skip("no /dev/fd")
 	obj = downloader(tmp_path, GZ)
 	fetch(obj)
-	before = len(os.listdir("/dev/fd"))
+	before = open_descriptors()
 	for i in range(5):
 		fetch(obj, refid="R" + str(i))
-	assert len(os.listdir("/dev/fd")) == before
+	assert open_descriptors() == before
 
 
 @pytest.mark.parametrize("refid", ["../esc", "a/b", "..", "x\\y"])
