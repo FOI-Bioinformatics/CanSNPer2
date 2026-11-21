@@ -23,7 +23,7 @@ import re
 import sqlite3
 from collections import Counter, OrderedDict
 
-from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS
+from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT
 
 BASES = ("A", "C", "G", "T")
 ## ASCII digits only: str.isdigit() also accepts characters such as superscripts
@@ -94,6 +94,7 @@ def check_references(path, problems, known=None, database=None):
 		database: the name of that database in the messages'''
 	names = {}
 	genomes = Counter()
+	accessions = {}
 	with open(path) as references:
 		headers = _header(references)
 		missing = [column for column in GENOME_SOURCE_COLUMNS if column not in headers]
@@ -116,6 +117,13 @@ def check_references(path, problems, known=None, database=None):
 				problems.append("{0}:{1}: genbank_id '{2}' is not an assembly accession (GCA_ or GCF_, nine digits "
 					"and a version, such as GCA_000008985.1); CanSNPer2-download needs it to fetch the genome".format(
 					path, number, row["genbank_id"]))
+			accession = row["genbank_id"]
+			if accession in accessions:
+				problems.append("{0}:{1}: genbank_id '{2}' of genome '{3}' is already used by genome '{4}' on line {5}; "
+					"a source file is written per accession, so two genomes cannot share one".format(
+					path, number, accession, genome, accessions[accession][0], accessions[accession][1]))
+			else:
+				accessions[accession] = (genome, number)
 			if known is not None and genome in known:
 				problems.append("{0}:{1}: genome '{2}' is already in {3}".format(path, number, genome, database))
 			for column in ("refseq_id", "genbank_id", "genome"):
@@ -137,8 +145,7 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 	with open(path) as snps:
 		headers = _header(snps)
 		if "position" in headers and "sequence_position" not in headers:
-			problems.append("{0}:1: joined positions (the format before 2.3.0); convert with "
-				"CanSNPer2-database --convert".format(path))
+			problems.append("{0}:1: this SNP file cannot be used. {1}".format(path, JOINED_FORMAT_HINT))
 			return
 		missing = [column for column in ANNOTATION_SOURCE_COLUMNS if column not in headers]
 		if missing:
