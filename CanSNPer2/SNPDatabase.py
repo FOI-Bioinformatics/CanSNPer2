@@ -12,7 +12,7 @@ import logging
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
 from CanSNPer2.modules.ModifyTree import InputError
-from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError
+from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError, DatabaseWriteError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
@@ -268,10 +268,29 @@ def main():
 				exit(1)
 	elif args.annotation or args.tree or args.references:
 		'''a database can also be created from only a tree or only a reference list (issue #129)'''
+		if not args.database:
+			logger.error("--create needs the new database to write, give it with --database!")
+			exit(1)
+		if os.path.exists(args.database):
+			'''--create into an existing file added the tree, the references and the SNPs a second
+				time; into a database from before 2.3.0 every SNP insert also failed and the
+				command still ended with exit status 0. An existing file is refused, as --import does,
+				and a database from before 2.3.0 is named as such with the conversion hint.'''
+			try:
+				check_database(args.database)
+			except ConnectionError as e:
+				logger.error(str(e))
+				exit(1)
+			logger.error("The database {db} already exists, --create builds a new database, "
+				"choose a new name or remove it first".format(db=args.database))
+			exit(1)
 		try:
 			CanSNPDB = CanSNPDatabase(**vars(args))
-		except (InputError,SourceFileError) as e:
+		except (InputError,SourceFileError,DatabaseWriteError) as e:
 			logger.error(str(e))
+			if os.path.exists(args.database):
+				'''the file did not exist before this run, so a database that was started is incomplete'''
+				os.remove(args.database)
 			exit(1)
 	else:
 		logger.error("No datafile supplied, nothing to process!")

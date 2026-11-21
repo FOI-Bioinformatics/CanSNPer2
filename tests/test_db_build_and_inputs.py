@@ -206,3 +206,72 @@ def test_cli_refuses_joined_database(tmp_path, module, arguments):
 		capture_output=True, text=True, cwd=str(tmp_path), env=env)
 	assert result.returncode != 0, result.stdout + result.stderr
 	assert "--convert" in result.stderr, (result.stdout, result.stderr)
+
+
+def run_database_cli(tmp_path, arguments, code=None):
+	'''run CanSNPer2-database in a subprocess from tmp_path; code, when given, is Python run
+		before main() in the same process, to make a part of the build fail'''
+	import subprocess
+	env = dict(os.environ)
+	root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+	env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
+	if code is None:
+		command = [sys.executable, "-m", "CanSNPer2.SNPDatabase"]
+	else:
+		command = [sys.executable, "-c", code + "\nimport sys\nsys.argv[0] = 'CanSNPer2-database'\n"
+			"from CanSNPer2.SNPDatabase import main\nmain()\n"]
+	return subprocess.run(command + arguments + ["--logs", "logs"],
+		capture_output=True, text=True, cwd=str(tmp_path), env=env)
+
+
+def create_arguments(tmp_path, db):
+	paths = helpers.write_sources(tmp_path, ["A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC",
+		"B.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t200\tG\tA"])
+	return ["--create", "--database", db, "--tree", paths["tree"], "--annotation", paths["snp"],
+		"--references", paths["references"]]
+
+
+def row_counts(db):
+	conn = sqlite3.connect(db)
+	try:
+		return tuple(conn.execute("SELECT count(*) FROM {0}".format(table)).fetchone()[0]
+			for table in ("nodes", "tree", "snp_annotation", "snp_references"))
+	finally:
+		conn.close()
+
+
+def test_create_refuses_an_existing_joined_database(tmp_path):
+	'''--create into a database from before 2.3.0 added the tree and the references a second
+		time, failed on every SNP insert with a warning only, and ended with exit status 0'''
+	db = helpers.make_db(tmp_path / "joined.db", [("A.1", "chrI", 50, "C", "T")], joined=True)
+	before = row_counts(db)
+	result = run_database_cli(tmp_path, create_arguments(tmp_path, db))
+	assert result.returncode == 1, result.stdout + result.stderr
+	assert "--convert" in result.stderr, (result.stdout, result.stderr)
+	assert row_counts(db) == before
+
+
+def test_create_refuses_an_existing_database(tmp_path):
+	'''a second --create into a current-format database doubled its nodes, references and SNPs'''
+	db = str(tmp_path / "scheme.db")
+	arguments = create_arguments(tmp_path, db)
+	first = run_database_cli(tmp_path, arguments)
+	assert first.returncode == 0, first.stdout + first.stderr
+	before = row_counts(db)
+	second = run_database_cli(tmp_path, arguments)
+	assert second.returncode == 1, second.stdout + second.stderr
+	assert "already exists" in second.stderr, (second.stdout, second.stderr)
+	assert row_counts(db) == before
+
+
+def test_create_fails_when_a_snp_cannot_be_written(tmp_path):
+	'''a failed SNP insert was only logged as a warning and --create ended with exit status 0;
+		the table is made without its sequence column here, so every SNP insert fails'''
+	code = ("import CanSNPer2.modules.InitiateDatabase as initiate\n"
+		"initiate.snp_annotation_sql = lambda table='snp_annotation': {0!r}\n").format(
+		helpers.JOINED_SNP_ANNOTATION_TABLE)
+	db = str(tmp_path / "scheme.db")
+	result = run_database_cli(tmp_path, create_arguments(tmp_path, db), code=code)
+	assert result.returncode == 1, result.stdout + result.stderr
+	assert "The SNP A.1 could not be written" in result.stderr, (result.stdout, result.stderr)
+	assert not os.path.exists(db), "an incomplete database must not stay behind"

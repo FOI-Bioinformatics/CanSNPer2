@@ -1,6 +1,6 @@
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
 from CanSNPer2.modules.SourceCheck import check_sources
 from importlib import import_module
 from datetime import date
@@ -121,6 +121,11 @@ class CanSNPDatabase(DatabaseFunctions):
 		if id is not False: ## the twin of issue #203 in the create path: an id of 0 is a real id
 			info["node_id"] = id
 		taxid_base = self.insert(info, table="snp_annotation")
+		if isinstance(taxid_base, Exception):
+			'''a failed insert was only logged as a warning, and --create then ended with exit
+				status 0 and a database that lacks the SNP'''
+			raise DatabaseWriteError("The SNP {snp} could not be written to {db}: {error}".format(
+				snp=data["snp_id"], db=self.database, error=taxid_base))
 		return taxid_base
 
 	def add_genome(self,data):
@@ -135,7 +140,11 @@ class CanSNPDatabase(DatabaseFunctions):
 				"assembly_name":         data["assembly_name"],
 				#"comment":             data["comment"]
 		}
-		return self.insert(info, table="snp_references")
+		genome_i = self.insert(info, table="snp_references")
+		if isinstance(genome_i, Exception):
+			raise DatabaseWriteError("The reference genome {genome} could not be written to {db}: {error}".format(
+				genome=data["genome"], db=self.database, error=genome_i))
+		return genome_i
 
 	def load_genome_annotation_file(self,annotation_file):
 		self.genomes = {}

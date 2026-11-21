@@ -335,7 +335,7 @@ def main():
 			build the database with this CanSNPer2 version'''
 		from CanSNPer2.modules.FetchScheme import build_scheme, SchemeError
 		from CanSNPer2.modules.ModifyTree import InputError
-		from CanSNPer2.modules.DatabaseConnection import SourceFileError
+		from CanSNPer2.modules.DatabaseConnection import SourceFileError, DatabaseWriteError
 		if not args.database:
 			args.database = "{scheme}.db".format(scheme=args.scheme)
 		try:
@@ -343,7 +343,7 @@ def main():
 				raise SchemeError("{db} already exists, use --overwrite to replace it".format(db=args.database))
 			source = scheme_source()
 			build_scheme(args.scheme, args.database, overwrite=args.overwrite, source=source)
-		except (SchemeError, InputError, SourceFileError) as e:
+		except (SchemeError, InputError, SourceFileError, DatabaseWriteError) as e:
 			logger.error(str(e))
 			exit(1)
 		print("Built {db} from the scheme {scheme} in {loc}".format(db=args.database, scheme=args.scheme, loc=source.location()))
