@@ -157,3 +157,32 @@ def test_a_downloaded_reference_with_duplicate_names_is_reported(tmp_path):
 	refid, ok, reason = results[0]
 	assert not ok and "more than one sequence named chr" in reason
 	assert not os.path.lexists(os.path.join(obj.directory, "Ames.fna"))
+
+
+def test_an_earlier_result_is_used_only_with_the_same_database_and_settings(tmp_path):
+	q = write(tmp_path / "in" / "x.fasta")
+	obj, db = project(tmp_path, [q], keep_going=True)
+	source = "Query file: /elsewhere/x.fasta sha256:{0}\n".format(obj.file_sha256(q))
+	same = obj.settings_line() + "\n"
+	assert same.startswith("Typing settings: database sha256:")
+	# same database and settings: used again
+	result_file(obj, "x", source + same)
+	obj.run(database=db)
+	assert "x" in obj.reused
+	# another database: the sample is refused with the reason
+	obj, db = project(tmp_path, [q], keep_going=True)
+	other = same.replace("database sha256:", "database sha256:0")
+	result_file(obj, "x", source + other)
+	obj.run(database=db)
+	assert "x" not in obj.reused
+	assert "different database or settings" in obj.not_typed["x"]
+	# another threshold: refused as well
+	obj, db = project(tmp_path, [q], keep_going=True, min_required_hits=2)
+	result_file(obj, "x", source + same.replace("min_required_hits=2", "min_required_hits=3"))
+	obj.run(database=db)
+	assert "different database or settings" in obj.not_typed["x"]
+	# --rerun replaces it
+	obj, db = project(tmp_path, [q], keep_going=True, rerun=True)
+	result_file(obj, "x", source + other)
+	obj.run(database=db)
+	assert "different database or settings" not in obj.not_typed.get("x", "")

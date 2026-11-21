@@ -866,6 +866,22 @@ class CanSNPer2(object):
 		'''the trailer line that records which input a result file was made from'''
 		return "Query file: {path} sha256:{sha}".format(path=os.path.abspath(query), sha=self.query_sha256)
 
+	def settings_line(self):
+		'''the trailer line that records the database and the settings a result was made with:
+			a result file from another database or another threshold was reused without a word'''
+		if getattr(self, "_database_sha256", None) is None:
+			self._database_sha256 = self.file_sha256(self.database)
+		return "Typing settings: database sha256:{sha} min_required_hits={hits} strictness={strict} mask={mask}".format(
+			sha=self._database_sha256, hits=self.min_required_hits, strict=self.strictness, mask=self.mask)
+
+	def read_result_settings(self, resultfile):
+		'''the settings line of a result file, None for files from versions that did not record it'''
+		with open(resultfile) as handle:
+			for row in handle:
+				if row.startswith("Typing settings:"):
+					return row.rstrip("\n")
+		return None
+
 	def read_result_file(self,resultfile):
 		'''Read the final SNP and the SNP path from a sample's result file, used for samples
 			skipped because their result file already exists. The final SNP is read from the
@@ -978,6 +994,10 @@ class CanSNPer2(object):
 						if old_sha is not None and old_sha != self.query_sha256:
 							raise CanSNPer2Error("{outputfile} exists for a different input ({old}); use --rerun to replace it or choose another --outdir".format(
 									outputfile=outputfile, old=old_path or "unknown file"))
+						old_settings = self.read_result_settings(outputfile)
+						if old_settings is not None and old_settings != self.settings_line():
+							raise CanSNPer2Error("{outputfile} was made with a different database or settings ({old}); use --rerun to replace it or choose another --outdir".format(
+									outputfile=outputfile, old=old_settings.split(":",1)[1].strip()))
 						if old_sha is None:
 							logger.info("{outputfile} does not record its input (older version), it is used again as it is".format(outputfile=outputfile))
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
@@ -1056,6 +1076,7 @@ class CanSNPer2(object):
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
 								print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
 								print(self.query_source_line(q),file=called_out)
+								print(self.settings_line(),file=called_out)
 						logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 					else:
 						if self.export:
@@ -1073,6 +1094,7 @@ class CanSNPer2(object):
 								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 								print(self.query_source_line(q),file=called_out)
+								print(self.settings_line(),file=called_out)
 							logger.info(message)
 					'''SNP positions of the tree that no alignment carried a base for had no data at all,
 						and were missing from both result files, so the only place they showed up was the
