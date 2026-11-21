@@ -3,7 +3,7 @@
 '''
 
 from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
-from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS
+from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
 from datetime import date
 import logging
 logger = logging.getLogger(__name__)
@@ -46,6 +46,11 @@ class ModifyCanSNPer2Database(ModifyTree):
 			info["node_id"] = id
 		logger.debug(info)
 		taxid_base = self.taxonomydb.insert(info, table="snp_annotation")
+		if isinstance(taxid_base, Exception):
+			'''the insert result was never checked, a SNP that could not be written was lost and
+				the command still ended with exit status 0'''
+			raise DatabaseWriteError("The SNP {snp} could not be written to {db}: {error}".format(
+				snp=data["snp_id"], db=self.taxonomydb.database, error=taxid_base))
 		self.taxonomydb.commit()
 		return taxid_base
 
@@ -61,13 +66,30 @@ class ModifyCanSNPer2Database(ModifyTree):
 				#"comment":             data["comment"]
 		}
 		logger.debug(info)
-		return self.taxonomydb.insert(info, table="snp_references")
+		genome_i = self.taxonomydb.insert(info, table="snp_references")
+		if isinstance(genome_i, Exception):
+			raise DatabaseWriteError("The reference genome {genome} could not be written to {db}: {error}".format(
+				genome=data["genome"], db=self.taxonomydb.database, error=genome_i))
+		return genome_i
+
+	def close(self):
+		'''close the connection to the database, so the file can be moved'''
+		self.taxonomydb.conn.close()
 
 	def load_annotation_file(self,annotation_file):
 		'''Read the annotation source file'''
 		nodes = self.get_nodes()
-		if len(self.genomes) == 0:
-			self.genomes = self.get_genomes(table="snp_references")
+		'''the genomes of the database, by name and by accession as SourceCheck accepts them, and
+			the genomes just loaded with --references; the database genomes used to be read only
+			when no references file had been loaded, so a SNP on a genome already in the database
+			was refused when a references file was given too'''
+		genomes = {}
+		for genome_i, genome, genbank_id, refseq_id in self.taxonomydb.query("SELECT id, genome, genbank_id, refseq_id FROM snp_references").fetchall():
+			for key in (refseq_id, genbank_id, genome):
+				if key:
+					genomes[key] = genome_i
+		genomes.update(self.genomes)
+		self.genomes = genomes
 		with open(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
@@ -86,8 +108,9 @@ class ModifyCanSNPer2Database(ModifyTree):
 					continue
 				data = row.rstrip("\r\n").split("\t")
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
-					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
-					continue
+					'''a skipped row used to be a warning only; SourceCheck.check_modification
+						refuses the file before this point, this is the last guard'''
+					raise SourceFileError("{file}: short row '{row}'".format(file=annotation_file,row=row.strip()))
 				data += [""] * (len(headers)-len(data))
 				ddict = {}
 				for i in range(len(headers)):
@@ -97,17 +120,15 @@ class ModifyCanSNPer2Database(ModifyTree):
 				try:
 					_id = nodes[ddict["snp_id"]]
 				except KeyError:
-					logging.warning("WARNING: {id} was not found in the tree, check your source files!".format(id=ddict["snp_id"]))
-					_id = False
+					raise SourceFileError("{file}: snp_id '{id}' does not appear in the tree of {db}".format(
+						file=annotation_file,id=ddict["snp_id"],db=self.taxonomydb.database))
 				try:
 					genome_i = self.genomes[ddict["genome"]]
 				except KeyError:
-					logger.warning("No genome annotation could be found for given reference, please add {genome}!".format(genome=ddict["genome"]))
-
-					_id = False
+					raise SourceFileError("{file}: genome '{genome}' is not listed in {db}, add it with --references".format(
+						file=annotation_file,genome=ddict["genome"],db=self.taxonomydb.database))
 				logger.debug(ddict)
-				if _id is not False: ## a node id of 0 is valid, only False means "not found" (issue #204)
-					self.add_annotation(ddict, id=_id, genome_i=genome_i)
+				self.add_annotation(ddict, id=_id, genome_i=genome_i)
 		self.taxonomydb.commit()
 		return dataArr
 
@@ -125,8 +146,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 				## reference without an assembly name was skipped as a short row
 				data = row.rstrip("\r\n").split("\t")
 				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #89)
-					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
-					continue
+					raise SourceFileError("{file}: short row '{row}'".format(file=reference_file,row=row.strip()))
 				ddict = {}
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]

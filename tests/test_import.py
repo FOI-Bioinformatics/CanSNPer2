@@ -23,8 +23,8 @@ SNP_ROWS = [("R", "Paper2020", "REF1", "chrI", 10, "A", "G"),
 	("A.2", "Paper2021", "REF1", "chrI", 200, "G", "A"),
 	("B.1", "Paper2020", "REF2", "CP000002.1", 400, "A", "C")]
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
-	"REF1\ts1\tGCA_1.1\tGCF_1.1\tASM1v1\n"
-	"REF2\ts2\tGCA_2.1\tGCF_2.1\t\n")
+	"REF1\ts1\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n"
+	"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\t\n")
 
 
 def sources(tmp_path):

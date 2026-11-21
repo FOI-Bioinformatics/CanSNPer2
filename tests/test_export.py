@@ -25,8 +25,8 @@ SNPS = ("\t".join(helpers.SNP_HEADER) + "\tdate\n"
 	"B.1\tsp\tPaper2020\tREF2\tCP000002.1\t400\tA\tC\t01/02/20\n")
 # REF2 has no assembly name: its row ends with an empty field
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
-	"REF1\tstrain one\tGCA_1.1\tGCF_1.1\tASM1v1\n"
-	"REF2\tstrain two\tGCA_2.1\tGCF_2.1\t\n")
+	"REF1\tstrain one\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n"
+	"REF2\tstrain two\tGCA_000000002.1\tGCF_000000002.1\t\n")
 
 
 def create(db, tree, snp, references):
@@ -68,7 +68,7 @@ def test_an_export_rebuilds_the_same_database(tmp_path):
 	create(rebuilt, files["tree"], files["snp"], files["references"])
 	original = content(db)
 	assert len(original["snps"]) == 5 and len(original["references"]) == 2
-	assert ("REF2", "strain two", "GCA_2.1", "GCF_2.1", "") in original["references"]
+	assert ("REF2", "strain two", "GCA_000000002.1", "GCF_000000002.1", "") in original["references"]
 	assert content(rebuilt) == original
 	# exporting the rebuilt database gives the same files
 	again = export_source(rebuilt, str(tmp_path / "again"), name="scheme")
@@ -117,13 +117,12 @@ def test_an_export_passes_CanSNPer2_data_validate(tmp_path):
 	spec.loader.exec_module(validate)
 	if "sequence_position" not in getattr(validate, "SNP_HEADER", ()):
 		pytest.skip("the CanSNPer2-data checkout still validates joined positions")
-	# a scheme as published there: accessions of the checked form, an assembly name on every
+	# a scheme as published there: an assembly name on every
 	# reference (an empty last column is trailing whitespace to validate.py) and a SNP on
 	# every node (B.2 has none in the shared fixture)
 	db = str(tmp_path / "scheme.db")
 	files = {}
-	references = (REFERENCES.replace("GCA_1.1", "GCA_000000001.1").replace("GCF_1.1", "GCF_000000001.1")
-		.replace("GCA_2.1", "GCA_000000002.1").replace("GCF_2.1", "GCF_000000002.1").replace("\t\n", "\tASM2v1\n"))
+	references = REFERENCES.replace("\t\n", "\tASM2v1\n")
 	for key, text in (("tree", TREE.replace("R\tB.1\tB.2\n", "")), ("snp", SNPS), ("references", references)):
 		files[key] = str(tmp_path / ("src_" + key + ".txt"))
 		with open(files[key], "w") as out:

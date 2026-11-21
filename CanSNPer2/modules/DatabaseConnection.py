@@ -23,7 +23,8 @@ class ConnectionError(Exception):
 	def __init__(self, value):
 		self.value = value
 	def __str__(self):
-		return repr(self.value)
+		'''the message itself; repr() printed every message in quotes'''
+		return str(self.value)
 
 CANSNP_TABLES = ("nodes","tree","snp_annotation","snp_references")
 

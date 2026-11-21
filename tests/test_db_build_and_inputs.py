@@ -22,7 +22,7 @@ from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 
 
 REFERENCES_FILE = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
-                   "REF1\tref one strain\tGCA.1\tGCF.1\tasm1\n")
+                   "REF1\tref one strain\tGCA_000000001.1\tGCF_000000001.1\tasm1\n")
 
 def tree_file(separator):
 	return "R\nR{0}A.1\nR{0}A.1{0}B.1\n".format(separator)

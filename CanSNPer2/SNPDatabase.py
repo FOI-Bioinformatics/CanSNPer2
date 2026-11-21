@@ -5,14 +5,18 @@ CreateDatabase is a simple script to simplify the creation of a new database
 
 #**** Imports ****
 import sys, os
+import shutil
 import sqlite3
+import tempfile
 
 import logging
 
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.ModifyDatabase import ModifyCanSNPer2Database
-from CanSNPer2.modules.ModifyTree import InputError
+from CanSNPer2.modules.ModifyTree import InputError, TreeError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import TreeError as DatabaseTreeError
+from CanSNPer2.modules.SourceCheck import check_modification
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
@@ -165,6 +169,61 @@ def convert(args, logger):
 	return 0
 
 
+def modify(args, logger):
+	'''--mod_file (with --annotation and --references) and --remove change an existing database.
+		The loaders used to skip a SNP on an unknown node or genome and a short row with a warning,
+		and to ignore a failed insert, and the command ended with exit status 0 and a database
+		that had changed in part. Now the changes are made on a copy beside the database: the
+		tree is changed first, the SNP and references files are then checked against the tree
+		and the reference genomes of the copy (SourceCheck.check_modification), and the copy
+		replaces the database only when every step succeeded and it passes check_database.
+		A run that fails leaves the database byte-identical. Returns the exit code.'''
+	database = args.database
+	folder = os.path.dirname(os.path.abspath(database))
+	fd, work = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(database)), suffix=".part", dir=folder)
+	os.close(fd)
+	modifier = None
+	try:
+		shutil.copyfile(database, work)
+		shutil.copymode(database, work) ## the database keeps its mode, not the 0600 of mkstemp
+		options = dict(vars(args))
+		options["database"] = work
+		modifier = ModifyCanSNPer2Database(**options)
+		if args.remove:
+			modifier.remove_branch(args.parent)
+		else:
+			modifier.update_database()
+			problems = check_modification(work, annotation=args.annotation or None,
+				references=args.references or None, name=database)
+			if problems:
+				raise SourceFileError("The files cannot be added to {db}, {n} problem(s):\n  {list}".format(
+					db=database, n=len(problems), list="\n  ".join(problems)))
+			if args.references:
+				'''the references first, so the new SNPs can be placed on new genomes'''
+				logger.info("Load new genomes!")
+				modifier.load_genome_reference_file(args.references)
+			if args.annotation:
+				logger.info("Load new SNP annotations!")
+				modifier.load_annotation_file(args.annotation)
+		modifier.close()
+		modifier = None
+		check_database(work)
+		os.replace(work, database)
+	except (InputError, TreeError, DatabaseTreeError, SourceFileError, DatabaseWriteError, ConnectionError,
+			sqlite3.Error, OSError) as e:
+		'''messages name the database, not the copy that was worked on'''
+		message = getattr(e, "message", None) or str(e)
+		logger.error(message.replace(work, database))
+		logger.error("{db} was not changed".format(db=database))
+		return 1
+	finally:
+		if modifier is not None:
+			modifier.close()
+		if os.path.exists(work):
+			os.remove(work)
+	return 0
+
+
 def main():
 	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
 	args = get_arguments()
@@ -240,12 +299,7 @@ def main():
 		if not args.parent:
 			logger.error("--remove needs the branch to remove, give the branch root with --parent!")
 			exit(1)
-		try:
-			ModifyCanSNPer2Database(**vars(args)).remove_branch(args.parent)
-		except InputError as e:
-			logger.error(str(e))
-			exit(1)
-		exit()
+		exit(modify(args, logger))
 	if args.export: ## Dump database to file
 		outdir = args.outdir or "." ## without -o the export goes to the current directory (issue #132)
 		log_scheme_notice(args.database, logger) ## the scheme_info table itself is not exported
@@ -273,30 +327,10 @@ def main():
 			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
-		'''This should be reprogrammed so that one can add annotations without supplying a mod file!'''
-		try:
-			CanSNPer2Mod_DB = ModifyCanSNPer2Database(**vars(args))
-			CanSNPer2Mod_DB.update_database()
-		except InputError as e:
-			'''a modification without a mod_file or mod_database is a usage error, not a crash (issue #150)'''
-			logger.error(str(e))
-			exit(1)
-		if args.annotation:
-			'''Update for snp annotations supplied, run load annotation file function'''
-			logger.info("Load new SNP annotations!")
-			try:
-				CanSNPer2Mod_DB.load_annotation_file(args.annotation)
-			except SourceFileError as e:
-				'''a source file without the expected columns would otherwise crash the loader (issue #154)'''
-				logger.error(str(e))
-				exit(1)
-		if args.references:
-			logger.info("Load new genomes!")
-			try:
-				CanSNPer2Mod_DB.load_genome_reference_file(args.references)
-			except SourceFileError as e:
-				logger.error(str(e))
-				exit(1)
+		'''This should be reprogrammed so that one can add annotations without supplying a mod file!
+			A modification without a mod_file is a usage error, not a crash (issue #150); a source
+			file without the expected columns is refused, not a crash in the loader (issue #154)'''
+		exit(modify(args, logger))
 	elif args.annotation or args.tree or args.references:
 		'''a database can also be created from only a tree or only a reference list (issue #129)'''
 		if not args.database:

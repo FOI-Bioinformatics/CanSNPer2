@@ -10,11 +10,17 @@ refuse the files before a database is started.
 
 The rules follow CanSNPer2-data/validate.py, so a scheme that passes there builds
 here. Format rules that only concern the published repository (line endings,
-accession formats, a README, a SNP on every node) are left to validate.py.
+the RefSeq accession format, a README, a SNP on every node) are left to validate.py.
+The GenBank assembly accession of every reference is checked here, as CanSNPer2-download
+needs it to fetch the genome.
+
+check_modification() checks the files given to modify an existing database against the
+nodes and the reference genomes that database already holds.
 '''
 
 import gzip
 import re
+import sqlite3
 from collections import Counter, OrderedDict
 
 from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS
@@ -24,6 +30,8 @@ BASES = ("A", "C", "G", "T")
 POSITION_RE = re.compile(r"^[0-9]+$")
 ## trailing free-text columns that rows of the SNP file may leave out (issue #22)
 COMMENT_COLUMNS = ("comment", "comments", "note", "notes", "free text", "free_text")
+## a GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version
+ACCESSION_RE = re.compile(r"^GC[AF]_[0-9]{9}\.[0-9]+$")
 
 
 def _open(path):
@@ -79,9 +87,11 @@ def _header(handle):
 	return handle.readline().lstrip("#").strip().split("\t")
 
 
-def check_references(path, problems):
+def check_references(path, problems, known=None, database=None):
 	'''Return the names a SNP may use for its genome (the genome column and both
-		accessions, as the loaders accept all three), mapped to the genome name'''
+		accessions, as the loaders accept all three), mapped to the genome name.
+		known: the genome names a database already holds, which a new row must not repeat;
+		database: the name of that database in the messages'''
 	names = {}
 	genomes = Counter()
 	with open(path) as references:
@@ -102,6 +112,12 @@ def check_references(path, problems):
 			row = dict(zip(headers, data))
 			genome = row["genome"]
 			genomes[genome] += 1
+			if not ACCESSION_RE.match(row["genbank_id"]):
+				problems.append("{0}:{1}: genbank_id '{2}' is not an assembly accession (GCA_ or GCF_, nine digits "
+					"and a version, such as GCA_000008985.1); CanSNPer2-download needs it to fetch the genome".format(
+					path, number, row["genbank_id"]))
+			if known is not None and genome in known:
+				problems.append("{0}:{1}: genome '{2}' is already in {3}".format(path, number, genome, database))
 			for column in ("refseq_id", "genbank_id", "genome"):
 				if row[column]:
 					names[row[column]] = genome
@@ -111,8 +127,11 @@ def check_references(path, problems):
 	return names
 
 
-def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=None):
-	'''Check every SNP row; tree_nodes and genomes are skipped when not given'''
+def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=None, tree_name="the tree file",
+		existing=None):
+	'''Check every SNP row; tree_nodes and genomes are skipped when not given.
+		existing: (database name, snp_ids, {(genome, sequence, position)}) of the SNPs a database
+		already holds, which a new row must not repeat'''
 	snp_ids = Counter()
 	positions = Counter()
 	with open(path) as snps:
@@ -147,7 +166,9 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 			derived, ancestral = row["derived_base"], row["ancestral_base"]
 			snp_ids[snp_id] += 1
 			if tree_nodes is not None and snp_id not in tree_nodes:
-				problems.append("{0}:{1}: snp_id '{2}' does not appear in the tree file".format(path, number, snp_id))
+				problems.append("{0}:{1}: snp_id '{2}' does not appear in {3}".format(path, number, snp_id, tree_name))
+			if existing is not None and snp_id in existing[1]:
+				problems.append("{0}:{1}: snp_id '{2}' already has a SNP in {3}".format(path, number, snp_id, existing[0]))
 			if genomes is not None:
 				if genome not in genomes:
 					problems.append("{0}:{1}: genome '{2}' is not listed in {3}".format(
@@ -161,6 +182,9 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 				problems.append("{0}:{1}: sequence_position '{2}' is not a positive integer".format(path, number, position))
 			elif sequence.strip() != "":
 				positions[(genome, sequence, int(position))] += 1
+				if existing is not None and (genome, sequence, int(position)) in existing[2]:
+					problems.append("{0}:{1}: position {2} on sequence '{3}' of '{4}' is already annotated in {5}".format(
+						path, number, position, sequence, genome, existing[0]))
 			for column, base in (("derived_base", derived), ("ancestral_base", ancestral)):
 				if base not in BASES:
 					problems.append("{0}:{1}: {2} '{3}' is not one of A, C, G, T".format(path, number, column, base))
@@ -185,4 +209,38 @@ def check_sources(tree=None, annotation=None, references=None):
 			problems.append("{0}: the SNP file needs the references file (--references) that lists "
 				"its genomes".format(annotation))
 		check_snps(annotation, problems, tree_nodes=tree_nodes, genomes=genomes, references_path=references)
+	return problems
+
+
+def check_modification(database, annotation=None, references=None, name=None):
+	'''Return the problems of a SNP file and a references file that are to be added to an
+		existing database, an empty list when they can be added. The SNPs are checked against
+		the nodes of the tree in the database and against the reference genomes of the database
+		and of the references file; a genome, a snp_id or a position the database already holds
+		is a problem. name: the database as it is named in the messages (default database)'''
+	name = name or database
+	problems = []
+	conn = sqlite3.connect(database)
+	try:
+		tree_nodes = set(row[0] for row in conn.execute(
+			"SELECT name FROM nodes WHERE id IN (SELECT child FROM tree UNION SELECT parent FROM tree)"))
+		genomes = {}
+		for genome, genbank_id, refseq_id in conn.execute("SELECT genome, genbank_id, refseq_id FROM snp_references"):
+			for key in (refseq_id, genbank_id, genome):
+				if key:
+					genomes[key] = genome
+		snp_ids = set(row[0] for row in conn.execute("SELECT snp_id FROM snp_annotation"))
+		positions = set((genome, str(sequence), int(position)) for genome, sequence, position in conn.execute(
+			"""SELECT snp_references.genome, snp_annotation.sequence, snp_annotation.sequence_position
+				FROM snp_annotation JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)""")
+			if sequence is not None and str(position).isdigit())
+	finally:
+		conn.close()
+	known = set(genomes.values())
+	if references:
+		genomes.update(check_references(references, problems, known=known, database=name))
+	if annotation:
+		check_snps(annotation, problems, tree_nodes=tree_nodes, genomes=genomes,
+			references_path=name if not references else "{0} or {1}".format(name, references),
+			tree_name="the tree of {0}".format(name), existing=(name, snp_ids, positions))
 	return problems
