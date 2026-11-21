@@ -486,3 +486,17 @@ def test_nodes_without_snps_are_allowed_at_typing_start_up(tmp_path):
 	write(tmp_path / "refs" / "REF.fna", GENOME)
 	obj = CanSNPer2([], workdir=str(tmp_path), refdir="refs", database=db)
 	assert obj.check_start() == ["REF.fna"]
+
+
+def test_a_repeated_tree_path_adds_no_second_node(tmp_path):
+	'''a line of the tree file that repeats a known path, or ends at an inner node, used to add
+		that node a second time under the same name'''
+	files = helpers.write_sources(tmp_path / "src", SNP_ROWS, tree=TREE + "R\tA.1\nR;A.1;A.2\n", references=REFERENCES,
+		header=SNP_HEADER)
+	db = str(tmp_path / "scheme.db")
+	CanSNPDatabase(database=db, create=True, tree=files["tree"], annotation=files["snp"],
+		references=files["references"], source_type="CanSNPer", verbose=False)
+	conn = sqlite3.connect(db)
+	assert sorted(n for (n,) in conn.execute("SELECT name FROM nodes")) == ["A.1", "A.2", "B.1", "R"]
+	assert conn.execute("SELECT count(*) FROM tree").fetchone()[0] == 4
+	conn.close()

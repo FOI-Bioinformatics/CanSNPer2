@@ -17,6 +17,7 @@ from CanSNPer2.modules.ModifyTree import InputError, TreeError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, SourceFileError, DatabaseWriteError
 from CanSNPer2.modules.DatabaseConnection import TreeError as DatabaseTreeError
 from CanSNPer2.modules.SourceCheck import check_modification
+from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
 from CanSNPer2.modules.ExportDatabase import export_source, ExportError
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
@@ -351,7 +352,8 @@ def main():
 			exit(1)
 		try:
 			CanSNPDB = CanSNPDatabase(scheme_info=scheme_info, **vars(args))
-		except (InputError,SourceFileError,DatabaseWriteError) as e:
+		except (InputError,TreeFileError,SourceFileError,DatabaseWriteError,sqlite3.Error,OSError) as e:
+			'''a tree, node, link, reference or SNP that could not be written ends the build'''
 			logger.error(str(e))
 			if os.path.exists(args.database):
 				'''the file did not exist before this run, so a database that was started is incomplete'''
