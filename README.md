@@ -506,8 +506,10 @@ available:
   stretches between IS elements and rearrangements, which separate Francisella genomes
   of different subspecies, are aligned as well. PAF gives positions on each reference
   sequence, so the alignment is read again with `--skip_alignment` without any other file.
-* `mummer4`, MUMmer4 `nucmer` with its default settings followed by `delta-filter -1`,
-  written as delta. The 1-to-1 filter keeps, for every reference and query position,
+* `mummer4`, MUMmer4 `nucmer` with its default settings and one thread (`-t 1`) followed
+  by `delta-filter -1`, written as delta. With the default of two threads, repeated runs on
+  the same genomes could give different alignments after the filter, and so a different
+  base or no data at a few canSNP positions; one thread gives the same result every time. The 1-to-1 filter keeps, for every reference and query position,
   only the best alignment, allowing rearrangements. The delta file names the reference
   and query fasta files it was made from. The reference coordinates are positions on each
   reference sequence; the reader takes only the query bases from the query file, so that

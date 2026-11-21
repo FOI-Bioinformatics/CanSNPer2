@@ -173,13 +173,17 @@ class Mummer4(Aligner):
 		1-to-1 filter keeps, for every reference and query position, only the best alignment,
 		allowing rearrangements; it is the filter MUMmer recommends for SNP finding and plays
 		the part of the primary alignment and mapping quality rule of minimap2. nucmer runs with
-		its default settings. The two programs run as one shell command, so a failure of either
-		fails the alignment; delta-filter is taken from the folder of nucmer when a path is given.'''
+		its default settings except for one thread (-t 1): with its default of two threads, two
+		runs on the same genomes gave different alignments after the 1-to-1 filter (in 2 of 10
+		Y. pestis drafts, up to 20 of 970 canSNP positions changed between no data and a base),
+		while one thread gave the same output every time. The two programs run as one shell
+		command, so a failure of either fails the alignment; delta-filter is taken from the
+		folder of nucmer when a path is given.'''
 	name = "mummer4"
 	program = "nucmer"
 	suffix = "delta"
 	log_tag = "mummer4"
-	options = []
+	options = ["-t", "1"]
 
 	def filter_program(self):
 		folder = os.path.dirname(self.executable())

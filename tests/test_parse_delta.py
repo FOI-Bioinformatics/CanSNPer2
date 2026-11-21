@@ -105,7 +105,7 @@ def test_mummer4_definition(tmp_path):
 	command = mum.command("refs/r.fna", "q.fna", "/tmp/run/R_q.delta")
 	assert command[:2] == ["sh", "-c"]
 	script = command[2]
-	assert script.startswith("/opt/mummer/bin/nucmer --delta=/tmp/run/R_q.delta.unfiltered " + os.path.abspath("refs/r.fna"))
+	assert script.startswith("/opt/mummer/bin/nucmer -t 1 --delta=/tmp/run/R_q.delta.unfiltered " + os.path.abspath("refs/r.fna"))
 	assert "/opt/mummer/bin/delta-filter -1 /tmp/run/R_q.delta.unfiltered > /tmp/run/R_q.delta" in script
 	assert mum.alignment_path("/tmp/run", "CO92", "s") == "/tmp/run/CO92_s.delta"
 	assert isinstance(mum.reader(), ParseDelta)
