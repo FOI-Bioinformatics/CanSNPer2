@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
-from CanSNPer2.modules.SourceCheck import check_sources
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
+from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from importlib import import_module
 from datetime import date
@@ -153,7 +153,8 @@ class CanSNPDatabase(DatabaseFunctions):
 
 	def load_genome_annotation_file(self,annotation_file):
 		self.genomes = {}
-		with open(annotation_file) as f:
+		owners = {}
+		with open_source(annotation_file) as f:
 			headers = f.readline().lstrip("#").strip().split("\t")
 			#dataArr = []
 			logging.debug(headers)
@@ -163,7 +164,7 @@ class CanSNPDatabase(DatabaseFunctions):
 					continue
 				## only the line end is removed: strip() also removed empty trailing fields, so a
 				## reference without an assembly name was skipped as a short row
-				data = row.rstrip("\r\n").split("\t")
+				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
 				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
 					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
 					continue
@@ -171,10 +172,11 @@ class CanSNPDatabase(DatabaseFunctions):
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
 					ddict[head] = val
+				register_genome_names(owners, ddict, annotation_file)
 				genome_i = self.add_genome(ddict)
-				self.genomes[ddict["genome"]] = genome_i
-				self.genomes[ddict["genbank_id"]] = genome_i
-				self.genomes[ddict["refseq_id"]] = genome_i
+				for column in ("genome", "genbank_id", "refseq_id"):
+					if ddict[column]:
+						self.genomes[ddict[column]] = genome_i
 		self.conn.commit()
 		return self.genomes
 
@@ -188,7 +190,7 @@ class CanSNPDatabase(DatabaseFunctions):
 			for genome_i, genome in self.conn.execute("SELECT id,genome FROM snp_references"):
 				self.genomes[genome] = genome_i
 		logger.debug(self.genomes)
-		with open(annotation_file) as af:
+		with open_source(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
@@ -206,7 +208,7 @@ class CanSNPDatabase(DatabaseFunctions):
 				if row.strip() == "" or row.strip().startswith("#"):
 					'''# lines are comments in the annotation file (issue #22)'''
 					continue
-				data = row.rstrip("\r\n").split("\t")
+				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
 					continue
@@ -219,8 +221,9 @@ class CanSNPDatabase(DatabaseFunctions):
 				try:
 					_id = nodes[ddict["snp_id"]]
 				except KeyError:
-					logging.warning("WARNING: {id} was not found in the tree, check your source files!".format(id=ddict["snp_id"]))
-					_id = False
+					'''a SNP dropped with only a warning left a database without it and exit status 0'''
+					raise SourceFileError("{file}: snp_id '{id}' does not appear in the tree, the SNP would be left out of the database".format(
+						file=annotation_file, id=ddict["snp_id"]))
 				try:
 					genome_i = self.genomes[ddict["genome"]]
 				except KeyError:

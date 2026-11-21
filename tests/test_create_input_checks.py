@@ -376,3 +376,54 @@ def test_check_source_headers_refuses_joined_positions_with_the_conversion_hint(
 	with pytest.raises(SourceFileError) as error:
 		check_source_headers(headers, ANNOTATION_SOURCE_COLUMNS, "old_snp.txt")
 	assert JOINED_FORMAT_HINT in str(error.value) and "old_snp.txt" in str(error.value)
+
+
+## a genome name that is also the accession of another genome, and whitespace in the source files
+
+def test_genome_name_equal_to_another_genomes_accession_is_refused(tmp_path):
+	# the loaders kept genome, genbank_id and refseq_id of every genome in one dict, so the
+	# name REF2 below resolved to the genome that has it as an accession and the SNPs of
+	# genome REF2 were attached to the wrong genome
+	references = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
+		"REF1\ts1\tGCA_000000001.1\tREF2\tASM1v1\n"
+		"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\tASM2v1\n")
+	files = write_sources(tmp_path, references=references)
+	message = refused(tmp_path, files)
+	assert "REF2" in message and "REF1" in message
+	problems = check_sources(tree=files["tree"], annotation=files["snp"], references=files["references"])
+	assert any("'REF2'" in p and "'REF1'" in p for p in problems), problems
+
+
+def test_genome_name_equal_to_its_own_accession_is_accepted(tmp_path):
+	references = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
+		"REF1\ts1\tGCA_000000001.1\tREF1\tASM1v1\n"
+		"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\tASM2v1\n")
+	files = write_sources(tmp_path, references=references)
+	assert check_sources(tree=files["tree"], annotation=files["snp"], references=files["references"]) == []
+
+
+def test_loader_refuses_a_name_that_maps_to_two_genomes(tmp_path):
+	# the loader itself, without the source check in front of it
+	from CanSNPer2.modules.InitiateDatabase import CreateSNPDatabase
+	references = tmp_path / "references.txt"
+	references.write_text("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
+		"REF1\ts1\tGCA_000000001.1\tREF2\tASM1v1\n"
+		"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\tASM2v1\n")
+	db = str(tmp_path / "x.db")
+	CreateSNPDatabase(db, create=True)
+	loader = CanSNPDatabase(database=db, create=False, tree=None, annotation=None, references=None,
+		source_type="CanSNPer", verbose=False)
+	with pytest.raises(SourceFileError) as error:
+		loader.load_genome_annotation_file(str(references))
+	assert "REF1" in str(error.value) and "REF2" in str(error.value)
+
+
+def test_modification_refuses_a_name_that_maps_to_two_genomes(tmp_path):
+	from CanSNPer2.modules.SourceCheck import check_modification
+	files = write_sources(tmp_path)
+	db = create(tmp_path, files)
+	references = tmp_path / "new_references.txt"
+	references.write_text("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
+		"REF3\ts3\tGCA_000000003.1\tREF1\tASM3v1\n")
+	problems = check_modification(db, references=str(references))
+	assert any("'REF1'" in p and "'REF3'" in p for p in problems), problems

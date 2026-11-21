@@ -176,7 +176,7 @@ def convert(args, logger):
 
 
 def modify(args, logger):
-	'''--mod_file (with --annotation and --references) and --remove change an existing database.
+	'''--mod_file, --annotation, --references (each alone or together) and --remove change an existing database.
 		The loaders used to skip a SNP on an unknown node or genome and a short row with a warning,
 		and to ignore a failed insert, and the command ended with exit status 0 and a database
 		that had changed in part. Now the changes are made on a copy beside the database: the
@@ -359,8 +359,7 @@ def command():
 			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
-		'''This should be reprogrammed so that one can add annotations without supplying a mod file!
-			A modification without a mod_file is a usage error, not a crash (issue #150); a source
+		'''--annotation and --references need no --mod_file. A modification without any source is a usage error, not a crash (issue #150); a source
 			file without the expected columns is refused, not a crash in the loader (issue #154)'''
 		exit(modify(args, logger))
 	elif args.annotation or args.tree or args.references:

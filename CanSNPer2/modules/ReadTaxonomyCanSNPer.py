@@ -16,7 +16,7 @@ __email__ = "bioinformatics@foi.se"
 __date__ = "2020-01-17"
 __status__ = "Production"
 
-from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions, DatabaseWriteError, open_source
 import logging
 import gzip
 import sys
@@ -53,7 +53,10 @@ class ReadTaxonomyBase(object):
 		self.ids = 0
 
 	def zopen(self, path,*args, **kwargs):
-		'''Redefine open to handle zipped files automatically'''
+		'''Redefine open to handle zipped files automatically; a file read as text is read
+			with open_source, so a byte order mark is dropped'''
+		if not kwargs and (not args or args == ("r",)):
+			return open_source(path)
 		if path.endswith(".gz"):
 			if str(*args) in ["r","w"] and sys.version_info.major >= 3:
 				## Python version three and above interprets binary formats as binary, add t (rt) to get text returned
@@ -225,7 +228,7 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 					firstline = row
 					break
 			firstline = firstline.strip().replace("\t",";")
-			root = firstline.split(";") ## Root should be either the leftmost annotation in the tree or the only annotation on that row
+			root = [name.strip() for name in firstline.split(";")] ## Root should be either the leftmost annotation in the tree or the only annotation on that row
 			if isinstance(root,list):
 				root = root[0]
 		return root
@@ -257,7 +260,7 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 				row = row.strip().replace("\t",";")  ## Also accept tab separated tree files
 				if not row:
 					continue
-				nodes = row.strip().split(";")  ## get node and all its parents in a list
+				nodes = [name.strip() for name in row.strip().split(";")]  ## get node and all its parents in a list, names are stripped as SourceCheck does
 				logger.debug(nodes)
 				child = nodes[-1]  ## get name of child node
 				if len(nodes) > 1 and child.strip() in self.taxonomy:

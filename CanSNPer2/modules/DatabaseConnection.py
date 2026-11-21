@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, gzip
 import sqlite3
 
 '''
@@ -46,6 +46,52 @@ class DatabaseWriteError(Exception):
 		taxonomy connection only logs a failed insert and returns the exception, so the
 		loaders check the result and raise this instead of finishing with exit status 0'''
 	pass
+
+class SourceReader(object):
+	'''a text file that names itself when it is not UTF-8: reading a byte that is not valid
+		UTF-8 (a file saved as latin-1, for example) raises SourceFileError with the file name
+		instead of a bare UnicodeDecodeError'''
+	def __init__(self, handle, path):
+		self.handle = handle
+		self.path = path
+
+	def _guard(self, call, *args):
+		try:
+			return call(*args)
+		except UnicodeDecodeError as e:
+			raise SourceFileError("The source file {file} cannot be read: it is not valid UTF-8 text ({error}). "
+				"Save the file as UTF-8 and run again".format(file=self.path, error=e.reason)) from e
+
+	def __iter__(self):
+		return self
+
+	def __next__(self):
+		return self._guard(self.handle.__next__)
+
+	def readline(self, *args):
+		return self._guard(self.handle.readline, *args)
+
+	def read(self, *args):
+		return self._guard(self.handle.read, *args)
+
+	def close(self):
+		self.handle.close()
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, *exc):
+		self.handle.close()
+		return False
+
+def open_source(path):
+	'''open a tree, SNP, references or modification source file as text. The encoding is
+		utf-8-sig, so a byte order mark at the start of the file (saved by some editors as
+		"UTF-8 with BOM") is dropped instead of becoming part of the first name; a .gz file
+		is read compressed. Text that is not UTF-8 raises SourceFileError naming the file'''
+	if str(path).endswith(".gz"):
+		return SourceReader(gzip.open(path, "rt", encoding="utf-8-sig"), path)
+	return SourceReader(open(path, encoding="utf-8-sig"), path)
 
 def check_source_headers(headers,required,filename):
 	'''source files are read by column name, a file without the header row, or with renamed columns,
@@ -243,7 +289,7 @@ class LoadCanSNPAnnotation(DatabaseConnection):
 		if not annotation or not os.path.exists(annotation):
 			raise SourceFileError("The annotation file {file} does not exist, no annotations could be loaded!".format(file=annotation))
 
-		with open(annotation) as f:
+		with open_source(annotation) as f:
 			headers = f.readline().strip().lstrip("#").split("\t")
 			'''Define new headers as they must match the database'''
 			headers = ["node_id", "snp_id", "sequence", "sequence_position", "ancestral_base","derived_base","reference","date","genome_i"]
