@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 class ModifyCanSNPer2Database(ModifyTree):
 	"""ModifyCanSNPer2Database adds a few important functions only nessesary when modifying a database"""
-	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,remove=False,**kwargs):
+	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,remove=False,annotation=False,references=False,**kwargs):
 		logger.info("Load ModifyFunctions")
-		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace,remove=remove)
+		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace,remove=remove,annotation=annotation,references=references)
 		self.genomes = {}
 		self.today = date.today()
 
@@ -173,6 +173,9 @@ class ModifyCanSNPer2Database(ModifyTree):
 			ModifyTree never sets, so every --mod_file run died with an AttributeError (issue #133),
 			the names below follow ModifyTree.parse_modification
 		'''
+		if self.sources_only:
+			logger.info("No change to the tree was given, only SNPs and reference genomes are added")
+			return
 		removed_links = (self.old_links | self.non_overlapping_old_links) - set(self.parent_link)
 		if self.replace:
 			self.taxonomydb.delete_links(removed_links)

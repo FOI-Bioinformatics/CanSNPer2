@@ -74,6 +74,7 @@ class ModifyTree(object):
 		self.remove = remove
 		self.ncbi_order = True
 		self.mod_genomes =False
+		self.sources_only = False ## true when only SNPs and reference genomes are added, the tree is not changed
 
 		self.fast_clean = True
 
@@ -115,10 +116,14 @@ class ModifyTree(object):
 			self.modsource = self.parse_modification(self.moddb,"database")
 		elif mod_file:
 			self.modsource = self.parse_modification(mod_file,"file")
+		elif kwargs.get("annotation") or kwargs.get("references"):
+			'''SNPs and reference genomes can be added without a change of the tree'''
+			self.sources_only = True
 		elif update_genomes or clean_database or update_node_names or rename_node or purge_database or remove:
 			pass
 		else:
-			raise InputError("No modification source could be found both mod_database and mod_file file are empty!")
+			raise InputError("Nothing to modify: give --mod_file with changes to the tree, --annotation with SNPs "
+				"to add, --references with reference genomes to add, or --remove with --parent to remove a branch")
 
 	def _is_int(self,s):
 		'''Small help function, test if value is int'''
