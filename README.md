@@ -372,7 +372,8 @@ optional arguments:
   -h, --help            show this help message and exit
 
 Required arguments:
-  query                 File(s) to align (fasta)
+  query                 File(s) to align (fasta), or one list file with a file path
+                        per line (a list must be the only query argument)
   -db , --database      CanSNP database
 
 Output options:
@@ -461,6 +462,16 @@ B.6	clade	marker	AMR feature (separated at the B.6 / B.12 split)	#c0392b
   annotations by rank.
 - `color` is optional; without it ranks get a stable palette color. Annotations naming a
   SNP that is not in the database are skipped with a warning.
+
+### Query input
+
+Queries are FASTA files (plain text; gzip-compressed files must be decompressed first). A
+file is a query list instead when its first non-blank line does not start with `>`: the
+list holds one file path per line. This is decided by the content, not by the file name, so
+a FASTA file named `x.txt` is typed as a FASTA file. A query list must be the only query
+argument; combining it with other arguments stops the run with a message. An empty file, a
+file without a `>` header and a file that has a header but no sequence stop the run (or the
+sample, with `--keep_going`) with a message naming the file.
 
 ### Sample and sequence names
 

@@ -69,3 +69,35 @@ def test_the_call_is_printed_with_no_snpfiles(tmp_path, capsys):
 	obj.run(database=db)
 	assert "x: " in capsys.readouterr().out
 	assert not os.path.exists(os.path.join(obj.outdir, "x_snps.txt"))
+
+
+# 2. query list detection
+
+def test_a_list_file_is_read_by_content(tmp_path):
+	a = write(tmp_path / "a.fasta")
+	lst = write(tmp_path / "list.txt", a + "\n")
+	obj, db = project(tmp_path, [lst])
+	assert obj.resolve_queries([lst]) == [a]
+
+
+def test_a_fasta_named_txt_is_a_fasta(tmp_path):
+	q = write(tmp_path / "x.txt")
+	obj, db = project(tmp_path, [q])
+	assert obj.resolve_queries([q]) == [q]
+
+
+def test_a_list_with_other_arguments_is_refused(tmp_path):
+	a = write(tmp_path / "a.fasta")
+	lst = write(tmp_path / "list.txt", a + "\n")
+	obj, db = project(tmp_path, [a, lst])
+	with pytest.raises(CanSNPer2Error, match="list.txt.*only query argument"):
+		obj.resolve_queries([a, lst])
+	with pytest.raises(CanSNPer2Error, match="only query argument"):
+		obj.resolve_queries([lst, a])
+
+
+def test_an_empty_file_is_a_query_not_a_list(tmp_path):
+	# it is refused as a FASTA file, with a message that says it is empty (see the query fasta checks)
+	empty = write(tmp_path / "list.txt", "\n\n")
+	obj, db = project(tmp_path, [empty])
+	assert obj.resolve_queries([empty]) == [empty]

@@ -83,7 +83,7 @@ def command():
 		epilog=COMMANDS_HELP,
 		formatter_class=argparse.RawDescriptionHelpFormatter)
 	required_arguments = parser.add_argument_group("Required arguments")
-	required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 		help="File(s) to align (fasta)")
+	required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 		help="File(s) to align (fasta), or one list file with a file path per line (a file that does not start with '>'; a list must be the only query argument)")
 	required_arguments.add_argument('-db',  '--database', 	metavar='', 							help='CanSNP database')
 
 	output_options = parser.add_argument_group("Output options")

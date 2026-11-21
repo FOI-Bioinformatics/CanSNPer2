@@ -601,8 +601,37 @@ class CanSNPer2(object):
 		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
 		return final_snp
 
+	def is_list_file(self,path):
+		'''A query list is an existing text file whose first non-blank line is not a FASTA header
+			(">"); a FASTA file is told from it by its content, not by its file name. Empty and
+			gzip-compressed files are not lists, the FASTA checks name them.'''
+		if not os.path.isfile(path):
+			return False
+		try:
+			with open(path,"rb") as handle:
+				head = handle.read(4096)
+		except OSError:
+			return False
+		head = head[3:] if head.startswith(b"\xef\xbb\xbf") else head
+		head = head.lstrip()
+		return bool(head) and not head.startswith((b">", b"\x1f\x8b"))
+
+	def resolve_queries(self,queries):
+		'''The query files of the run. A file whose first non-blank line is not a FASTA header is a
+			query list, one file path per line; it must be the only query argument. All other
+			arguments are query FASTA files, whatever their file name.'''
+		lists = [q for q in queries if self.is_list_file(q)]
+		if not lists:
+			return list(queries)
+		if len(queries) > 1:
+			raise CanSNPer2Error("{lst} is a query list (it does not start with a FASTA header) and a list must be the only query argument, "
+				"not combined with {n} other query argument(s); put all files in the list, or give the FASTA files without a list".format(
+				lst=lists[0], n=len(queries)-1))
+		logger.info("A query list was found, reading file paths from {q}".format(q=lists[0]))
+		return self.read_query_textfile_input(lists[0])
+
 	def read_query_textfile_input(self,query_file):
-		'''If query input is a text file, parse file
+		'''Read a query list: one file path per line.
 
 			query_file is the query list from the command line, so the text file is its
 			first entry; passing the list itself to open() raised TypeError and the
@@ -613,7 +642,7 @@ class CanSNPer2(object):
 		with open(query_file, "r") as f:
 			query = [query.strip() for query in f if query.strip()]
 		if not query:
-			raise CanSNPer2Error("The query input file {query_file} contained no filepaths".format(query_file=query_file))
+			raise CanSNPer2Error("The query input file {query_file} is empty, it contained no filepaths".format(query_file=query_file))
 		return query
 
 	def cleanup(self):
@@ -953,10 +982,8 @@ class CanSNPer2(object):
 		'''Run CanSNPer2'''
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
 		if len(self.query) > 0:
-			'''Read query input file if a txt file is supplied insead of fasta files'''
-			if self.query[0].endswith(".txt"):
-				logger.info("Textfile input was found, parsing filepaths in {q} file".format(q=self.query[0]))
-				self.query=self.read_query_textfile_input(self.query)
+			'''A query list file (file paths, one per line) is read, see resolve_queries'''
+			self.query = self.resolve_queries(self.query)
 			self.query = self.check_sample_names(self.query)
 			'''the database and the reference folder are checked once, before the first sample'''
 			self.check_start()
