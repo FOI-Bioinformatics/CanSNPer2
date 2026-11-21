@@ -102,7 +102,7 @@ database is written. The same checks apply to `--import` and `CanSNPer2-download
 | File | Refused |
 |---|---|
 | tree | a line that does not start at the root of the first line, a node with more than one parent, an empty column |
-| SNP | a position that is not a positive integer, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a snp_id or a position on one genome listed twice, a row with too few columns |
+| SNP | a sequence_position that is not a positive integer, the old header with a `position` column, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a snp_id or a (sequence, sequence_position) on one genome listed twice, a row with too few columns |
 | references | a genome listed twice, a row with too few columns |
 
 `#` comment lines, blank lines, a trailing comment column in the SNP file, `;` separated
@@ -165,7 +165,7 @@ Logging and debug options:
 | File | Content |
 |---|---|
 | `<db>_tree.txt` | one line per node, the tab separated path from the root to the node |
-| `<db>_snp.txt` | `snp_id strain reference genome position derived_base ancestral_base` |
+| `<db>_snp.txt` | `snp_id strain reference genome sequence sequence_position derived_base ancestral_base` |
 | `<db>_references.txt` | `genome strain genbank_id refseq_id assembly_name` |
 
 The SNP file has the header CanSNPer2-data requires. The database keeps no strain per SNP, so
@@ -258,15 +258,13 @@ LVS     LVS     GCA_000009245.1 GCF_000009245.1 ASM924v1
 SCHUS4.2        SCHUS4  GCA_000008985.1 GCF_000008985.1 ASM898v1
 
 ```
-Example structure of snps.txt (NEW headerline)
+Example structure of snps.txt (NEW headerline; `sequence` is the GenBank accession of the
+sequence the SNP lies on and `sequence_position` the 1-based position on that sequence)
 ```
-snp_id	strain	reference	genome	position	derived_base	ancestral_base
-T/N.1	francisella	Svensson2009	SCHUS4.2	83976	A	G
-T.1	francisella	Svensson2009	SCHUS4.2	1165688	G	A
-M.1	francisella	Vogler2009	SCHUS4.2	75124	T	C
-A/M.1	francisella	Vogler2009	SCHUS4.2	1491914	A	G
-A.1	francisella	Vogler2009	SCHUS4.2	397639	T	C
-B.1	francisella	Birdsell2014	OSU18	1710718	T	C
+snp_id	strain	reference	genome	sequence	sequence_position	derived_base	ancestral_base
+T/N.1	francisella	Svensson2009	SCHUS4.2	AJ749949.2	83976	A	G
+T.1	francisella	Svensson2009	SCHUS4.2	AJ749949.2	1165688	G	A
+M.1	francisella	Vogler2009	SCHUS4.2	AJ749949.2	75124	T	C
 ...
 ```
 Example structure of tree.txt
@@ -403,22 +401,69 @@ queries; these names must be set and unique, otherwise the run (reference) or th
 
 ### References of several sequences
 
-SNP positions in the database run along the sequences of the reference (chromosomes,
-plasmids) joined end to end in the order of the reference fasta file, which is the order
-of the NCBI assembly that CanSNPer2-download fetches. The database does not record the
-sequences, so every reference is checked before it is used, at download and at the start
-of a run: it must be at least as long as the last SNP position on it, and its base at each
-SNP position must be the ancestral or the derived base of that SNP. A reference with its
-sequences in another order, or another genome, has the expected base at about half of the
-SNPs; a reference that lacks it at a fifth of its SNPs or more is refused, fewer
-mismatches are reported as a warning.
+Each SNP is stored as the reference sequence it lies on (chromosome or plasmid, named by
+its GenBank accession, for example `AE008917.1`) and the 1-based position on that
+sequence. A sequence is identified by the first word of its fasta header. The order of
+the sequences in the reference file does not matter, and a position is the same as the one
+published for that chromosome or plasmid.
 
-The tables `x_snps.txt` and `x_not_called.txt` give the position on the joined reference
-(`Pos`) and, in the last two columns, the reference sequence it falls on and the position
-on that sequence (`ReferenceSeq`, `ReferenceSeqPosition`), for comparison with positions
-published per chromosome. The two columns are `-` when the reference file cannot be read
-(`--skip_alignment` without the reference folder).
+Every reference is checked before it is used, at download and at the start of a run: it
+must contain each sequence that the database places SNPs on, each sequence must be at least
+as long as its last SNP position, and its base at each SNP position must be the ancestral
+or the derived base of that SNP. A reference that lacks a named sequence stops with an
+error naming the sequence. Extra sequences in the file are allowed. A reference that lacks the
+expected base at a fifth of its SNPs or more is refused, fewer mismatches are reported as a
+warning.
 
+`CanSNPer2-download --source refseq` renames each sequence of the downloaded RefSeq assembly
+to its GenBank accession, so that the file matches the database. `--source genbank` (the
+default) needs no renaming.
+
+The tables `x_snps.txt` and `x_not_called.txt` have the columns `Name`, `Reference`,
+`Sequence`, `Pos`, `QuerySeq`, `QueryPosition`, `Ancestral base`, `Derived base`,
+`Target base` and `Edge flag`. `Sequence` and `Pos` are the reference sequence and the
+position on it. The columns `ReferenceSeq` and `ReferenceSeqPosition` of version 2.2 are
+removed, as `Sequence` and `Pos` now carry that information.
+
+### Upgrading from 2.2
+
+Version 2.3.0 changes how a SNP position is stored. Up to 2.2 it was one number along all
+the sequences of the reference joined in the order of the reference fasta file, which made
+a result depend on that order. From 2.3.0 the database and the source files hold the
+sequence and the position on it (`sequence`, `sequence_position`; the `position` column
+is gone), and the result tables hold the columns listed above.
+
+A database or SNP source file in the old format is refused:
+
+```
+The database old.db cannot be used. It stores SNP positions along the joined reference
+sequences (the format before 2.3.0). Convert it with CanSNPer2-database --convert, or
+download the current database with CanSNPer2-download --scheme.
+```
+
+A database made by 2.3.0 cannot be read by 2.2.x, which stops with `no such column: position`.
+
+`--convert` rewrites the positions of a SNP source file or a database. Each SNP is located on
+the sequence of its reference genome, which is read from `--refdir` (`<genome>.fna`; missing
+files are downloaded). A SNP whose base in the reference is neither its derived nor its
+ancestral base is reported, and nothing is written. The result is written to the folder
+given with `-o`, under the name of the input file, which is not changed.
+
+```sh
+# a SNP source file; --references is optional and names the genomes of the file
+CanSNPer2-database --convert --annotation old_snp.txt --references old_references.txt \
+    --refdir references/ -o converted/
+
+# a database
+CanSNPer2-database --convert --database old.db --refdir references/ -o converted/
+```
+
+The reference files must have their sequences in the order in which the old positions were
+counted (the order of the NCBI assembly file). The sequence names written are the first
+words of their fasta headers; missing reference files are downloaded from GenBank, so the
+names are GenBank accessions. Alignments
+made by 2.2 must be made again, as `--skip_alignment` needs the sequence table that 2.3.0
+writes next to an alignment.
 
 ## Aligners
 
@@ -467,9 +512,9 @@ that walks the alignment file and reports, for each SNP position it covers, the 
 base on the forward strand of the reference (`observe()`); the classification into
 derived, ancestral, other base and no data, `--mask`, the edge flag and the result
 rows are shared by all readers. SNP positions are the reference coordinates of the
-database: for a reference with several sequences (chromosomes, plasmids) the sequences
-are joined end to end in the order of the reference fasta file, as progressiveMauve
-does. A new aligner is registered in `ALIGNERS` and can then be selected with `--aligner`.
+database: the reference sequence (the first word of its fasta header) and the position on
+it. progressiveMauve counts along the sequences joined end to end and its reader converts
+the positions. A new aligner is registered in `ALIGNERS` and can then be selected with `--aligner`.
 
 Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki).
 

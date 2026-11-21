@@ -12,7 +12,7 @@
 # gate stays honest on machines that are not the reference one.
 #
 # Data it needs from the project (issue #185, the data lives next to the repository):
-#   ../CanSNPer2-data/schemes/francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
+#   ../CanSNPer2-data-perseq/schemes (DATA=/path overrides) /francisella_tularensis/francisella_tularensis_{tree,snp,references}.txt
 #   references/*.fna in this repository, and ../../test_data/*.fasta for the known answers
 # Override the root with ROOT=/path/to/project when the layout is different.
 
@@ -23,7 +23,9 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 ROOT=${ROOT:-$(cd "$REPO/.." && pwd)}
 PKG=$REPO
-SRC=$ROOT/CanSNPer2-data/schemes/francisella_tularensis
+# worktree of CanSNPer2-data with the converted schemes (per-sequence positions, 2.3.0)
+DATA=${DATA:-$ROOT/CanSNPer2-data-perseq}
+SRC=$DATA/schemes/francisella_tularensis
 PY=${PYTHON:-python}
 OUT=${OUT:-$ROOT/test-run/release_gate}
 
@@ -232,12 +234,11 @@ cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inp
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
 expect "query_snps.txt lines" "20" "$(wc -l < "$OUT/res_query/query_snps.txt")"
 expect "query_not_called.txt lines" "313" "$(wc -l < "$OUT/res_query/query_not_called.txt")"
-# issue #23: both tables carry the query trace columns (Name, Reference, Pos, QuerySeq,
-# QueryPosition, Ancestral base, Derived base, Target base, Edge flag, ReferenceSeq,
-# ReferenceSeqPosition)
-expect "snps table columns (#23)" "11" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
-expect "not_called table columns (#23)" "11" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
-BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($4=="" || $5=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+# issue #23: both tables carry the query trace columns (Name, Reference,
+# Sequence, Pos, QuerySeq, QueryPosition, Ancestral base, Derived base, Target base, Edge flag)
+expect "snps table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
+expect "not_called table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
+BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 expect "query trace columns filled in every SNP row" "0" "$BADQ"
 QPNUM=$(awk -F'\t' 'NR>1 && $5 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 if [ "$QPNUM" -gt 0 ]; then
