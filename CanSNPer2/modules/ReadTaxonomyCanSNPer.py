@@ -225,7 +225,7 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 					firstline = row
 					break
 			firstline = firstline.strip().replace("\t",";")
-			root = firstline.split(";") ## Root should be either the leftmost annotation in the tree or the only annotation on that row
+			root = [name.strip() for name in firstline.split(";")] ## Root should be either the leftmost annotation in the tree or the only annotation on that row
 			if isinstance(root,list):
 				root = root[0]
 		return root
@@ -257,7 +257,7 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 				row = row.strip().replace("\t",";")  ## Also accept tab separated tree files
 				if not row:
 					continue
-				nodes = row.strip().split(";")  ## get node and all its parents in a list
+				nodes = [name.strip() for name in row.strip().split(";")]  ## get node and all its parents in a list, names are stripped as SourceCheck does
 				logger.debug(nodes)
 				child = nodes[-1]  ## get name of child node
 				if len(nodes) > 1 and child.strip() in self.taxonomy:

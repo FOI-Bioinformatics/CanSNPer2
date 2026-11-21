@@ -51,12 +51,13 @@ def check_tree(path, problems):
 			if line.strip() == "":
 				continue
 			## the same reading as ReadTaxonomyCanSNPer.parse_taxonomy
-			fields = line.strip().replace("\t", ";").split(";")
-			empty = [i + 1 for i, field in enumerate(fields) if field.strip() == ""]
+			## every name is stripped, as the loader does, so "A " and "A" are one node
+			fields = [field.strip() for field in line.strip().replace("\t", ";").split(";")]
+			empty = [i + 1 for i, field in enumerate(fields) if field == ""]
 			if empty:
 				where = "at the end" if empty == [len(fields)] else "between populated columns"
 				problems.append("{0}:{1}: empty column {2} {3}".format(path, number, empty[0], where))
-				fields = [field for field in fields if field.strip() != ""]
+				fields = [field for field in fields if field != ""]
 				if not fields:
 					continue
 			if root is None:
@@ -125,7 +126,7 @@ def check_references(path, problems, known=None, database=None, known_accessions
 		for number, line in enumerate(references, start=2):
 			if line.strip() == "":
 				continue
-			data = line.rstrip("\r\n").split("\t")
+			data = [value.strip() for value in line.rstrip("\r\n").split("\t")]
 			if len(data) != len(headers):
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(
 					path, number, len(headers), len(data)))
@@ -196,7 +197,7 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 		for number, line in enumerate(snps, start=2):
 			if line.strip() == "" or line.strip().startswith("#"):
 				continue
-			data = line.rstrip("\r\n").split("\t")
+			data = [value.strip() for value in line.rstrip("\r\n").split("\t")]
 			if not required <= len(data) <= len(headers):
 				expected = str(required) if optional == 0 else "{0} to {1}".format(required, len(headers))
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(path, number, expected, len(data)))

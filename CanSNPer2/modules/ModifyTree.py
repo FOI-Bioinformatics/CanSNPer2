@@ -267,7 +267,7 @@ class ModifyTree(object):
 		with open(modfile, "r") as f:
 			headers = f.readline().strip().split(self.sep)
 			if replace_parent:
-				new_root = f.readline().strip().split(self.sep)
+				new_root = [field.strip() for field in f.readline().strip().split(self.sep)]
 				if len(new_root) == 2:
 					new_root.append("no rank")
 				if len(new_root) != 3 or not new_root[0].strip(): ## branch root row must name parent, child and level (issue #81)
@@ -288,7 +288,7 @@ class ModifyTree(object):
 			for row in f:
 				if row.strip() == "":
 					continue
-				line = row.strip().split(self.sep)
+				line = [field.strip() for field in row.strip().split(self.sep)]
 				if len(line) == 2:
 					line +=["no rank"] ## Add no specified rank to line
 				if len(line) != 3: ## malformed row, too few or too many columns (issue #82)
@@ -387,7 +387,7 @@ class ModifyTree(object):
 					branchroot = f.readline().strip().split(self.sep)
 					if not branchroot[0].strip(): ## replace_parent needs the branch root name in the first data row (issue #83/#84)
 						raise InputError("The replace_parent option needs the first data row of the modification file to contain the branch root name, none was found")
-					new_name = branchroot[0]
+					new_name = branchroot[0].strip()
 					#logger.info("New root name: {nn}".format(nn=new_name))
 				logger.info("New name of parent, changing from {oldp}, to {newp}".format(oldp=self.parent, newp=new_name))
 				self._name_update(self.parent,new_name)

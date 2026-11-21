@@ -107,7 +107,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 			for row in af:
 				if row.strip() == "" or row.strip().startswith("#"):
 					continue
-				data = row.rstrip("\r\n").split("\t")
+				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					'''a skipped row used to be a warning only; SourceCheck.check_modification
 						refuses the file before this point, this is the last guard'''
@@ -150,7 +150,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 					continue
 				## only the line end is removed: strip() also removed empty trailing fields, so a
 				## reference without an assembly name was skipped as a short row
-				data = row.rstrip("\r\n").split("\t")
+				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
 				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #89)
 					raise SourceFileError("{file}: short row '{row}'".format(file=reference_file,row=row.strip()))
 				ddict = {}

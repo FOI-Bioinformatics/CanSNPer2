@@ -164,7 +164,7 @@ class CanSNPDatabase(DatabaseFunctions):
 					continue
 				## only the line end is removed: strip() also removed empty trailing fields, so a
 				## reference without an assembly name was skipped as a short row
-				data = row.rstrip("\r\n").split("\t")
+				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
 				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
 					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
 					continue
@@ -208,7 +208,7 @@ class CanSNPDatabase(DatabaseFunctions):
 				if row.strip() == "" or row.strip().startswith("#"):
 					'''# lines are comments in the annotation file (issue #22)'''
 					continue
-				data = row.rstrip("\r\n").split("\t")
+				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
 					continue
@@ -221,8 +221,9 @@ class CanSNPDatabase(DatabaseFunctions):
 				try:
 					_id = nodes[ddict["snp_id"]]
 				except KeyError:
-					logging.warning("WARNING: {id} was not found in the tree, check your source files!".format(id=ddict["snp_id"]))
-					_id = False
+					'''a SNP dropped with only a warning left a database without it and exit status 0'''
+					raise SourceFileError("{file}: snp_id '{id}' does not appear in the tree, the SNP would be left out of the database".format(
+						file=annotation_file, id=ddict["snp_id"]))
 				try:
 					genome_i = self.genomes[ddict["genome"]]
 				except KeyError:
