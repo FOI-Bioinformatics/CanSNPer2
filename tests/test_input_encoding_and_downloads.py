@@ -172,9 +172,11 @@ def open_descriptors():
 
 def test_download_closes_its_temporary_descriptors(tmp_path):
 	obj = downloader(tmp_path, GZ)
+	genome = os.path.join(obj.directory, "source", "GCA_000007845.1_ASM784v1_genomic.fna")
 	fetch(obj)
 	before = open_descriptors()
 	for i in range(5):
+		os.remove(genome) ## a genome that is present is reused without a download
 		fetch(obj, refid="R" + str(i))
 	assert open_descriptors() == before
 
