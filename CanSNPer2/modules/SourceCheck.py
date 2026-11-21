@@ -23,7 +23,7 @@ import re
 import sqlite3
 from collections import Counter, OrderedDict
 
-from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT
+from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT, SourceFileError
 
 BASES = ("A", "C", "G", "T")
 ## ASCII digits only: str.isdigit() also accepts characters such as superscripts
@@ -87,12 +87,31 @@ def _header(handle):
 	return handle.readline().lstrip("#").strip().split("\t")
 
 
-def check_references(path, problems, known=None, database=None, known_accessions=None):
+def register_genome_names(owners, row, source):
+	'''Record the names a SNP may use for a genome (the genome column and both accessions) in
+		owners, {name: genome}, and raise SourceFileError when a name already belongs to another
+		genome: a SNP that names that genome would be attached to the wrong one.
+		source: the file or database named in the message'''
+	genome = row["genome"]
+	for column in ("genome", "genbank_id", "refseq_id"):
+		name = row[column]
+		if not name:
+			continue
+		if owners.get(name, genome) != genome:
+			raise SourceFileError("{0}: the name '{1}' ({2} of genome '{3}') is already used for genome '{4}'; "
+				"a genome, a genbank_id and a refseq_id must not repeat the name of another genome".format(
+				source, name, column, genome, owners[name]))
+		owners[name] = genome
+
+
+def check_references(path, problems, known=None, database=None, known_accessions=None, known_names=None):
 	'''Return the names a SNP may use for its genome (the genome column and both
 		accessions, as the loaders accept all three), mapped to the genome name.
 		known: the genome names a database already holds, which a new row must not repeat;
 		known_accessions: {genbank_id: genome} of that database, an accession a new row must
-		not give for another genome; database: the name of that database in the messages'''
+		not give for another genome; known_names: {name: genome} of the names that database accepts
+		(genome and both accessions), a name a new row must not use for another genome;
+		database: the name of that database in the messages'''
 	names = {}
 	genomes = Counter()
 	accessions = {}
@@ -131,9 +150,19 @@ def check_references(path, problems, known=None, database=None, known_accessions
 					path, number, accession, genome, known_accessions[accession], database))
 			if known is not None and genome in known:
 				problems.append("{0}:{1}: genome '{2}' is already in {3}".format(path, number, genome, database))
-			for column in ("refseq_id", "genbank_id", "genome"):
-				if row[column]:
-					names[row[column]] = genome
+			for column in ("genome", "genbank_id", "refseq_id"):
+				name = row[column]
+				if not name:
+					continue
+				owner = names.get(name)
+				if owner is None and known_names:
+					owner = known_names.get(name)
+				if owner is not None and owner != genome:
+					problems.append("{0}:{1}: the name '{2}' ({3} of genome '{4}') is already used for genome '{5}'; "
+						"a genome, a genbank_id and a refseq_id must not repeat the name of another genome".format(
+						path, number, name, column, genome, owner))
+				else:
+					names[name] = genome
 	for genome, count in genomes.items():
 		if count > 1:
 			problems.append("{0}: genome '{1}' is listed {2} times".format(path, genome, count))
@@ -254,7 +283,7 @@ def check_modification(database, annotation=None, references=None, name=None):
 	known = set(genomes.values())
 	if references:
 		genomes.update(check_references(references, problems, known=known, database=name,
-			known_accessions=accessions))
+			known_accessions=accessions, known_names=dict(genomes)))
 	if annotation:
 		check_snps(annotation, problems, tree_nodes=tree_nodes, genomes=genomes,
 			references_path=name if not references else "{0} or {1}".format(name, references),

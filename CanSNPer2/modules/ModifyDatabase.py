@@ -4,6 +4,7 @@
 
 from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
 from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
+from CanSNPer2.modules.SourceCheck import register_genome_names
 from datetime import date
 import logging
 logger = logging.getLogger(__name__)
@@ -138,6 +139,11 @@ class ModifyCanSNPer2Database(ModifyTree):
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,GENOME_SOURCE_COLUMNS,reference_file)
+			owners = {}
+			for genome, genbank_id, refseq_id in self.taxonomydb.query("SELECT genome, genbank_id, refseq_id FROM snp_references").fetchall():
+				for key in (genome, genbank_id, refseq_id):
+					if key:
+						owners[key] = genome
 			dataArr = []
 			for row in af:
 				if row.strip() == "":
@@ -152,10 +158,11 @@ class ModifyCanSNPer2Database(ModifyTree):
 					head,val = headers[i],data[i]
 					ddict[head] = val
 				dataArr.append(ddict)
+				register_genome_names(owners, ddict, reference_file)
 				genome_i = self.add_genome(ddict)
-				self.genomes[ddict["genome"]] = genome_i
-				self.genomes[ddict["genbank_id"]] = genome_i
-				self.genomes[ddict["refseq_id"]] = genome_i
+				for column in ("genome", "genbank_id", "refseq_id"):
+					if ddict[column]:
+						self.genomes[ddict[column]] = genome_i
 		self.taxonomydb.commit()
 		return dataArr
 

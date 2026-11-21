@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
-from CanSNPer2.modules.SourceCheck import check_sources
+from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from importlib import import_module
 from datetime import date
@@ -153,6 +153,7 @@ class CanSNPDatabase(DatabaseFunctions):
 
 	def load_genome_annotation_file(self,annotation_file):
 		self.genomes = {}
+		owners = {}
 		with open(annotation_file) as f:
 			headers = f.readline().lstrip("#").strip().split("\t")
 			#dataArr = []
@@ -171,10 +172,11 @@ class CanSNPDatabase(DatabaseFunctions):
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
 					ddict[head] = val
+				register_genome_names(owners, ddict, annotation_file)
 				genome_i = self.add_genome(ddict)
-				self.genomes[ddict["genome"]] = genome_i
-				self.genomes[ddict["genbank_id"]] = genome_i
-				self.genomes[ddict["refseq_id"]] = genome_i
+				for column in ("genome", "genbank_id", "refseq_id"):
+					if ddict[column]:
+						self.genomes[ddict[column]] = genome_i
 		self.conn.commit()
 		return self.genomes
 
