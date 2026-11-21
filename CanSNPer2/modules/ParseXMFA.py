@@ -3,13 +3,19 @@ ParseXMFA reads the xmfa alignments of progressiveMauve and reports the query ba
 every SNP position of the reference. The classification of the bases, the --mask filter,
 the edge flag and the result rows are shared with the other alignment readers, see
 AlignmentReader.
+
+progressiveMauve counts reference positions along all reference sequences joined end to
+end, in file order. The database stores a SNP as (sequence, position on that sequence), so
+the reader converts the SNPs to joined positions with the reference sequence table that
+ProgressiveMauve.prepare writes next to the alignment (<alignment>.sequences), and converts
+each observed position back before it is recorded.
 '''
 
 #__name__="ParseXMFA"
-from CanSNPer2.modules.AlignmentReader import AlignmentReader, EDGE_MARGIN  # noqa: F401 (EDGE_MARGIN is imported from here by callers)
+from CanSNPer2.modules.AlignmentReader import AlignmentReader, EDGE_MARGIN, SEQUENCES_SUFFIX, read_sequence_table  # noqa: F401 (EDGE_MARGIN is imported from here by callers)
 import os
 import logging
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 logger = logging.getLogger(__name__)
 
 reference_genomes = ["FSC200","SCHUS4.1","SCHUS4.2","OSU18","LVS","FTNF002-00"]
@@ -21,6 +27,10 @@ class ParseXMFA(AlignmentReader):
 		super(ParseXMFA, self).__init__(verbose=verbose, **kwargs)
 		'''names and start offsets of the query sequences, see load_query_map'''
 		self.query_map = None
+		'''sorted joined positions of the SNPs, and the (sequence, position) of each, see
+			load_joined_positions'''
+		self.joined = []
+		self.joined_keys = {}
 		### Define translation table for complement base
 		self.rcDict = {
 			 "A" : "T",
@@ -31,12 +41,47 @@ class ParseXMFA(AlignmentReader):
 			 "N" : "N"
 		}
 
+	def load_joined_positions(self, table_path):
+		'''Convert the SNP positions to positions along the joined reference sequences, with
+			the sequence table of the alignment: a sequence starts after the lengths of all
+			sequences before it in the table. A SNP on a sequence the table does not have, or
+			beyond the end of its sequence, has no joined position and is left out; it would
+			otherwise be read from a neighbouring sequence.'''
+		offsets, lengths, total = {}, {}, 0
+		for name, length in read_sequence_table(table_path):
+			offsets[name] = total
+			lengths[name] = length
+			total += length
+		self.joined, self.joined_keys = [], {}
+		missing_sequences, outside = set(), []
+		for (sequence, position), (_anc, _der, snp_id) in self.snplist.items():
+			if sequence not in offsets:
+				missing_sequences.add(sequence)
+				continue
+			if not 1 <= position <= lengths[sequence]:
+				outside.append(snp_id)
+				continue
+			joined = offsets[sequence] + position
+			self.joined_keys[joined] = (sequence, position)
+		self.joined = sorted(self.joined_keys)
+		self.unknown_sequences.update(name for name in offsets if name not in self.snp_positions)
+		if missing_sequences:
+			logger.warning("SNPs on {sequences} of {reference} are not evaluated: the aligned reference has no such sequence ({table})".format(
+					sequences=", ".join(sorted(missing_sequences)), reference=self.reference, table=table_path))
+		if outside:
+			logger.warning("SNPs {ids} of {reference} lie beyond the end of their sequence in the aligned reference and are not evaluated ({table})".format(
+					ids=", ".join(sorted(outside)[:20]), reference=self.reference, table=table_path))
+
+	def joined_snps_in(self, start, end):
+		'''the joined SNP positions from start to end, both included, in ascending order'''
+		return self.joined[bisect_left(self.joined,start):bisect_right(self.joined,end)]
+
 	def find_snps(self,ref,target,head,query_head=None):
 		'''Walk through one aligned sequence pair and report the query base at the SNP
 			positions of the reference stretch start..end (both included, issue #39)'''
 		start = int(head["start"])
 		block_len = int(head["end"]) - start + 1 ## the block length in reference bases, to measure the distance to the far edge (issue #175)
-		wanted = [pos - start + 1 for pos in self.snps_in(start, int(head["end"]))] ## 1-based offsets in the block
+		wanted = [pos - start + 1 for pos in self.joined_snps_in(start, int(head["end"]))] ## 1-based offsets in the block
 		if not wanted:
 			return
 		next_snp = 0
@@ -91,7 +136,7 @@ class ParseXMFA(AlignmentReader):
 				else:
 					joined = int(query_head["start"]) + left
 				query_name, query_pos = self.query_location(joined)
-			self.observe(start + i - 1, _snp, i, block_len, query_name=query_name, query_pos=query_pos)
+			self.observe(*self.joined_keys[start + i - 1], _snp, i, block_len, query_name=query_name, query_pos=query_pos)
 			next_snp += 1
 			if next_snp == len(wanted):
 				break
@@ -120,7 +165,7 @@ class ParseXMFA(AlignmentReader):
 				logger.warning("Malformed xmfa sequence block header, skipping block: {head}".format(head=(refSeq[:1] or [""])[0]))
 				return
 			'''Parse aligned sequence pair, if any SNP is inside it'''
-			if self.snps_in(refHead["start"], refHead["end"]):
+			if self.joined_snps_in(refHead["start"], refHead["end"]):
 				ref = "".join(refSeq)				 ## Make reference sequence one string
 				target = "".join(targetSeq)			 ## Make target sequence one string
 				self.find_snps(ref,target,head=refHead,query_head=targetHead)
@@ -172,9 +217,11 @@ class ParseXMFA(AlignmentReader):
 		return names[idx], str(joined - starts[idx])
 
 	def read_xmfa(self,f):
-		'''read xmfa file; each aligned block is separated by a "=" line'''
+		'''read xmfa file; each aligned block is separated by a "=" line. The sequence table
+			is read after the alignment, so a missing alignment is reported as such.'''
 		with open(f) as fin:
 			text = fin.read()
+		self.load_joined_positions(f + SEQUENCES_SUFFIX)
 		self.load_query_map(text, f)
 		for seqP in text.strip().split("="):
 			self.read_sequence(seqP)

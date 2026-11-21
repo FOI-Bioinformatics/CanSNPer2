@@ -10,22 +10,23 @@ import sys
 
 import pytest
 
+import helpers
 from CanSNPer2.modules.ExportDatabase import ExportError, export_source
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS
 from CanSNPer2.modules.SourceCheck import check_sources
 
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tA.1\tA.3\nR\tB.1\nR\tB.1\tB.2\n"
-SNPS = ("snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base\tdate\n"
-	"R\tsp\tPaper2020\tREF1\t10\tA\tG\t01/02/20\n"
-	"A.1\tsp\tPaper2020\tREF1\t100\tT\tC\t01/02/20\n"
-	"A.2\tsp\tPaper2021\tREF2\t200\tG\tA\t03/04/21\n"
-	"A.3\tsp\tPaper2021\tREF1\t300\tC\tT\t03/04/21\n"
-	"B.1\tsp\tPaper2020\tREF2\t400\tA\tC\t01/02/20\n")
+SNPS = ("\t".join(helpers.SNP_HEADER) + "\tdate\n"
+	"R\tsp\tPaper2020\tREF1\tCP000001.1\t10\tA\tG\t01/02/20\n"
+	"A.1\tsp\tPaper2020\tREF1\tCP000001.1\t100\tT\tC\t01/02/20\n"
+	"A.2\tsp\tPaper2021\tREF2\tCP000002.1\t200\tG\tA\t03/04/21\n"
+	"A.3\tsp\tPaper2021\tREF1\tCP000001.1\t300\tC\tT\t03/04/21\n"
+	"B.1\tsp\tPaper2020\tREF2\tCP000002.1\t400\tA\tC\t01/02/20\n")
 # REF2 has no assembly name: its row ends with an empty field
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
-	"REF1\tstrain one\tGCA_1.1\tGCF_1.1\tASM1v1\n"
-	"REF2\tstrain two\tGCA_2.1\tGCF_2.1\t\n")
+	"REF1\tstrain one\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n"
+	"REF2\tstrain two\tGCA_000000002.1\tGCF_000000002.1\t\n")
 
 
 def create(db, tree, snp, references):
@@ -34,11 +35,9 @@ def create(db, tree, snp, references):
 
 
 def source_db(tmp_path):
-	files = {}
-	for key, content in (("tree", TREE), ("snp", SNPS), ("references", REFERENCES)):
-		files[key] = str(tmp_path / ("src_" + key + ".txt"))
-		with open(files[key], "w") as out:
-			out.write(content)
+	header, _, body = SNPS.partition("\n")
+	files = helpers.write_sources(tmp_path, body.splitlines(), tree=TREE, references=REFERENCES,
+		name="src", header=header)
 	db = str(tmp_path / "scheme.db")
 	create(db, files["tree"], files["snp"], files["references"])
 	return db
@@ -50,7 +49,7 @@ def content(db):
 		"nodes": conn.execute("SELECT id,name FROM nodes ORDER BY id").fetchall(),
 		"links": conn.execute("""SELECT c.name, p.name, r.rank FROM tree t JOIN nodes c ON c.id=t.child
 			JOIN nodes p ON p.id=t.parent JOIN rank r ON r.rank_i=t.rank_i ORDER BY c.name""").fetchall(),
-		"snps": conn.execute("""SELECT a.node_id, a.snp_id, a.position, a.ancestral_base, a.derived_base,
+		"snps": conn.execute("""SELECT a.node_id, a.snp_id, a.sequence, a.sequence_position, a.ancestral_base, a.derived_base,
 			a.reference, g.genome FROM snp_annotation a JOIN snp_references g ON g.id=a.genome_i
 			ORDER BY a.node_id""").fetchall(),
 		"references": conn.execute("""SELECT genome,strain,genbank_id,refseq_id,assembly_name
@@ -69,7 +68,7 @@ def test_an_export_rebuilds_the_same_database(tmp_path):
 	create(rebuilt, files["tree"], files["snp"], files["references"])
 	original = content(db)
 	assert len(original["snps"]) == 5 and len(original["references"]) == 2
-	assert ("REF2", "strain two", "GCA_2.1", "GCF_2.1", "") in original["references"]
+	assert ("REF2", "strain two", "GCA_000000002.1", "GCF_000000002.1", "") in original["references"]
 	assert content(rebuilt) == original
 	# exporting the rebuilt database gives the same files
 	again = export_source(rebuilt, str(tmp_path / "again"), name="scheme")
@@ -81,16 +80,16 @@ def test_the_files_have_the_source_format(tmp_path):
 	files = export_source(source_db(tmp_path), str(tmp_path / "export"))
 	assert open(files["tree"]).read() == TREE
 	snp = open(files["snp"]).read().splitlines()
-	assert snp[0] == "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base"
+	assert snp[0] == "\t".join(helpers.SNP_HEADER)
 	# the strain is that of the SNP's reference genome; the date is not exported
-	assert snp[2] == "A.1\tstrain one\tPaper2020\tREF1\t100\tT\tC"
-	assert snp[3] == "A.2\tstrain two\tPaper2021\tREF2\t200\tG\tA"
+	assert snp[2] == "A.1\tstrain one\tPaper2020\tREF1\tCP000001.1\t100\tT\tC"
+	assert snp[3] == "A.2\tstrain two\tPaper2021\tREF2\tCP000002.1\t200\tG\tA"
 	assert open(files["references"]).read() == REFERENCES
 
 
 # the header that CanSNPer2-data/validate.py requires of a scheme's SNP file
-CANSNPER2_DATA_SNP_HEADER = ["snp_id", "strain", "reference", "genome", "position",
-	"derived_base", "ancestral_base"]
+CANSNPER2_DATA_SNP_HEADER = ["snp_id", "strain", "reference", "genome", "sequence",
+	"sequence_position", "derived_base", "ancestral_base"]
 
 
 def test_the_snp_header_is_the_one_CanSNPer2_data_requires(tmp_path):
@@ -116,13 +115,14 @@ def test_an_export_passes_CanSNPer2_data_validate(tmp_path):
 	spec = importlib.util.spec_from_file_location("cansnper2_data_validate", script)
 	validate = importlib.util.module_from_spec(spec)
 	spec.loader.exec_module(validate)
-	# a scheme as published there: accessions of the checked form, an assembly name on every
+	if "sequence_position" not in getattr(validate, "SNP_HEADER", ()):
+		pytest.skip("the CanSNPer2-data checkout still validates joined positions")
+	# a scheme as published there: an assembly name on every
 	# reference (an empty last column is trailing whitespace to validate.py) and a SNP on
 	# every node (B.2 has none in the shared fixture)
 	db = str(tmp_path / "scheme.db")
 	files = {}
-	references = (REFERENCES.replace("GCA_1.1", "GCA_000000001.1").replace("GCF_1.1", "GCF_000000001.1")
-		.replace("GCA_2.1", "GCA_000000002.1").replace("GCF_2.1", "GCF_000000002.1").replace("\t\n", "\tASM2v1\n"))
+	references = REFERENCES.replace("\t\n", "\tASM2v1\n")
 	for key, text in (("tree", TREE.replace("R\tB.1\tB.2\n", "")), ("snp", SNPS), ("references", references)):
 		files[key] = str(tmp_path / ("src_" + key + ".txt"))
 		with open(files[key], "w") as out:

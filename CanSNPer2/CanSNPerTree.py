@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 oname = __name__
 __name__ 		= "CanSNPer2"
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2 import __version__, COMMANDS_HELP
 __author__ 		= "David Sundell"
 __credits__ 	= ["David Sundell"]
@@ -42,6 +43,7 @@ from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
 import os,sys
@@ -74,7 +76,7 @@ def fraction(value):
 	return number
 
 
-def main():
+def command():
 	'''Initiate CanSNPer2 object'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2 - type query assemblies (or reads) against a CanSNP database',
@@ -93,6 +95,7 @@ def main():
 
 	run_options = parser.add_argument_group("Run options")
 	run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
+	run_options.add_argument('--allow_missing_references', action='store_true',		help="Type even when reference genomes of the database have no <genome>.fna in --refdir; one warning names them, and their SNPs are not compared (default: stop with an error)")
 	run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 	run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
 	run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
@@ -139,7 +142,7 @@ def main():
 	try:
 		check_database(args.database)
 	except ConnectionError as e:
-		print(e)
+		print(e, file=sys.stderr) ## an error message, so a script that reads stdout does not take it as output
 		exit(1)
 
 	logval = args.supress
@@ -162,6 +165,7 @@ def main():
 	logpath = setup_logging(args.logdir, "CanSNPer2", level=logval) ## shared log naming for all commands (issue #217)
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
+	log_scheme_notice(args.database, logger) ## which scheme is typed against, before any work starts
 
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
 	if not args.tmpdir.rstrip("/"):
@@ -176,6 +180,7 @@ def main():
 
 	CanSNPer2_obj = CanSNPer2(args.query,
 									refdir=args.refdir,
+									allow_missing_references=args.allow_missing_references,
 									verbose=args.verbose,
 									outdir=args.outdir,
 									tmpdir=args.tmpdir,
@@ -219,6 +224,12 @@ def main():
 		was used again, made from the same input, counts as typed'''
 	if not CanSNPer2_obj.typed and not CanSNPer2_obj.reused and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
 		exit(1)
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if oname=="__main__":
 	main()

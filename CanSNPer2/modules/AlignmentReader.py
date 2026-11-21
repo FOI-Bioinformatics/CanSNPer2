@@ -6,9 +6,11 @@ the rows of the per sample SNP tables.
 
 A reader for an alignment format only has to walk its file and report, for each aligned
 stretch of the reference, the query base at the SNP positions inside it through observe().
-Positions are always 1-based coordinates of the reference sequence as the database stores
-them; for a reference with several sequences that is the position in the sequences joined
-end to end in file order, the convention of progressiveMauve.
+A SNP is identified by the reference sequence it lies on (the first word of its fasta
+header, a GenBank accession for the published schemes) and its 1-based position on that
+sequence, as the database stores it. minimap2 and MUMmer4 report positions per sequence;
+progressiveMauve counts along the sequences joined end to end, and its reader converts them
+with the sequence table written next to the alignment (write_sequence_table).
 '''
 
 import os
@@ -18,6 +20,41 @@ from bisect import bisect_left, bisect_right
 from CanSNPer2.modules.DatabaseConnection import XMFAFunctions
 
 logger = logging.getLogger(__name__)
+
+'''file ending of the reference sequence table written next to an alignment: name and length
+	of each reference sequence, in file order, for readers whose alignment format counts
+	positions along the joined reference'''
+SEQUENCES_SUFFIX = ".sequences"
+
+
+def write_sequence_table(fasta, path):
+	'''write name and length of the sequences of a fasta file, in file order'''
+	rows = []
+	with open(fasta) as fin:
+		for line in fin:
+			if line.startswith(">"):
+				rows.append([line[1:].split()[0] if line[1:].split() else "", 0])
+			elif rows:
+				rows[-1][1] += len("".join(line.split()))
+	with open(path, "w") as out:
+		for name, length in rows:
+			out.write("{0}\t{1}\n".format(name, length))
+
+
+def read_sequence_table(path):
+	'''[(name, length)] of the reference sequences, in file order, from a table written by
+		write_sequence_table'''
+	rows = []
+	try:
+		with open(path) as fin:
+			for line in fin:
+				if not line.strip():
+					continue
+				name, length = line.rstrip("\n").split("\t")
+				rows.append((name, int(length)))
+	except FileNotFoundError as e:
+		raise FileNotFoundError("The reference sequence table {path} of the alignment is missing. It is written when the alignment is made; alignments made before CanSNPer2 2.3.0 have none, align again without --skip_alignment".format(path=path)) from e
+	return rows
 
 '''SNPs closer to either edge of an alignment block than this many reference bases are
 	flagged in the output: assembly ends and read ends are the most likely place for
@@ -54,9 +91,10 @@ class AlignmentReader(object):
 
 	def _reset(self):
 		'''state of one parsed alignment'''
-		self.snplist = {}          ## {position: (position, ancestral base, derived base, snp id)}
-		self.snp_positions = []    ## sorted positions of snplist
-		self.observations = {}     ## {position: observation row}, see observe()
+		self.snplist = {}          ## {(sequence, position): (ancestral base, derived base, snp id)}
+		self.snp_positions = {}    ## {sequence: sorted positions of its SNPs}
+		self.observations = {}     ## {(sequence, position): observation row}, see observe()
+		self.unknown_sequences = set()  ## aligned reference sequences on which the database has no SNPs
 		self.SNPS = {}
 		self.SNP_info = []
 		self.called_snps = []
@@ -74,17 +112,25 @@ class AlignmentReader(object):
 		'''Return true snps'''
 		return self.called_snps
 
-	def snps_in(self, start, end):
-		'''the registered SNP positions from start to end, both included, in ascending order.
-			Looking positions up per block makes the result independent of the order in which
-			the blocks come in the file: walking the sorted SNP list as a queue dropped every
-			SNP that sat in a block coming after a block further along the reference'''
-		return self.snp_positions[bisect_left(self.snp_positions,start):bisect_right(self.snp_positions,end)]
+	def snps_in(self, sequence, start, end):
+		'''the registered SNP positions on reference sequence from start to end, both included,
+			in ascending order; [] for a sequence without SNPs (a plasmid the scheme does not
+			use, or a sequence not in the database). Looking positions up per block makes the
+			result independent of the order in which the blocks come in the file: walking the
+			sorted SNP list as a queue dropped every SNP that sat in a block coming after a
+			block further along the reference'''
+		positions = self.snp_positions.get(sequence)
+		if not positions:
+			self.unknown_sequences.add(sequence)
+			return []
+		return positions[bisect_left(positions,start):bisect_right(positions,end)]
 
-	def observe(self, position, base, block_offset, block_length, query_name="-", query_pos="N/A"):
+	def observe(self, sequence, position, base, block_offset, block_length, query_name="-", query_pos="N/A"):
 		'''Record the query base found at a SNP position of the reference.
 
-			position      reference position of the SNP (a key of snplist)
+			sequence      reference sequence of the SNP
+			position      1-based position of the SNP on that sequence ((sequence, position)
+			              is a key of snplist)
 			base          query base on the forward strand of the reference, "-" for a gap in
 			              the query; any other character than A, C, G, T, "-" or N is kept as
 			              it is and reads as "other base"
@@ -102,19 +148,20 @@ class AlignmentReader(object):
 			return
 		edge = block_offset <= EDGE_MARGIN or block_length - block_offset < EDGE_MARGIN
 		base = base.upper()
-		previous = self.observations.get(position)
+		key = (sequence, position)
+		previous = self.observations.get(key)
 		if previous is not None:
 			'''a position covered by more than one alignment block: progressiveMauve never
 				produces that for the reference, other aligners can (repeats, duplicated
 				contigs). The same base twice is one observation; different bases are no
 				evidence either way, so the position is reported as an N'''
 			if previous["base"] != base:
-				logger.warning("SNP {snp} at position {pos} of {reference} is covered by more than one alignment with different query bases ({a}, {b}), it is treated as N".format(
-						snp=self.snplist[position][3], pos=position, reference=self.reference, a=previous["base"], b=base))
+				logger.warning("SNP {snp} at position {pos} of {sequence} in {reference} is covered by more than one alignment with different query bases ({a}, {b}), it is treated as N".format(
+						snp=self.snplist[key][2], pos=position, sequence=sequence, reference=self.reference, a=previous["base"], b=base))
 				previous["base"] = "N"
 			previous["edge"] = previous["edge"] or edge
 			return
-		self.observations[position] = {"base": base, "edge": edge, "query_name": query_name or "-", "query_pos": str(query_pos)}
+		self.observations[key] = {"base": base, "edge": edge, "query_name": query_name or "-", "query_pos": str(query_pos)}
 
 	def classify(self, base, ancestral, derived):
 		'''state of a SNP from the query base'''
@@ -128,19 +175,28 @@ class AlignmentReader(object):
 
 	def finish(self):
 		'''turn the observations into the SNP states, the result rows and the called list, in
-			reference position order'''
-		for position in sorted(self.observations):
-			obs = self.observations[position]
-			snppos,rbase,tbase,snp_id = self.snplist[position]
+			(sequence, position) order. A row is [snp_id, reference, sequence, position,
+			query sequence, query position, ancestral base, derived base, query base, edge flag],
+			the columns of CanSNPer2.SNP_FILE_COLUMNS'''
+		for key in sorted(self.observations):
+			obs = self.observations[key]
+			sequence, position = key
+			rbase,tbase,snp_id = self.snplist[key]
 			state = self.classify(obs["base"], rbase, tbase)
 			self.SNPS[snp_id] = state
 			edge_flag = "edge" if obs["edge"] else ""
 			if edge_flag:
 				self.edge_snps.add(snp_id)
-			self.SNP_info.append([snp_id,self.reference,str(snppos),obs["query_name"],obs["query_pos"],rbase,tbase,obs["base"],edge_flag])
+			self.SNP_info.append([snp_id,self.reference,sequence,str(position),obs["query_name"],obs["query_pos"],rbase,tbase,obs["base"],edge_flag])
 			if state == DERIVED:
 				self.called_snps.append(snp_id)
 		return self.SNPS
+
+	@staticmethod
+	def _listing(names, limit=5):
+		'''up to limit of the names, sorted and comma separated'''
+		names = sorted(names)
+		return ", ".join(names[:limit]) + (" ..." if len(names) > limit else "")
 
 	def read_alignment(self, path):
 		'''walk the alignment file and call observe() for the SNP positions it covers'''
@@ -164,18 +220,27 @@ class AlignmentReader(object):
 			reference = os.path.basename(alignment).split("_")[0]
 		self.reference = reference
 		self.snplist, self.snp_positions = self.database.get_snps(reference)
-		self.snp_positions = sorted(self.snp_positions)
 		if not self.snp_positions: ## the reference has no registered SNPs in this database, nothing to look for (issue #99)
 			logger.warning("No SNPs are registered in the database for reference {reference}, no SNP calls possible".format(reference=reference))
 			return self.SNPS
 		try:
 			self.read_alignment(alignment)
-		except FileNotFoundError:
+		except FileNotFoundError as e:
 			'''this used to return False, which every caller read as "no SNPs in this
 				alignment", so a missing alignment typed the sample NA and exited 0
-				(issue #176, #179)'''
-			logger.error("The alignment file {f} was not found".format(f=alignment))
+				(issue #176, #179). A file the reader needs besides the alignment (the
+				sequence table of progressiveMauve) is named by its own message.'''
+			if os.path.isfile(alignment):
+				logger.error(str(e))
+			else:
+				logger.error("The alignment file {f} was not found".format(f=alignment))
 			raise
+		if not self.observations and self.unknown_sequences:
+			'''a reference whose sequences have other names than in the database (RefSeq
+				instead of GenBank accessions) is aligned, but none of its SNPs is found, which
+				gave NA calls and nothing in the log'''
+			logger.warning("No SNP of {reference} was found in {alignment}: its reference sequences ({aligned}) match none of the sequences the database places SNPs on ({expected}). The reference sequences must have the names the database uses".format(
+					reference=reference, alignment=alignment, aligned=self._listing(self.unknown_sequences), expected=self._listing(self.snp_positions)))
 		self.finish()
 		if self.mask and self.masked.get(self.reference):
 			logger.info("{n} SNP positions against {reference} were within {mask} bases of an alignment edge and were not evaluated".format(

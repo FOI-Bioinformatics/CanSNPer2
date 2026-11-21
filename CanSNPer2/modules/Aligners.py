@@ -8,8 +8,7 @@ a reader (a subclass of AlignmentReader) and add it to ALIGNERS.
 
 What a reader must report is narrow: for every SNP position of the reference that the
 alignment covers, the query base on the forward strand of the reference, in the reference
-coordinates the database uses (sequences of a multi-sequence reference joined end to end
-in file order).
+coordinates the database uses (the reference sequence and the 1-based position on it).
 '''
 
 import os
@@ -17,8 +16,9 @@ import shlex
 import shutil
 import logging
 
+from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX, write_sequence_table
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
-from CanSNPer2.modules.ParsePAF import ParsePAF, SEQUENCES_SUFFIX, write_sequence_table
+from CanSNPer2.modules.ParsePAF import ParsePAF
 from CanSNPer2.modules.ParseDelta import ParseDelta
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,12 @@ class ProgressiveMauve(Aligner):
 	def command(self, reference_file, query_file, output):
 		return [self.executable(), "--output", output, reference_file, query_file]
 
+	def prepare(self, reference_file, query_file, output):
+		'''the xmfa counts reference positions along the reference sequences joined end to
+			end; the names and lengths of the sequences, in the order mauve joins them, are
+			written next to the alignment for ParseXMFA to convert them back'''
+		write_sequence_table(reference_file, output + SEQUENCES_SUFFIX)
+
 	def reader(self, **kwargs):
 		return ParseXMFA(**kwargs)
 
@@ -156,10 +162,6 @@ class Minimap2(Aligner):
 	def command(self, reference_file, query_file, output):
 		return [self.executable(), "-c", "--cs=long", "-x", self.preset] + list(self.options) + ["-o", output, reference_file, query_file]
 
-	def prepare(self, reference_file, query_file, output):
-		'''the reference sequence table that maps PAF positions to the joined reference'''
-		write_sequence_table(reference_file, output + SEQUENCES_SUFFIX)
-
 	def reader(self, **kwargs):
 		kwargs.setdefault("min_mapq", self.min_mapq)
 		return ParsePAF(**kwargs)
@@ -171,13 +173,17 @@ class Mummer4(Aligner):
 		1-to-1 filter keeps, for every reference and query position, only the best alignment,
 		allowing rearrangements; it is the filter MUMmer recommends for SNP finding and plays
 		the part of the primary alignment and mapping quality rule of minimap2. nucmer runs with
-		its default settings. The two programs run as one shell command, so a failure of either
-		fails the alignment; delta-filter is taken from the folder of nucmer when a path is given.'''
+		its default settings except for one thread (-t 1): with its default of two threads, two
+		runs on the same genomes gave different alignments after the 1-to-1 filter (in 2 of 10
+		Y. pestis drafts, up to 20 of 970 canSNP positions changed between no data and a base),
+		while one thread gave the same output every time. The two programs run as one shell
+		command, so a failure of either fails the alignment; delta-filter is taken from the
+		folder of nucmer when a path is given.'''
 	name = "mummer4"
 	program = "nucmer"
 	suffix = "delta"
 	log_tag = "mummer4"
-	options = []
+	options = ["-t", "1"]
 
 	def filter_program(self):
 		folder = os.path.dirname(self.executable())

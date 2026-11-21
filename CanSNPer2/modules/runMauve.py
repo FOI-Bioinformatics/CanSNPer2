@@ -20,6 +20,7 @@ __partof__ = "CanSNPer2"
 
 from subprocess import Popen,STDOUT
 from CanSNPer2.modules.Aligners import ProgressiveMauve
+from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX
 
 class MauveError(Exception):
 	"""docstring for MauveE"""
@@ -153,7 +154,12 @@ class RunMauve(object):
 
 			'''the command is built by the aligner definition CanSNPer2 uses as well, as an argument
 				list, so paths with spaces stay single arguments (issue #85)'''
-			command = ProgressiveMauve(self.mauve_path).command(ref_file, query_file, xmfa_output)
+			aligner = ProgressiveMauve(self.mauve_path)
+			command = aligner.command(ref_file, query_file, xmfa_output)
+			if not self.skip_mauve:
+				'''the reference sequence table that CanSNPer2 needs to read the xmfa, written from
+					the reference that is aligned, as CanSNPer2 does it'''
+				aligner.prepare(ref_file, query_file, xmfa_output)
 			commands.append(command)			## Mauve command
 			logs.append(log_file)				## Store log files for each alignment
 			self.xmfa_files.append(xmfa_output)	## Store the path to xmfa files as they will be used later
@@ -223,6 +229,12 @@ class RunMauve(object):
 			target = os.path.join(self.outdir,os.path.basename(xmfa))
 			if os.path.abspath(target) != os.path.abspath(xmfa):
 				shutil.copyfile(xmfa,target)
+				'''the sequence table goes with the alignment: without it CanSNPer2 cannot map
+					the xmfa coordinates to the reference sequences'''
+				if os.path.exists(xmfa + SEQUENCES_SUFFIX):
+					shutil.copyfile(xmfa + SEQUENCES_SUFFIX, target + SEQUENCES_SUFFIX)
+				else:
+					print("WARNING no reference sequence table {table} was found, CanSNPer2 cannot read {xmfa} without it".format(table=xmfa + SEQUENCES_SUFFIX, xmfa=target))
 			aligned.append(target)
 		if not aligned:
 			raise MauveError("No alignments were produced, check the mauve logs in {logdir}".format(logdir=self.logdir))

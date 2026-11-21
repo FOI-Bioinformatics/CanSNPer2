@@ -48,7 +48,9 @@ CanSNPer2-download --scheme francisella_tularensis      # builds francisella_tul
 The scheme files (SNPs, tree and references) are fetched and checked against the SHA-256
 recorded in the manifest of CanSNPer2-data, and the database is built locally by the installed
 CanSNPer2. `francisella_tularensis.source.json` beside the database records the repository
-commit and the hash of each file it was built from. `--branch dev` gives access to draft
+commit and the hash of each file it was built from. A verified scheme whose files cannot be
+checked (no manifest, or a file the manifest has no hash for) is refused unless
+`--allow_unverified` is given. `--branch dev` gives access to draft
 schemes that have not yet been verified; building one prints a warning. `--branch` also takes a
 commit, which makes a database reproducible from its `source.json`.
 
@@ -70,6 +72,34 @@ records the commit and lists the scheme files with uncommitted changes.
 Listing schemes and resolving a branch to a commit use the GitHub API, which allows 60
 anonymous requests an hour per address. On shared machines, set `GITHUB_TOKEN` (or `GH_TOKEN`)
 to a GitHub token to raise the limit; it is sent to the API only.
+
+From 2.3.0 the database also records which scheme it holds, in a `scheme_info` table: the
+scheme, its status (`verified`, `draft` or `unknown`), the repository or folder, the branch and
+commit (`unknown` when the GitHub API could not resolve it), the SNPs that `schemes.toml` lists
+as known issues, and the CanSNPer2 version and date of the build. `CanSNPer2-database --database
+<db> --info` prints the table. Typing, `CanSNPer2-download --database` and `--export` report
+the scheme once when they open the database; a draft or unknown status, known issues, or a
+database without the table (built before 2.3.0 or by hand) give a warning, and a verified scheme
+is reported only with `--verbose`. The table is informative only and never stops a run.
+A database changed with `--mod_file`, `--annotation`, `--references` or `--remove` no longer
+matches the scheme files it was built from, so the change sets its status to `unknown`, adds
+`+modified` to the commit (or records `modified` when there was none), records the date in
+`modified` and the CanSNPer2 version in `built_with`; typing then gives a warning. A database
+converted with `--convert` records status `unknown` and the converted file as its source.
+`--info` prints `none` for an empty value, such as `known_issues` of a scheme without any.
+
+```
+$ CanSNPer2-database --database brucella_suis.db --info
+scheme	brucella_suis
+status	draft
+source	FOI-Bioinformatics/CanSNPer2-data
+ref	dev
+commit	abc1234000000000000000000000000000000000
+known_issues	B.1
+format	2.3
+built_with	2.3.0
+built	2026-11-21
+```
 
 2. Alternatively, with a database you already have, download its references
 
@@ -98,11 +128,13 @@ The source files are checked before a database is built, with the rules of
 [CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data)'s `validate.py`. Files
 that do not form one scheme are refused, every problem is listed with its file and line, and no
 database is written. The same checks apply to `--import` and `CanSNPer2-download --scheme`.
+`--create` builds a new database: an existing `--database` file is refused (a database from
+before 2.3.0 with the hint to convert it), and a build that fails part way leaves no file behind.
 
 | File | Refused |
 |---|---|
 | tree | a line that does not start at the root of the first line, a node with more than one parent, an empty column |
-| SNP | a position that is not a positive integer, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a snp_id or a position on one genome listed twice, a row with too few columns |
+| SNP | a sequence_position that is not a positive integer, the old header with a `position` column, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a snp_id or a (sequence, sequence_position) on one genome listed twice, a row with too few columns |
 | references | a genome listed twice, a row with too few columns |
 
 `#` comment lines, blank lines, a trailing comment column in the SNP file, `;` separated
@@ -112,14 +144,16 @@ trees and nodes without a SNP are accepted.
 
 ```
 usage: CanSNPer2-database [-h] [-db] [--tree] [--annotation] [--references]
-                      [--source_type] [--create] [--import]
-                      [--mod_file] [--parent]
-                      [--remove] [--replace] [--export] [--export_format] [-o]
-                      [--tmpdir] [--logs] [--verbose] [--debug] [--supress]
+                          [--source_type] [--create] [--import]
+                          [--scheme_name] [--scheme_status] [--scheme_source]
+                          [--info] [--convert] [--refdir] [--mod_file]
+                          [--parent] [--remove] [--replace] [--export]
+                          [--export_format] [-o] [--tmpdir] [--logs]
+                          [--verbose] [--debug] [--supress]
 
-CanSNPer2-database
+CanSNPer2-database - create, modify and export CanSNP databases
 
-optional arguments:
+options:
   -h, --help         show this help message and exit
 
 Required:
@@ -131,8 +165,27 @@ Load database:
   --references       File containing all reference genomes listed
   --source_type      Select source file type
   --create           Create new database!
-  --import           build a database from the source files written by --export
-                     (--tree --annotation --references), written to --database
+  --import           build a database from the source files written by
+                     --export (--tree --annotation --references), written to
+                     --database
+  --scheme_name      with --create or --import: the name of the scheme,
+                     recorded in the database
+  --scheme_status    with --create or --import: the status of the scheme,
+                     verified, draft or unknown, recorded in the database
+  --scheme_source    with --create or --import: where the scheme files came
+                     from (a repository or folder), recorded in the database
+
+Database information:
+  --info             print the scheme information the database records
+                     (scheme, status, source, CanSNPer2 version) and exit
+
+Convert from the format before 2.3.0:
+  --convert          convert a SNP source file (--annotation) or a database
+                     (--database) from positions along the joined reference
+                     sequences to positions on each reference sequence,
+                     written to -o
+  --refdir           folder with the reference files <genome>.fna used by
+                     --convert; missing files are downloaded
 
 Database modifications:
   --mod_file         File with modifications/update to the tree
@@ -155,6 +208,13 @@ Logging and debug options:
   --verbose          print process info, default no output
   --debug            print debug info
   --supress          supress warnings
+
+available CanSNPer2 commands (installed together):
+  CanSNPer2            type query assemblies or reads against a CanSNP database
+  CanSNPer2-database   create, modify and export CanSNP databases
+  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
+  CanSNPer2-test       check the installation: imports and aligner programs in PATH
+Run any command with --help for its arguments; examples in README.md.
 ```
 
 #### Export
@@ -165,7 +225,7 @@ Logging and debug options:
 | File | Content |
 |---|---|
 | `<db>_tree.txt` | one line per node, the tab separated path from the root to the node |
-| `<db>_snp.txt` | `snp_id strain reference genome position derived_base ancestral_base` |
+| `<db>_snp.txt` | `snp_id strain reference genome sequence sequence_position derived_base ancestral_base` |
 | `<db>_references.txt` | `genome strain genbank_id refseq_id assembly_name` |
 
 The SNP file has the header CanSNPer2-data requires. The database keeps no strain per SNP, so
@@ -195,6 +255,11 @@ CanSNPer2-database --import --database new_scheme.db --tree scheme/my_scheme_tre
     --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
 ```
 
+The source files carry no scheme information, so `--export` does not write the `scheme_info`
+table. `--import` and `--create` record the format, the CanSNPer2 version and the build date,
+and the scheme, its status and its source when they are given with `--scheme_name`,
+`--scheme_status` (`verified`, `draft` or `unknown`) and `--scheme_source`.
+
 The same loaders `--create` uses do the work, so the schema is always current, and the result
 is checked with the export validator before the database is kept: source files that do not
 form a clean scheme are refused and leave no half-written database behind. The destination
@@ -208,45 +273,55 @@ single-rooted and exportable.)
 ```
 usage: CanSNPer2-download [-h] [-db] [--scheme] [--branch] [--repo]
                           [--data_dir] [--list_schemes] [--overwrite]
-                          [--no_references] [-s] [-o] [--logs] [--verbose]
+                          [--no_references] [--allow_unverified] [-s] [-o]
+                          [--logs] [--verbose] [--debug]
 
-CanSNPer2-download
+CanSNPer2-download - fetch the reference genomes a database needs from NCBI
 
 options:
-  -h, --help         show this help message and exit
+  -h, --help          show this help message and exit
 
 Database:
-  -db , --database   CanSNP database (with --scheme: the database to build,
-                     default <scheme>.db)
+  -db , --database    CanSNP database (with --scheme: the database to build,
+                      default <scheme>.db)
 
 CanSNPer2-data scheme options:
-  --scheme           Fetch this scheme from CanSNPer2-data and build its
-                     database
-  --branch           Branch, tag or commit of the repository; in
-                     CanSNPer2-data master holds verified schemes, dev also
-                     draft schemes (default master, with --repo the default
-                     branch of that repository)
-  --repo             GitHub repository laid out as CanSNPer2-data, as
-                     owner/name (default FOI-Bioinformatics/CanSNPer2-data)
-  --data_dir         Local directory laid out as CanSNPer2-data (a clone, or a
-                     folder of custom schemes) to read schemes from instead of
-                     GitHub
-  --list_schemes     List the schemes of the repository or --data_dir and exit
-  --overwrite        Replace an existing database when building from --scheme
-  --no_references    Build the database from --scheme without downloading its
-                     references
+  --scheme            Fetch this scheme from CanSNPer2-data and build its
+                      database
+  --branch            Branch, tag or commit of the repository; in
+                      CanSNPer2-data master holds verified schemes, dev also
+                      draft schemes (default master, with --repo the default
+                      branch of that repository)
+  --repo              GitHub repository laid out as CanSNPer2-data, as
+                      owner/name (default FOI-Bioinformatics/CanSNPer2-data)
+  --data_dir          Local directory laid out as CanSNPer2-data (a clone, or
+                      a folder of custom schemes) to read schemes from instead
+                      of GitHub
+  --list_schemes      List the schemes of the repository or --data_dir and
+                      exit
+  --overwrite         Replace an existing database when building from --scheme
+  --no_references     Build the database from --scheme without downloading its
+                      references
+  --allow_unverified  Build a verified scheme from GitHub although its files
+                      cannot be checked against a manifest (no manifest, or no
+                      hash for a file)
 
 Download options:
-  -s , --source      Source for download (genbank/refseq)
-  -o , --outdir      reference genomes folder
+  -s , --source       Source for download (genbank/refseq)
+  -o , --outdir       reference genomes folder
 
 Logging and debug options:
-  --logs             Specify log directory
-  --verbose          Verbose logging
+  --logs              Specify log directory
+  --verbose           Verbose logging
+  --debug             Debug logging, and the traceback of an unexpected error
 
-Give a database with --database, or name a scheme with --scheme to fetch it
-from CanSNPer2-data (or --repo, or --data_dir), build its database and
-download its references in one step.
+Give a database with --database, or name a scheme with --scheme to fetch it from CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step.
+available CanSNPer2 commands (installed together):
+  CanSNPer2            type query assemblies or reads against a CanSNP database
+  CanSNPer2-database   create, modify and export CanSNP databases
+  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
+  CanSNPer2-test       check the installation: imports and aligner programs in PATH
+Run any command with --help for its arguments; examples in README.md.
 ```
 Example structure of references.txt
 ```
@@ -258,15 +333,13 @@ LVS     LVS     GCA_000009245.1 GCF_000009245.1 ASM924v1
 SCHUS4.2        SCHUS4  GCA_000008985.1 GCF_000008985.1 ASM898v1
 
 ```
-Example structure of snps.txt (NEW headerline)
+Example structure of snps.txt (NEW headerline; `sequence` is the GenBank accession of the
+sequence the SNP lies on and `sequence_position` the 1-based position on that sequence)
 ```
-snp_id	strain	reference	genome	position	derived_base	ancestral_base
-T/N.1	francisella	Svensson2009	SCHUS4.2	83976	A	G
-T.1	francisella	Svensson2009	SCHUS4.2	1165688	G	A
-M.1	francisella	Vogler2009	SCHUS4.2	75124	T	C
-A/M.1	francisella	Vogler2009	SCHUS4.2	1491914	A	G
-A.1	francisella	Vogler2009	SCHUS4.2	397639	T	C
-B.1	francisella	Birdsell2014	OSU18	1710718	T	C
+snp_id	strain	reference	genome	sequence	sequence_position	derived_base	ancestral_base
+T/N.1	francisella	Svensson2009	SCHUS4.2	AJ749949.2	83976	A	G
+T.1	francisella	Svensson2009	SCHUS4.2	AJ749949.2	1165688	G	A
+M.1	francisella	Vogler2009	SCHUS4.2	AJ749949.2	75124	T	C
 ...
 ```
 Example structure of tree.txt
@@ -316,6 +389,11 @@ Output options:
 
 Run options:
   --refdir              Specify reference directory
+  --allow_missing_references
+                        Type even when reference genomes of the database have
+                        no <genome>.fna in --refdir; one warning names them,
+                        and their SNPs are not compared (default: stop with an
+                        error)
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
   --min_required_hits MIN_REQUIRED_HITS
@@ -401,6 +479,117 @@ Sequences are identified by the first word of their header line, in references a
 queries; these names must be set and unique, otherwise the run (reference) or the sample
 (query) stops with a message naming the file.
 
+### References of several sequences
+
+Each SNP is stored as the reference sequence it lies on (chromosome or plasmid, named by
+its GenBank accession, for example `AE008917.1`) and the 1-based position on that
+sequence. A sequence is identified by the first word of its fasta header. The order of
+the sequences in the reference file does not matter, and a position is the same as the one
+published for that chromosome or plasmid.
+
+Every reference is checked before it is used, at download and at the start of a run: it
+must contain each sequence that the database places SNPs on, each sequence must be at least
+as long as its last SNP position, and its base at each SNP position must be the ancestral
+or the derived base of that SNP. A reference that lacks a named sequence stops with an
+error naming the sequence. Extra sequences in the file are allowed. A reference that lacks the
+expected base at a fifth of its SNPs or more is refused, fewer mismatches are reported as a
+warning.
+
+`CanSNPer2-download --source refseq` renames each sequence of the downloaded RefSeq assembly
+to its GenBank accession, so that the file matches the database. A sequence that the NCBI
+assembly report marks as different from its GenBank sequence (Relationship `<>`) is not
+renamed, as a position on one need not hold on the other; one warning names these
+sequences, and the reference check refuses the genome when a SNP lies on one of them.
+`--source genbank` (the default) needs no renaming.
+
+The tables `x_snps.txt` and `x_not_called.txt` have the columns `Name`, `Reference`,
+`Sequence`, `Pos`, `QuerySeq`, `QueryPosition`, `Ancestral base`, `Derived base`,
+`Target base` and `Edge flag`. `Sequence` and `Pos` are the reference sequence and the
+position on it. The columns `ReferenceSeq` and `ReferenceSeqPosition` of version 2.2 are
+removed, as `Sequence` and `Pos` now carry that information.
+
+### Upgrading from 2.2
+
+Version 2.3.0 changes how a SNP position is stored. Up to 2.2 it was one number along all
+the sequences of the reference joined in the order of the reference fasta file, which made
+a result depend on that order. From 2.3.0 the database and the source files hold the
+sequence and the position on it (`sequence`, `sequence_position`; the `position` column
+is gone), and the result tables hold the columns listed above.
+
+A database or SNP source file in the old format is refused:
+
+```
+The database old.db cannot be used. It stores SNP positions along the joined reference
+sequences (the format before 2.3.0). Convert it with CanSNPer2-database --convert, or
+download the current database with CanSNPer2-download --scheme.
+```
+
+A database made by 2.3.0 cannot be read by 2.2.x, which stops with `no such column: position`.
+
+`--convert` rewrites the positions of a SNP source file or a database. Each SNP is located on
+the sequence of its reference genome, which is read from `--refdir` (`<genome>.fna`; missing
+files are downloaded). A SNP whose base in the reference is neither its derived nor its
+ancestral base is reported, and nothing is written. The result is written to the folder
+given with `-o`, under the name of the input file, which is not changed.
+
+```sh
+# a SNP source file; --references is optional and names the genomes of the file
+CanSNPer2-database --convert --annotation old_snp.txt --references old_references.txt \
+    --refdir references/ -o converted/
+
+# a database
+CanSNPer2-database --convert --database old.db --refdir references/ -o converted/
+```
+
+The reference files must have their sequences in the order in which the old positions were
+counted (the order of the NCBI assembly file). The sequence names written are the first
+words of their fasta headers; missing reference files are downloaded from GenBank, so the
+names are GenBank accessions. progressiveMauve alignments made by 2.2 must be made again,
+as `--skip_alignment` needs the sequence table (`<alignment>.sequences`) that 2.3.0 writes
+next to an xmfa alignment. minimap2 and MUMmer4 alignments made by 2.2 are read as they
+are, because their reference coordinates were always positions on each sequence.
+
+### When something is wrong
+
+Every command checks its inputs before it starts to write or to align, and a problem ends
+the command with one message that names the file or the database and says what to do. The
+exit status tells the kind of stop:
+
+- 0: the command did what it was asked to do (warnings may have been printed);
+- 1: an input could not be used; the message says which and why;
+- 2: an unexpected error, printed as `CanSNPer2 stopped: <type>: <message>; run with --debug
+  for details`. Run the command again with `--debug` to see the traceback, and report it
+  together with the command line.
+
+A database is never left half changed: `--create`, `--import` and `CanSNPer2-download
+--scheme` remove a database they had started, and a modification (`--mod_file`,
+`--annotation`, `--references`, `--remove`) is made on a copy that replaces the database
+only when every step succeeded.
+
+| Message (beginning) | Command | What to do |
+|---|---|---|
+| `The source files cannot be built into a database, N problem(s):` followed by `<file>:<line>: ...` | `CanSNPer2-database --create`, `--import`, `CanSNPer2-download --scheme` | Correct the listed rows; all problems are listed together. |
+| `<file>:<line>: genbank_id '...' is not an assembly accession` | as above, and `--references` | Give the GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version, such as GCA_000008985.1. |
+| `<file>:<line>: genbank_id '...' of genome '...' is already used by genome '...'` | as above, and `--references` on an existing database | Each genome needs its own assembly accession, as one reference file is written per accession. |
+| `The files cannot be added to <db>, N problem(s):` | `CanSNPer2-database --mod_file` with `--annotation` or `--references` | A SNP on a node that is not in the tree of the database or the modification file, on a genome that is not listed, a short row, or a genome, snp_id or position the database already holds. Correct the files; the database was not changed. |
+| `The selected parent node (X) could not be found`, `The node X could not be found`, `X is a root of the tree` | `CanSNPer2-database --mod_file`, `--remove` | Give a node of the database with `--parent`; the root cannot be removed. |
+| `The SNP X could not be written to <db>`, `The node X could not be written to <db>` | `CanSNPer2-database` | The disk is full or the database cannot be written to; free space or check the permissions, then run again. |
+| `scheme X on owner/name@ref uses positions on the joined reference (before 2.3.0)` | `CanSNPer2-download --scheme` | The branch holds the format before 2.3.0. Use CanSNPer2 2.2 for it, or a branch converted for 2.3.0. |
+| `... manifest.json was not found ...` or `... records no hash for ...`, `the files of the verified scheme X cannot be checked` | `CanSNPer2-download --scheme` | The files cannot be checked against the manifest of the repository. Report it to the repository, or give `--allow_unverified` when the source is trusted. |
+| `The database X could not be built from the scheme Y`, `The database X could not be written` | `CanSNPer2-download --scheme` | An sqlite error or a file system error; free space or check the permissions of the folder. No partial file is left behind. |
+| `X lists no reference genomes, there is nothing to download` | `CanSNPer2-download --database` | Build the database again with its references file. |
+| `REF: the database has no genbank_id for this genome` | `CanSNPer2-download --database` | Give the assembly accession of the genome in the references file and build the database again. |
+| `The SNP positions of X could not be read` | `CanSNPer2-download --database`, `CanSNPer2` | The database is damaged; export it with `CanSNPer2-database --export`, correct the files and build it again. |
+| `N reference genome(s) of X have no file <genome>.fna in DIR: ...` | `CanSNPer2` | Fetch them with `CanSNPer2-download --database X --outdir DIR`. Without them the SNPs on these genomes would not be compared. To type without them on purpose, for example to test a scheme with a reference genome left out, give `--allow_missing_references`: the run then continues with one warning that names the missing genomes. It still stops when no genome of the database has a file. |
+| `The database X has no SNPs`, `The database X lists no reference genomes` | `CanSNPer2` | Build the database again with its SNP file and its references file. |
+| `The database X has N SNP(s) on node ids that are not in the nodes or tree table` | `CanSNPer2` | Export the database, correct the tree or SNP file and build it again. Nodes without SNPs are allowed. |
+
+These cases give a warning and keep exit status 0: a draft scheme or a scheme of unknown
+status; a reference whose base matches neither the ancestral nor the derived base at fewer
+than a fifth of its SNPs; reference files in `--refdir` that are not reference genomes with
+SNPs in the database; reference genomes without a file in `--refdir` when
+`--allow_missing_references` is given; a database changed after it was built; `--no_references`; and a draft scheme, or a scheme read with
+`--data_dir`, whose files cannot be checked against a manifest.
 
 ## Aligners
 
@@ -408,22 +597,27 @@ CanSNPer2 aligns each query genome against every reference genome of the databas
 and reads the query base at each SNP position from the alignment. Three aligners are
 available:
 
-* `progressiveMauve` (default), which writes xmfa alignments.
+* `progressiveMauve` (default), which writes xmfa alignments. The xmfa counts reference
+  positions along the reference sequences joined end to end, so the names and lengths of
+  those sequences are written next to each alignment (`<alignment>.sequences`), and
+  `--skip_alignment` reads them again. This table is written for progressiveMauve only.
 * `minimap2`, run as `minimap2 -c --cs=long -x asm20 -r 1k,10k -N 50 -p 0.1` and
   written as PAF. Only primary alignments with a mapping quality of at least 20 are
   read: a secondary alignment, or a primary one with a lower mapping quality, can carry
   the base of another copy of a repeated region. The long-join bandwidth (`-r`) and the
   secondary chain settings (`-N`, `-p`) differ from the preset so that the short
   stretches between IS elements and rearrangements, which separate Francisella genomes
-  of different subspecies, are aligned as well. The reference sequence table
-  (`<alignment>.sequences`) is written next to each alignment, so `--skip_alignment`
-  can read it again.
-* `mummer4`, MUMmer4 `nucmer` with its default settings followed by `delta-filter -1`,
-  written as delta. The 1-to-1 filter keeps, for every reference and query position,
+  of different subspecies, are aligned as well. PAF gives positions on each reference
+  sequence, so the alignment is read again with `--skip_alignment` without any other file.
+* `mummer4`, MUMmer4 `nucmer` with its default settings and one thread (`-t 1`) followed
+  by `delta-filter -1`, written as delta. With the default of two threads, repeated runs on
+  the same genomes could give different alignments after the filter, and so a different
+  base or no data at a few canSNP positions; one thread gives the same result every time. The 1-to-1 filter keeps, for every reference and query position,
   only the best alignment, allowing rearrangements. The delta file names the reference
-  and query fasta files it was made from; the reader takes the query bases and the
-  reference sequence order from them, so those files must still be in place when the
-  alignment is read again with `--skip_alignment`. `nucmer` and `delta-filter` must
+  and query fasta files it was made from. The reference coordinates are positions on each
+  reference sequence; the reader takes only the query bases from the query file, so that
+  file must still be in place when the alignment is read again with `--skip_alignment`,
+  and the reference file is not needed. `nucmer` and `delta-filter` must
   both be installed (bioconda package `mummer4`).
 
 On 937 F. tularensis genomes typed with the Francisella scheme, both minimap2 and
@@ -449,9 +643,9 @@ that walks the alignment file and reports, for each SNP position it covers, the 
 base on the forward strand of the reference (`observe()`); the classification into
 derived, ancestral, other base and no data, `--mask`, the edge flag and the result
 rows are shared by all readers. SNP positions are the reference coordinates of the
-database: for a reference with several sequences (chromosomes, plasmids) the sequences
-are joined end to end in the order of the reference fasta file, as progressiveMauve
-does. A new aligner is registered in `ALIGNERS` and can then be selected with `--aligner`.
+database: the reference sequence (the first word of its fasta header) and the position on
+it. progressiveMauve counts along the sequences joined end to end and its reader converts
+the positions. A new aligner is registered in `ALIGNERS` and can then be selected with `--aligner`.
 
 Additional information about running CanSNPer2 could be found in the [wiki](https://github.com/FOI-Bioinformatics/CanSNPer2/wiki).
 

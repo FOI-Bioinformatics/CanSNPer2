@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.Aligners import Aligner, get_aligner
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions, duplicate_names
+from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
 from CanSNPer2 import __version__
 
 
@@ -34,9 +34,12 @@ import signal
 _MP_CTX = multiprocessing.get_context("fork")
 
 '''column header of the per sample SNP tables, both <sample>_snps.txt and
-	<sample>_not_called.txt; the last column carries the "edge" flag for SNPs that sit
-	near an alignment edge (issue #48)'''
-SNP_FILE_COLUMNS = ["Name","Reference","Pos","QuerySeq","QueryPosition","Ancestral base","Derived base","Target base","Edge flag"]
+	<sample>_not_called.txt. Sequence is the reference sequence the SNP lies on and Pos the
+	1-based position on that sequence, as the database stores them; the last column carries
+	the "edge" flag for SNPs that sit near an alignment edge (issue #48)'''
+SNP_FILE_COLUMNS = ["Name","Reference","Sequence","Pos","QuerySeq","QueryPosition","Ancestral base","Derived base","Target base","Edge flag"]
+'''index of the edge flag in a result row'''
+EDGE_COLUMN = SNP_FILE_COLUMNS.index("Edge flag")
 
 '''file that marks a private run directory created by CanSNPer2 below --tmpdir; cleanup()
 	only removes a directory it created itself, and the command line uses a marked
@@ -68,6 +71,9 @@ class CanSNPer2(object):
 		self.query = query
 		self.verbose = verbose
 		self.refdir = refdir
+		'''a reference genome of the database without its file in refdir stops the run,
+			unless this is set: the run then continues with one warning'''
+		self.allow_missing_references = kwargs.get("allow_missing_references", False)
 		'''the aligner is a name from Aligners.ALIGNERS or an Aligner object; aligner_path is
 			the program or the folder that holds it (mauve_path is its old name)'''
 		aligner = kwargs.get("aligner")
@@ -134,6 +140,7 @@ class CanSNPer2(object):
 		self.own_tmpdir = False
 		'''skip_mauve is the old name of skip_alignment'''
 		self.skip_alignment = bool(kwargs.get("skip_alignment",False) or kwargs.get("skip_mauve",False))
+		self.references = None ## the reference files, listed once by check_start
 		if not self.skip_alignment:
 			self.tmpdir = tempfile.mkdtemp(prefix="run_", dir=self.tmpdir)
 			with open(os.path.join(self.tmpdir, RUN_MARKER), "w"):
@@ -191,31 +198,109 @@ class CanSNPer2(object):
 
 	get_xmfa = get_alignments
 
+	def read_database(self):
+		'''The checks of the database before any sample is typed. Each of these used to show up
+			once per sample, or not at all: a database without SNPs failed with a ValueError for
+			every sample, SNPs that could not be read skipped the reference check with a
+			warning, and a SNP on a node missing from the tree was never reported. Raises
+			CanSNPer2Error; stores the SNPs of each reference genome in self.reference_snps'''
+		database = self.database
+		self.check_database_file()
+		try:
+			db = CanSNPdbFunctions(database,verbose=self.verbose)
+			try:
+				n_references = db.query("SELECT count(*) FROM snp_references").fetchone()[0]
+				n_snps = db.query("SELECT count(*) FROM snp_annotation").fetchone()[0]
+				orphans = db.query('''SELECT snp_id, node_id FROM snp_annotation
+						WHERE node_id NOT IN (SELECT id FROM nodes) OR node_id NOT IN (SELECT child FROM tree)
+						ORDER BY node_id''').fetchall()
+			finally:
+				db.disconnect()
+		except Exception as e:
+			raise CanSNPer2Error("The database {db} could not be read: {e}".format(db=database, e=e))
+		if n_references == 0:
+			raise CanSNPer2Error("The database {db} lists no reference genomes, nothing can be typed against it; build it "
+				"again with its references file".format(db=database))
+		if n_snps == 0:
+			raise CanSNPer2Error("The database {db} has no SNPs, nothing can be typed against it; build it again with "
+				"its SNP file".format(db=database))
+		if orphans:
+			raise CanSNPer2Error("The database {db} has {n} SNP(s) on node ids that are not in the nodes or tree table: "
+				"{snps}; export it with CanSNPer2-database --export, correct the files and build it again".format(
+				db=database, n=len(orphans),
+				snps=listing("{snp} (node {id})".format(snp=snp, id=node_id) for snp, node_id in orphans)))
+		return self.read_reference_snps()
+
+	def check_database_file(self):
+		'''sqlite creates an empty file for a path that does not exist'''
+		if not self.database or not os.path.isfile(self.database):
+			raise CanSNPer2Error("The database {database} is not a file".format(database=self.database))
+
+	def read_reference_snps(self):
+		'''The SNPs of each reference genome, which the reference files are checked against and
+			which give the genomes that need a reference file. SNPs that cannot be read stop the
+			run: the reference check used to be skipped with a warning'''
+		self.check_database_file()
+		try:
+			db = CanSNPdbFunctions(self.database,verbose=self.verbose)
+			try:
+				self.reference_snps = reference_snps(db)
+			finally:
+				db.disconnect()
+		except Exception as e:
+			raise CanSNPer2Error("The SNP positions of {db} could not be read ({e}), so the references cannot be checked "
+				"against them; export it with CanSNPer2-database --export, correct the files and build it again".format(
+				db=self.database, e=e))
+		return self.reference_snps
+
+	def check_start(self):
+		'''Check the database, and the reference folder when the query is aligned, before any
+			sample is typed. Returns the reference files that are aligned against'''
+		self.read_database()
+		if self.skip_alignment:
+			return []
+		self.references = None
+		self.references = self.get_references()
+		return self.references
+
 	def get_references(self,selected=False):
-		'''references must be available in the refdir, and only the references listed in the
-			database are aligned against: a shared reference folder otherwise makes mauve align a
-			genome against unrelated species, which wastes hours and fails with a non zero exitcode (issue #124)
+		'''The reference files in refdir, <genome>.fna, of the reference genomes of the database
+			that carry SNPs. Only these are aligned against: a shared reference folder otherwise
+			makes mauve align a genome against unrelated species, which wastes hours and fails
+			with a non zero exitcode (issue #124). A genome of the database without its file
+			stops the run: its SNPs were silently never compared, and when no file matched
+			the database every file in the folder was used. With allow_missing_references
+			the run continues against the genomes that have a file, with one warning that
+			names the others; it still stops when no genome has a file.
 		'''
-		refs = sorted(ref for ref in os.listdir(self.refdir) if ref.endswith(".fna"))
+		if getattr(self, "references", None):
+			return self.references
+		if not hasattr(self, "reference_snps"):
+			self.read_reference_snps()
+		try:
+			refs = sorted(ref for ref in os.listdir(self.refdir) if ref.endswith(".fna"))
+		except OSError:
+			refs = []
+		download = "CanSNPer2-download --database {database} --outdir {refdir}".format(database=self.database,refdir=self.refdir)
 		if not refs:
 			'''without references there is nothing to align against, say so instead of failing later
 				as "Mauve error skip" for every sample (issue #124)'''
-			raise CanSNPer2Error("No reference .fna files were found in {refdir}, run CanSNPer2-download --database {database} --outdir {refdir} first".format(refdir=self.refdir,database=self.database))
-		try:
-			db = CanSNPdbFunctions(self.database,verbose=self.verbose)
-			db_refs = set()
-			for genome,strain in db.query('''SELECT genome,strain FROM snp_references''').fetchall():
-				db_refs.update([genome,strain])
-		except Exception as e:
-			logger.warning("Could not read references from the database, using all fasta files in {refdir}: {err}".format(refdir=self.refdir,err=e))
-			return refs
-		matched = [ref for ref in refs if ref.rsplit(".",1)[0] in db_refs]
-		if not matched:
-			logger.warning("None of the {n} reference files in {refdir} matched the references in the database, using all of them!".format(n=len(refs),refdir=self.refdir))
-			return refs
+			raise CanSNPer2Error("No reference .fna files were found in {refdir}, run {download} first".format(refdir=self.refdir,download=download))
+		genomes = sorted(self.reference_snps)
+		missing = [genome for genome in genomes if genome + ".fna" not in refs]
+		if missing and (not self.allow_missing_references or len(missing) == len(genomes)):
+			raise CanSNPer2Error("{n} reference genome(s) of {database} have no file <genome>.fna in {refdir}: {names}; "
+				"the SNPs on them would not be compared. Fetch them with {download}{option}".format(
+				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing),download=download,
+				option="" if self.allow_missing_references else ", or give --allow_missing_references to type without them"))
+		if missing:
+			logger.warning("{n} reference genome(s) of {database} have no file <genome>.fna in {refdir}: {names}; "
+				"the SNPs on them are not compared (--allow_missing_references)".format(
+				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing)))
+		matched = [genome + ".fna" for genome in genomes if genome not in missing]
 		skipped = [ref.rsplit(".",1)[0] for ref in refs if ref not in matched]
 		if skipped:
-			logger.warning("Skipping {n} reference file(s) in {refdir} that are not in the database: {names}".format(n=len(skipped),refdir=self.refdir,names=", ".join(skipped)))
+			logger.warning("Skipping {n} reference file(s) in {refdir} that are not reference genomes with SNPs in the database: {names}".format(n=len(skipped),refdir=self.refdir,names=", ".join(skipped)))
 		return matched
 
 	def get_tempfiles(self):
@@ -433,17 +518,14 @@ class CanSNPer2(object):
 		return cleaned_path
 
 	def check_reference_file(self,path,name):
-		'''A reference shorter than the last SNP position the database places on it is truncated
-			or the wrong genome: its SNPs beyond the end had no data, which counts against a call,
-			so the run gave missing or wrong genotypes without an error. Checked once per run.'''
+		'''The reference must have every sequence the database places SNPs on, each at least as
+			long as its largest SNP position, and the ancestral or derived base at its SNPs. A
+			truncated, renamed or wrong reference otherwise gave missing or wrong genotypes
+			without an error. Checked once per run.'''
 		if path not in self.checked_references:
-			if not hasattr(self, "last_positions"):
-				try:
-					self.last_positions = last_snp_positions(CanSNPdbFunctions(self.database,verbose=self.verbose))
-				except Exception as e:
-					logger.warning("Could not read the SNP positions from the database, the reference files are not checked for length: {e}".format(e=e))
-					self.last_positions = {}
-			self.checked_references[path] = check_reference(path, name, self.last_positions.get(name))
+			if not hasattr(self, "reference_snps"):
+				self.read_reference_snps()
+			self.checked_references[path] = check_reference(path, name, self.reference_snps.get(name))
 		if self.checked_references[path]:
 			raise CanSNPer2Error(self.checked_references[path])
 
@@ -460,8 +542,14 @@ class CanSNPer2(object):
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
-			if not self.skip_alignment:
-				self.check_reference_file("{refdir}/{ref}".format(refdir=self.refdir, ref=ref), ref_name)
+			ref_path = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
+			'''the reference is also checked with --skip_alignment: a renamed reference gave
+				NA calls and nothing in the log. The references are listed from refdir and
+				opened by clean_input_fasta below, so the file is always present here and the
+				isfile test does not leave the check out; --skip_alignment without the
+				reference folder fails before this point (a known defect, tracked separately).'''
+			if not self.skip_alignment or os.path.isfile(ref_path):
+				self.check_reference_file(ref_path, ref_name)
 			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
 			commands.append(self.aligner.command(ref_file, query_file, output))
 			if not self.skip_alignment:
@@ -854,6 +942,8 @@ class CanSNPer2(object):
 				logger.info("Textfile input was found, parsing filepaths in {q} file".format(q=self.query[0]))
 				self.query=self.read_query_textfile_input(self.query)
 			self.query = self.check_sample_names(self.query)
+			'''the database and the reference folder are checked once, before the first sample'''
+			self.check_start()
 
 			'''Main function of CanSNPer2
 					1. Align sequences with the selected aligner (progressiveMauve by default)
@@ -1003,7 +1093,7 @@ class CanSNPer2(object):
 						alignment edge, a competing unconfirmed path); states/called let the embedded
 						tree paint the sample when it is selected'''
 					called_path = [snp[1] for snp in called] if called else []
-					edge_flags = set(row[0] for row in SNP_info if len(row) > 8 and row[8] == "edge")
+					edge_flags = set(row[0] for row in SNP_info if len(row) > EDGE_COLUMN and row[EDGE_COLUMN] == "edge")
 					edge_on_path = [s for s in edge_flags if s in set(called_path)]
 					path_missing = final_snp[4] if final_snp and len(final_snp) > 4 else []
 					severity = "clean"

@@ -16,30 +16,100 @@ import multiprocessing
 	so the fork context is requested explicitly, as in modules/CanSNPer2.py (issue #186).
 	Queues must come from the same context as the processes.'''
 _MP_CTX = multiprocessing.get_context("fork")
+from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, last_snp_positions
+from CanSNPer2.modules.ReferenceCheck import check_reference, reference_snps
 from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.FileMode import set_default_mode
 from CanSNPer2 import COMMANDS_HELP
 import logging
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 120 ## seconds per connection, urlretrieve had no timeout at all (issue #218)
 
+def assembly_report_url(genome_url):
+	'''the assembly report in the same NCBI folder as the genomic fasta file'''
+	suffix = "_genomic.fna.gz"
+	base = genome_url[:-len(suffix)] if genome_url.endswith(suffix) else genome_url
+	return base + "_assembly_report.txt"
+
+def genbank_names(report_text):
+	'''{refseq_accn: genbank_accn} from the text of an NCBI assembly report. The columns are
+		found by name in the last comment line; rows without a GenBank or RefSeq accession
+		(value na) are skipped. Rows whose Relationship is <> are skipped as well, with one
+		warning that names them: the RefSeq and the GenBank sequence differ, so a position on
+		one need not hold on the other. Such a sequence keeps its RefSeq name, and the
+		reference check then refuses the genome when a SNP needs it, as CanSNPCreator does.'''
+	header, names, different = None, {}, []
+	for line in report_text.splitlines():
+		if line.startswith("#"):
+			fields = line.lstrip("#").strip().split("\t")
+			if "GenBank-Accn" in fields and "RefSeq-Accn" in fields:
+				header = fields
+			continue
+		if header is None or not line.strip():
+			continue
+		row = line.split("\t")
+		if len(row) < len(header):
+			continue
+		genbank, refseq = row[header.index("GenBank-Accn")].strip(), row[header.index("RefSeq-Accn")].strip()
+		if genbank and refseq and genbank != "na" and refseq != "na":
+			if "Relationship" in header and row[header.index("Relationship")].strip() == "<>":
+				different.append(refseq)
+				continue
+			names[refseq] = genbank
+	if different:
+		logger.warning("{n} RefSeq sequence(s) differ from their GenBank sequence (Relationship <>) and keep "
+			"their RefSeq name: {names}; SNPs on them cannot be placed by their GenBank name".format(
+			n=len(different), names=", ".join(different)))
+	return names
+
+def rename_sequences(path, names):
+	'''rewrite the first word of each fasta header found in names, keeping the rest of the line.
+		The file is replaced through a temporary file in the same folder, which is removed
+		again if anything fails'''
+	fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".tmp")
+	try:
+		set_default_mode(tmp) ## the renamed genome gets the mode of open(), not the 0600 of mkstemp
+		with os.fdopen(fd, "w") as out, open(path) as fin:
+			for line in fin:
+				if line.startswith(">"):
+					words = line[1:].rstrip("\n").split(None, 1)
+					if words and words[0] in names:
+						rest = (" " + words[1]) if len(words) > 1 else ""
+						line = ">" + names[words[0]] + rest + "\n"
+				out.write(line)
+		os.replace(tmp, path)
+	finally:
+		if os.path.exists(tmp):
+			os.remove(tmp)
+
+def missing_accession(source):
+	'''the reason given for a genome without the accession of source'''
+	column = "refseq_id" if source == "refseq" else "genbank_id"
+	return ("the database has no {column} for this genome; give its assembly accession in the "
+		"references file and build the database again").format(column=column)
+
 class DownloadGenomes(object):
 	"""docstring for DownloadGenomes."""
 	def __init__(self, database, source="genbank",directory="references",verbose=False):
 		super(DownloadGenomes, self).__init__()
-		self.database = CanSNPdbFunctions(database,verbose=verbose)
+		'''database None gives a downloader for single genomes through download(), as the
+			conversion of SNP source files uses it; run() needs the database'''
+		self.database = CanSNPdbFunctions(database,verbose=verbose) if database is not None else None
+		self.database_path = database
 		self.source = source
 		self.directory = directory
 		if not os.path.exists(self.directory):
 			os.makedirs(self.directory)
 
 	def get_genomes(self, database=False,source="genbank"):
-		'''Get the list of genomes in the database'''
-		## This is a many to many relation, so all genomes has to be put in a set for each taxonomy id
-		genomeDict = {}
-		keys = []
+		'''The reference genomes of the database, one (accession, assembly name, genome) record per
+			row of snp_references; the accession is the refseq_id with source refseq, otherwise the
+			genbank_id. Accessions and assembly names used to share one dictionary, so two genomes
+			with the same assembly name were downloaded as one, and a genome without accession
+			and assembly name stopped the command with a KeyError'''
+		records = []
 		if not database:
 			raise ValueError("get_genomes needs a database connection, none was provided")
 		QUERY = '''SELECT id,genome,strain,refseq_id,genbank_id,assembly_name FROM {table}'''.format(table="snp_references")
@@ -47,35 +117,35 @@ class DownloadGenomes(object):
 		logger.debug("Selected source: {source}".format(source=source))
 		for id,genome_id,strain,refseq_id,genbank_id,assembly_name in database.query(QUERY).fetchall():
 			logging.debug([id,genome_id,strain,refseq_id,genbank_id,assembly_name])
-			logging.debug("Downloading {genome}".format(genome=genome_id))
-			if source == "refseq":
-				genomeDict[refseq_id] = assembly_name
-				keys.append(refseq_id)
-			else:
-				genomeDict[genbank_id] = assembly_name
-				keys.append(genbank_id)
-			genomeDict[assembly_name] = genome_id
-		logging.info(genomeDict)
-		return genomeDict,keys
+			accession = refseq_id if source == "refseq" else genbank_id
+			records.append((accession, assembly_name, genome_id))
+		logging.info(records)
+		return records
 
 	def retrieve(self, link, target, timeout=DOWNLOAD_TIMEOUT):
 		'''Fetch link into target; urlopen takes a timeout, urlretrieve never did (issue #218)'''
 		with urlopen(link, timeout=timeout) as response, open(target,"wb") as out:
 			shutil.copyfileobj(response, out)
 
-	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, last_position=None):
+	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, snps=None):
 		'''Download genomes from refseq or genbank on request
 			https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/00x/xxx/GCF_00000xxxx.x_ASMxxxv1/GCF_00000xxxx.x_ASMxxxv1_genomic.fna.gz
 			(the ftp:// protocol was retired by NCBI in 2021, the same tree is served over https (issue #120))
 			Each genome runs in its own process, so it reports (refid, ok, reason) back through
 			results: an exception in a child never reaches the log or the exit code otherwise (issue #218)
-			last_position: the largest SNP position the database has on this reference; a genome
-			shorter than that is reported as failed
+			snps: [(snp_id, sequence, position, ancestral, derived), ...] of this reference; a genome
+			without a sequence named there, with a sequence shorter than its SNP positions or
+			without the ancestral or the derived base at many SNPs is reported as failed
 		'''
 		def report(success, reason=""):
 			if results is not None:
 				results.put((refid, success, reason))
 		sourceD = {"refseq":"F", "genbank": "A"}
+		if not genome_id:
+			'''a NULL accession raised an AttributeError in the worker, which was reported as a
+				process that ended without reporting, with a traceback'''
+			report(False, missing_accession(source))
+			return
 		try:
 			n1,n2,n3 = textwrap.wrap(genome_id.split("_")[-1].split(".")[0],3)  ## Get the three number parts
 		except ValueError:
@@ -97,7 +167,7 @@ class DownloadGenomes(object):
 			'''a genome downloaded before is used again, but only when it is long enough for the
 				SNPs of the database: older versions could leave a half unpacked file behind and
 				took it for complete on the next run'''
-			problem = check_reference(ungzipped, refid, last_position)
+			problem = check_reference(ungzipped, refid, snps)
 			if problem is None:
 				logger.debug("Reference file for {refid} already exists!".format(refid=refid))
 				self.link_reference(ungzipped, link, refid)
@@ -120,6 +190,9 @@ class DownloadGenomes(object):
 			with gzip.open(tmpfile, "rb") as f_in, open(partial, "wb") as f_out:
 				shutil.copyfileobj(f_in, f_out)
 			os.replace(partial, ungzipped)
+			if source == "refseq":
+				'''the database names sequences by GenBank accession, the RefSeq assembly by NC_ or NZ_'''
+				self.rename_to_genbank(link_url, ungzipped)
 		except (HTTPError,URLError,OSError,EOFError,zlib.error) as e:
 			reason = "the download was incomplete ({error})".format(error=e) if isinstance(e, (EOFError, zlib.error)) else str(e)
 			logger.error("Could not download {refid} from {link}: {reason}".format(refid=refid,link=link_url,reason=reason))
@@ -129,13 +202,27 @@ class DownloadGenomes(object):
 			os.remove(tmpfile)
 			if os.path.exists(partial):
 				os.remove(partial) ## a half unpacked genome would look complete to the next run (issue #218)
-		problem = check_reference(ungzipped, refid, last_position)
+		problem = check_reference(ungzipped, refid, snps)
 		if problem is not None:
 			logger.error("Downloaded {refid}, but {problem}".format(refid=refid, problem=problem))
 			report(False, problem)
 			return
 		self.link_reference(ungzipped, link, refid)
 		report(True)
+
+	def rename_to_genbank(self, link_url, path):
+		'''fetch the assembly report of a RefSeq genome and rename its sequences to the GenBank accessions'''
+		report_file = tempfile.mkstemp(suffix=".txt")[1]
+		try:
+			self.retrieve(assembly_report_url(link_url), report_file)
+			with open(report_file) as fin:
+				names = genbank_names(fin.read())
+			rename_sequences(path, names)
+		except BaseException:
+			os.remove(path) ## a genome that keeps the RefSeq names would be reused as renamed by the next run
+			raise
+		finally:
+			os.remove(report_file)
 
 	def link_reference(self, ungzipped, link, refid):
 		'''the <refid>.fna link CanSNPer2 reads; a run that found the genome already unpacked
@@ -148,26 +235,34 @@ class DownloadGenomes(object):
 
 	def run(self):
 		'''Start download and collect what each worker actually managed to fetch (issue #218)'''
-		self.genomes,keys = self.get_genomes(self.database,self.source)
-		if not keys:
-			logger.warning("The database lists no genome references, there is nothing to download!")
-			return 0
+		database = getattr(self, "database_path", None) or "the database"
+		records = self.get_genomes(self.database,self.source)
+		if not records:
+			'''this was a warning with exit status 0, so a script went on without references'''
+			logger.error("{db} lists no reference genomes, there is nothing to download; build the database "
+				"again with its references file".format(db=database))
+			return 1
 		targets = []
-		for genome_id in keys:
-			assembly = self.genomes[genome_id]
-			targets.append((genome_id, assembly, self.genomes[assembly]))
-		'''the length every reference must have, from the SNP positions of the database'''
+		failed = []
+		for genome_id, assembly, refid in records:
+			if not genome_id:
+				failed.append("{refid}: {reason}".format(refid=refid, reason=missing_accession(self.source)))
+				continue
+			targets.append((genome_id, assembly, refid))
+		'''the SNPs of each reference, which its downloaded genome is checked against; without
+			them the check of sequence names, lengths and bases was skipped with only a warning'''
 		try:
-			last_positions = last_snp_positions(self.database)
+			snps = reference_snps(self.database)
 		except Exception as e:
-			logger.warning("Could not read the SNP positions from the database, the downloaded references are not checked for length: {e}".format(e=e))
-			last_positions = {}
+			logger.error("The SNP positions of {db} could not be read ({e}), so the downloaded references "
+				"cannot be checked; build the database again with CanSNPer2-database --create".format(db=database, e=e))
+			return 1
 		results = _MP_CTX.Queue()
 		threads = []
 		logging.info("Downloading {n} references from {source} into {directory}".format(
 				n=len(targets), source=self.source, directory=self.directory))
 		for genome_id, assembly, refid in targets:
-			kwargs = {"source":self.source, "directory":self.directory, "results":results, "last_position":last_positions.get(refid)}
+			kwargs = {"source":self.source, "directory":self.directory, "results":results, "snps":snps.get(refid)}
 			p = _MP_CTX.Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
 			p.start()
 			threads.append(p)
@@ -182,23 +277,23 @@ class DownloadGenomes(object):
 			except queue.Empty: ## Queue from multiprocessing is a function and has no Empty, the worker that died without reporting crashed the whole command
 				break
 			reports[refid] = (success, reason)
-		failed = []
 		for genome_id, assembly, refid in targets:
 			success, reason = reports.get(refid, (False, "the download process ended without reporting"))
 			if not success:
 				failed.append("{refid} ({genome_id} / {assembly}): {reason}".format(
 						refid=refid, genome_id=genome_id, assembly=assembly, reason=reason))
+		total = len(records)
 		logging.info("{n} of {m} references are now in {directory}".format(
-				n=len(targets)-len(failed), m=len(targets), directory=self.directory))
+				n=total-len(failed), m=total, directory=self.directory))
 		if failed:
-			logger.error("{n} of {m} references could not be downloaded:".format(n=len(failed), m=len(targets)))
+			logger.error("{n} of {m} references could not be downloaded:".format(n=len(failed), m=total))
 			for line in failed:
 				logger.error("  "+line)
 			return 1
 		logging.info("Done!")
 		return 0
 
-def main():
+def command():
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-download - fetch the reference genomes a database needs from NCBI',
 		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
@@ -217,6 +312,7 @@ def main():
 	schemeopts.add_argument('--list_schemes', 		action='store_true',										help="List the schemes of the repository or --data_dir and exit")
 	schemeopts.add_argument('--overwrite', 		action='store_true',										help="Replace an existing database when building from --scheme")
 	schemeopts.add_argument('--no_references', 	action='store_true',										help="Build the database from --scheme without downloading its references")
+	schemeopts.add_argument('--allow_unverified', 	action='store_true',										help="Build a verified scheme from GitHub although its files cannot be checked against a manifest (no manifest, or no hash for a file)")
 
 	downlopts = parser.add_argument_group('Download options')
 	downlopts.add_argument('-s', '--source', 			metavar='', default="genbank",	choices=["genbank","refseq"], 	help="Source for download (genbank/refseq)")
@@ -225,6 +321,7 @@ def main():
 	debugopts = parser.add_argument_group('Logging and debug options')
 	debugopts.add_argument('--logs', metavar='', default='logs', 				help='Specify log directory')
 	debugopts.add_argument('--verbose',	action='store_const', const=logging.DEBUG, help='Verbose logging')
+	debugopts.add_argument('--debug',	action='store_const', const=logging.DEBUG, help='Debug logging, and the traceback of an unexpected error')
 
 	args = parser.parse_args()
 	if not (args.database or args.scheme or args.list_schemes):
@@ -242,8 +339,8 @@ def main():
 		return GitHubSchemeSource(ref=args.branch or "master")
 
 	logval = logging.WARNING
-	if args.verbose:
-		logval = args.verbose
+	if args.verbose or args.debug:
+		logval = logging.DEBUG
 
 	if args.list_schemes:
 		'''only prints the schemes, so no log file is written'''
@@ -269,15 +366,18 @@ def main():
 			build the database with this CanSNPer2 version'''
 		from CanSNPer2.modules.FetchScheme import build_scheme, SchemeError
 		from CanSNPer2.modules.ModifyTree import InputError
-		from CanSNPer2.modules.DatabaseConnection import SourceFileError
+		from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
+		from CanSNPer2.modules.DatabaseConnection import SourceFileError, DatabaseWriteError
+		from CanSNPer2.modules.DatabaseConnection import ConnectionError as DatabaseConnectionError
 		if not args.database:
 			args.database = "{scheme}.db".format(scheme=args.scheme)
 		try:
 			if os.path.exists(args.database) and not args.overwrite:
 				raise SchemeError("{db} already exists, use --overwrite to replace it".format(db=args.database))
 			source = scheme_source()
-			build_scheme(args.scheme, args.database, overwrite=args.overwrite, source=source)
-		except (SchemeError, InputError, SourceFileError) as e:
+			build_scheme(args.scheme, args.database, overwrite=args.overwrite, source=source,
+				allow_unverified=args.allow_unverified)
+		except (SchemeError, InputError, TreeFileError, SourceFileError, DatabaseWriteError, DatabaseConnectionError) as e:
 			logger.error(str(e))
 			exit(1)
 		print("Built {db} from the scheme {scheme} in {loc}".format(db=args.database, scheme=args.scheme, loc=source.location()))
@@ -289,14 +389,25 @@ def main():
 	try:
 		check_database(args.database)
 	except ConnectionError as e:
-		print(e)
+		print(e, file=sys.stderr) ## an error message, so a script that reads stdout does not take it as output
 		exit(1)
+	if not args.scheme:
+		'''which scheme the references are fetched for; a database just built from --scheme
+			was already reported by the build (draft status, known issues)'''
+		from CanSNPer2.modules.SchemeInfo import log_scheme_notice
+		log_scheme_notice(args.database, logger)
 
 	# create a database connection
 	DG = DownloadGenomes(args.database,args.source,args.outdir)
 	if DG.run():
-		logger.error("CanSNPer2-download finished with missing references, check the failures listed above")
+		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
 		exit(1)
+
+
+def main():
+	'''the entry point of the command: command() with the handler of unexpected errors'''
+	return run_main(command)
+
 
 if __name__ == '__main__':
 	main()

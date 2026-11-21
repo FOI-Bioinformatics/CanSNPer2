@@ -1,37 +1,17 @@
-"""The minimap2 aligner and its PAF reader. Database positions run along the reference
-sequences joined end to end; PAF positions are per sequence, so the reader maps them with
-the sequence table the aligner writes next to the alignment. The cs tag is on the reference
-forward strand, also for "-" alignments, and the query position counts down on those."""
+"""The minimap2 aligner and its PAF reader. The database stores each SNP as a reference
+sequence and a position on it, the coordinates PAF gives for the target, so the reader needs
+nothing but the alignment. The cs tag is on the reference forward strand, also for "-"
+alignments, and the query position counts down on those."""
 import os
 import random
 import shutil
-import sqlite3
 
 import pytest
 
+from helpers import make_db
 from CanSNPer2.modules.Aligners import Minimap2, get_aligner
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2
-from CanSNPer2.modules.ParsePAF import ParsePAF, write_sequence_table
-
-
-def make_db(path, rows, genome="REF"):
-	'''rows: (snp_id, position, ancestral_base, derived_base) against reference genome'''
-	conn = sqlite3.connect(path)
-	conn.executescript("""
-		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
-		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
-			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);
-		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6), strain varchar(6));
-	""")
-	conn.execute("INSERT INTO snp_references (id, genome, strain) VALUES (5, ?, ?)", (genome, genome))
-	for i, (snp_id, pos, anc, der) in enumerate(rows):
-		conn.execute("INSERT INTO nodes (id, name) VALUES (?, ?)", (i + 1, snp_id))
-		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, position, ancestral_base, derived_base, reference, date, genome_i)"
-			" VALUES (?, ?, ?, ?, ?, 'test', '06/11/26', 5)", (i + 1, snp_id, pos, anc, der))
-	conn.commit()
-	conn.close()
+from CanSNPer2.modules.ParsePAF import ParsePAF
 
 
 def paf_line(cs, strand="+", tname="chr2", tstart=9, qstart=20, mapq=60, tp="P", qname="ctg1"):
@@ -44,44 +24,66 @@ def paf_line(cs, strand="+", tname="chr2", tstart=9, qstart=20, mapq=60, tp="P",
 	return "\t".join(str(f) for f in fields)
 
 
-def read(tmp_path, lines, rows, name="a", table=True, **kwargs):
-	'''the reference has chr1 (100 bases) and chr2 (50 bases): chr2 base n is joined 100 + n'''
+def read(tmp_path, lines, rows, name="a", **kwargs):
+	'''read PAF lines against the reference REF; rows as for helpers.make_db'''
 	db, paf = tmp_path / (name + ".db"), tmp_path / ("REF_" + name + ".paf")
 	make_db(db, rows)
 	paf.write_text("\n".join(lines) + "\n")
-	if table:
-		fasta = tmp_path / (name + ".fna")
-		fasta.write_text(">chr1 first\n" + "A" * 60 + "\n" + "A" * 40 + "\n>chr2\n" + "C" * 50 + "\n")
-		write_sequence_table(str(fasta), str(paf) + ".sequences")
 	parser = ParsePAF(**kwargs)
 	snps = parser.run(str(paf), reference="REF", database=str(db))
 	return snps, {row[0]: row for row in parser.get_snp_info()}
 
 
-# chr2 from its 10th base (joined 110): ACGT, then joined 114 is c in the reference, g in the query
-ROWS = [("B.1", 114, "C", "G")]
+# chr2 from its 10th base: ACGT, then chr2:14 is c in the reference, g in the query
+ROWS = [("B.1", "chr2", 14, "C", "G")]
 
 
-def test_sequence_table_maps_to_the_joined_reference(tmp_path):
+def test_target_coordinates_are_the_database_coordinates(tmp_path):
 	snps, info = read(tmp_path, [paf_line("=ACGT*cg=AAAA")], ROWS)
 	assert snps == {"B.1": 1}
-	assert info["B.1"][:5] == ["B.1", "REF", "114", "ctg1", "25"], "qstart 20 + 4 bases before it, 1-based"
-	assert info["B.1"][7] == "G"
+	assert info["B.1"][:6] == ["B.1", "REF", "chr2", "14", "ctg1", "25"], "qstart 20 + 4 bases before it, 1-based"
+	assert info["B.1"][8] == "G"
+
+
+def test_paf_reads_target_coordinates_without_a_table(tmp_path):
+	# no <alignment>.sequences file and no reference file: the target name and the 0-based
+	# target start of the record are enough
+	snps, info = read(tmp_path, [paf_line("=AC*cg=AAAA")], [("B.1", "chr2", 12, "C", "G")], name="notable")
+	assert not (tmp_path / "REF_notable.paf.sequences").exists()
+	assert snps == {"B.1": 1}
+	assert info["B.1"][2:4] == ["chr2", "12"]
+
+
+def test_same_position_on_two_sequences_both_called(tmp_path):
+	# position 50 on chr1 and position 50 on chr2 are different SNPs
+	rows = [("A.1", "chr1", 50, "A", "G"), ("B.2", "chr2", 50, "A", "C")]
+	lines = [paf_line("=ACGT*ag=AA", tname="chr1", tstart=45, qname="ctg1"),
+		paf_line("=ACGT*ac=AA", tname="chr2", tstart=45, qname="ctg2")]
+	snps, info = read(tmp_path, lines, rows, name="two")
+	assert snps == {"A.1": 1, "B.2": 1}
+	assert info["A.1"][2:6] == ["chr1", "50", "ctg1", "25"]
+	assert info["B.2"][2:6] == ["chr2", "50", "ctg2", "25"]
+	assert info["A.1"][8] == "G" and info["B.2"][8] == "C"
+
+
+def test_a_sequence_without_snps_is_skipped(tmp_path):
+	snps, info = read(tmp_path, [paf_line("=ACGT*cg=AAAA", tname="plasmid")], ROWS, name="other")
+	assert snps == {} and info == {}
 
 
 def test_query_insertion_and_reverse_strand(tmp_path):
 	snps, info = read(tmp_path, [paf_line("=ACGT+tt*cg=AAAA")], ROWS, name="ins")
-	assert info["B.1"][4] == "27", "two inserted query bases move the query position, not the reference one"
+	assert info["B.1"][5] == "27", "two inserted query bases move the query position, not the reference one"
 	# "-": the cs string is still on the reference strand, the query runs down from qend 31
 	snps, info = read(tmp_path, [paf_line("=ACGT+tt*cg=AAAA", strand="-")], ROWS, name="rev")
 	assert snps == {"B.1": 1}
-	assert info["B.1"][4] == "25", "qend 31 - 6 query bases before it"
+	assert info["B.1"][5] == "25", "qend 31 - 6 query bases before it"
 
 
 def test_deletion_at_a_snp_is_no_data(tmp_path):
 	snps, info = read(tmp_path, [paf_line("=ACGT-c=AAAA")], ROWS)
 	assert snps == {"B.1": 0}
-	assert info["B.1"][4] == "N/A" and info["B.1"][7] == "-"
+	assert info["B.1"][5] == "N/A" and info["B.1"][8] == "-"
 
 
 def test_only_primary_alignments_with_enough_mapping_quality_are_read(tmp_path):
@@ -89,14 +91,12 @@ def test_only_primary_alignments_with_enough_mapping_quality_are_read(tmp_path):
 		paf_line("=ACGT*ca=AAAA", tp="S", qname="paralog"),        ## secondary
 		paf_line("=ACGT*ct=AAAA", mapq=3, qname="repeat")]         ## primary, ambiguous placement
 	snps, info = read(tmp_path, lines, ROWS)
-	assert snps == {"B.1": 1} and info["B.1"][3] == "ctg1"
+	assert snps == {"B.1": 1} and info["B.1"][4] == "ctg1"
 	snps, info = read(tmp_path, lines, ROWS, name="mapq0", min_mapq=0)
-	assert snps == {"B.1": 0} and info["B.1"][7] == "N", "two primary alignments disagree, no evidence either way"
+	assert snps == {"B.1": 0} and info["B.1"][8] == "N", "two primary alignments disagree, no evidence either way"
 
 
-def test_missing_sequence_table_or_cs_tag_is_an_error(tmp_path):
-	with pytest.raises(FileNotFoundError, match="sequence table"):
-		read(tmp_path, [paf_line("=ACGT*cg=AAAA")], ROWS, table=False)
+def test_missing_cs_tag_is_an_error(tmp_path):
 	with pytest.raises(ValueError, match="cs tag"):
 		read(tmp_path, [paf_line("=ACGT*cg=AAAA").rsplit("\t", 1)[0]], ROWS, name="nocs")
 
@@ -110,7 +110,7 @@ def test_minimap2_definition(tmp_path):
 	fasta = tmp_path / "r.fna"
 	fasta.write_text(">c1 x\nACGT\nAC\n>c2\nGG\n")
 	mm2.prepare(str(fasta), "q.fna", str(tmp_path / "o.paf"))
-	assert (tmp_path / "o.paf.sequences").read_text() == "c1\t6\nc2\t2\n"
+	assert not (tmp_path / "o.paf.sequences").exists(), "PAF carries the target coordinates, no sequence table is written"
 
 
 def revcomp(seq):
@@ -125,13 +125,14 @@ def test_minimap2_through_the_whole_alignment_step(tmp_path):
 	chr1 = "".join(rng.choice("ACGT") for _ in range(6000))
 	chr2 = "".join(rng.choice("ACGT") for _ in range(4000))
 	joined = chr1 + chr2
-	snps = {1500: "B.1", 4500: "B.2", 6000 + 2000: "B.3"}  ## joined 1-based positions
+	## the query is built from the joined sequence; the SNPs are stored per reference sequence
+	snps = {1500: ("B.1", "chr1", 1500), 4500: ("B.2", "chr1", 4500), 6000 + 2000: ("B.3", "chr2", 2000)}
 	rows, query = [], list(joined)
-	for pos, snp_id in snps.items():
+	for pos, (snp_id, sequence, seq_pos) in snps.items():
 		ref_base = joined[pos - 1]
 		alt = "A" if ref_base != "A" else "C"
 		derived = snp_id != "B.2"                 ## B.2 stays ancestral in the query
-		rows.append((snp_id, pos, ref_base, alt))
+		rows.append((snp_id, sequence, seq_pos, ref_base, alt))
 		if derived:
 			query[pos - 1] = alt
 	query = "".join(query)
@@ -146,12 +147,13 @@ def test_minimap2_through_the_whole_alignment_step(tmp_path):
 	obj = CanSNPer2([str(qfile)], workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
 		database=db, aligner="minimap2")
 	files = obj.align(str(qfile))
-	assert files and all(os.path.isfile(f) and os.path.isfile(f + ".sequences") for f in files)
+	assert files and all(os.path.isfile(f) for f in files)
 	states, info, called = obj.find_snps_multiproc(xmfa_obj=obj.aligner.reader(database=db), xmfa_files=files,
 		references=obj.alignment_references)
 	assert states == {"B.1": 1, "B.2": 2, "B.3": 1}
 	assert sorted(called) == ["B.1", "B.3"]
-	where = {row[0]: (row[3], int(row[4])) for row in info}
+	assert {row[0]: (row[2], row[3]) for row in info} == {"B.1": ("chr1", "1500"), "B.2": ("chr1", "4500"), "B.3": ("chr2", "2000")}
+	where = {row[0]: (row[4], int(row[5])) for row in info}
 	assert where["B.1"] == ("q1", 1500)
 	assert where["B.2"] == ("q2", 7000 - 4500 + 1), "q2 is reverse complemented: query 4500 is its base 2501"
 	assert where["B.3"] == ("q3", 8000 - 7000)

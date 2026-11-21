@@ -28,6 +28,7 @@ jobs:
         with:
           repository: FOI-Bioinformatics/CanSNPer2-data
           path: cansnper2-data
+          ref: per_sequence_positions # set back to master when 2.3.0 is released
 
       - uses: actions/setup-python@v5
         with:
@@ -75,6 +76,9 @@ jobs:
           CanSNPer2-download --help
 
       - name: Unit tests
+        env:
+          # the published-scheme tests read the CanSNPer2-data checkout above
+          CANSNPER2_DATA: ${{ github.workspace }}/cansnper2-data
         run: python -m pytest -q tests
 
       - name: Build and export a database
@@ -102,7 +106,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the anonymous API limit is shared by all jobs on a runner address
         run: |
           CanSNPer2-download --list_schemes
-          CanSNPer2-download --scheme bacillus_anthracis --branch master --no_references
+          CanSNPer2-download --scheme bacillus_anthracis --branch per_sequence_positions --no_references # set back to master when 2.3.0 is released
           test -s bacillus_anthracis.source.json
           CanSNPer2-database --database bacillus_anthracis.db --export -o export_scheme
           for f in tree snp references; do

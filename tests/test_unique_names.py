@@ -12,6 +12,7 @@ import sqlite3
 
 import pytest
 
+import helpers
 from CanSNPer2.DownloadGenomes import DownloadGenomes
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, sequence_names
@@ -20,20 +21,11 @@ GENOME = ">chr1 test\n" + "ACGT" * 250 + "\n"
 
 
 def make_db(path):
-	if os.path.exists(path):
-		os.remove(path)
+	'''one SNP on chr1, the sequence of GENOME, on the root of the tree (a node linked to
+		itself); typing refuses SNPs on nodes that are not in the tree'''
+	helpers.make_db(path, [("S.1", "chr1", 100, "A", "T")])
 	conn = sqlite3.connect(path)
-	conn.executescript("""
-		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
-		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), position integer,
-			ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);
-		CREATE TABLE snp_references (id integer PRIMARY KEY, genome varchar(6), strain varchar(6));
-		INSERT INTO snp_references (id, genome, strain) VALUES (5, 'REF', 'REF');
-		INSERT INTO nodes (id, name) VALUES (1, 'S.1');
-		INSERT INTO snp_annotation VALUES (1, 'S.1', 100, 'A', 'T', 'test', '06/11/26', 5);
-	""")
+	conn.execute("INSERT INTO tree (parent, child, rank_i) VALUES (1, 1, 1)")
 	conn.commit()
 	conn.close()
 
