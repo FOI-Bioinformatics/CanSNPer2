@@ -398,7 +398,8 @@ Run options:
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
   --min_required_hits MIN_REQUIRED_HITS
-                        Minimum sequential hits to call a SNP!
+                        Minimum number of derived SNPs on the path from the root
+                        to the final SNP for a call (at least 1, default 3)
   --strictness STRICTNESS
                         Fraction of the SNPs on the path to the final SNP
                         that must be called; SNPs without alignment data count
