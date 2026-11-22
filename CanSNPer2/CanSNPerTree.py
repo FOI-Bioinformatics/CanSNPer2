@@ -46,7 +46,7 @@ from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
-import os,sys
+import os,sys,tempfile
 ## Basic config file
 
 '''CanSNPer2 settings'''
@@ -63,6 +63,13 @@ def resolve_tmpdir(path):
 	if os.path.basename(tmpdir) == "CanSNPer2" or os.path.isfile(os.path.join(tmpdir, RUN_MARKER)):
 		return tmpdir
 	return tmpdir + "/CanSNPer2"
+
+
+def default_tmpdir_candidates(outdir):
+	'''Folders tried in turn when --tmpdir is not given: the system temporary folder (which
+		follows TMPDIR), then a folder in the output directory. /tmp can be read-only, full, or hold a
+		CanSNPer2 folder owned by another user, which used to stop the run.'''
+	return [os.path.join(tempfile.gettempdir(), "CanSNPer2"), os.path.join(outdir, ".cansnper2_tmp")]
 
 
 def fraction(value):
@@ -113,7 +120,7 @@ def command():
 
 
 	debugopts = parser.add_argument_group("Logging and debug options")
-	debugopts.add_argument('--tmpdir', 			metavar='', default="/tmp/CanSNPer2",						help="Specify tmp directory default (/tmp/CanSNPer2)")
+	debugopts.add_argument('--tmpdir', 			metavar='', default=None,						help="Specify tmp directory (default: CanSNPer2 in the system temporary folder, see TMPDIR; a folder in --outdir is used when that cannot be written to)")
 	debugopts.add_argument('--logdir', 			metavar='', default="logs/", 								help="Specify log directory")
 	debugopts.add_argument('--verbose',			action='store_const', const=logging.INFO,					help="Verbose output")
 	debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")
@@ -172,16 +179,32 @@ def command():
 	log_scheme_notice(args.database, logger) ## which scheme is typed against, before any work starts
 
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
-	if not args.tmpdir.rstrip("/"):
+	if args.tmpdir is not None and not args.tmpdir.rstrip("/"):
 		parser.error("--tmpdir cannot be empty")
-	args.tmpdir = resolve_tmpdir(args.tmpdir)
-	if not os.path.exists(args.tmpdir):
-		logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
-	try:
-		ensure_directory(args.tmpdir, "--tmpdir")
-	except CanSNPer2Error as e:
-		logger.error(e.value)
-		exit(1)
+	if args.tmpdir is None:
+		'''no --tmpdir: use the first folder that can be written to'''
+		problems = []
+		for candidate in default_tmpdir_candidates(args.outdir):
+			candidate = resolve_tmpdir(candidate)
+			try:
+				ensure_directory(candidate, "--tmpdir")
+				args.tmpdir = candidate
+				break
+			except CanSNPer2Error as e:
+				problems.append(e.value)
+				logger.warning("{0}; trying another location".format(e.value))
+		else:
+			logger.error("No folder for temporary files could be used ({0}); give one with --tmpdir".format("; ".join(problems)))
+			exit(1)
+	else:
+		args.tmpdir = resolve_tmpdir(args.tmpdir)
+		if not os.path.exists(args.tmpdir):
+			logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
+		try:
+			ensure_directory(args.tmpdir, "--tmpdir")
+		except CanSNPer2Error as e:
+			logger.error(e.value)
+			exit(1)
 
 	## Add log level and log file path
 	logger.debug(args)
