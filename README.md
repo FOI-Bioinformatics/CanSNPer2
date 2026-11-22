@@ -423,7 +423,9 @@ Run options:
   --keep_temp           keep temporary files
 
 Logging and debug options:
-  --tmpdir              Specify tmp directory default (/tmp/CanSNPer2)
+  --tmpdir              Specify tmp directory (default: CanSNPer2 in the system
+                        temporary folder, see TMPDIR; a folder in --outdir is used
+                        when that cannot be written to)
 
 Each run that aligns writes its temporary files to its own directory,
 `<tmpdir>/CanSNPer2/run_<random>`, and removes only that directory when it
