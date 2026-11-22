@@ -35,7 +35,7 @@ REPORTS = [
 	{"name": "clean_sample", "severity": "clean", "final": "B.1", "path": "A.1;B.1",
 	 "reasons": [], "states": {"A.1": 1, "B.1": 1}, "called": ["A.1", "B.1"], "edge": [], "no_data": []},
 	{"name": "edge_sample", "severity": "review", "final": "B.2", "path": "A.1;B.2",
-	 "reasons": ["SNP flagged at an alignment edge on the called path: B.2"],
+	 "reasons": ["SNP flagged at an alignment edge on the SNP path: B.2"],
 	 "states": {"A.1": 1, "B.2": 1}, "called": ["A.1", "B.2"], "edge": ["B.2"], "no_data": []},
 	{"name": "failed_sample", "severity": "not called", "final": "NA", "path": "NA",
 	 "reasons": ["Two or more confirmed SNP paths compete at the same depth"],

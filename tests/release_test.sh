@@ -241,7 +241,7 @@ expect "query_not_called.txt lines" "313" "$(wc -l < "$OUT/res_query/query_not_c
 # Sequence, Pos, QuerySeq, QueryPosition, Ancestral base, Derived base, Target base, Edge flag)
 expect "snps table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
 expect "not_called table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
-BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(SNP path|Final SNP|Query file)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(#|SNP path|Final SNP|Query file|Typing settings)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 expect "query trace columns filled in every SNP row" "0" "$BADQ"
 QPNUM=$(awk -F'\t' 'NR>1 && $6 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
 if [ "$QPNUM" -gt 0 ]; then
@@ -271,7 +271,7 @@ cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/quer
 NODATA=$(awk -F'\t' 'NR>1 && $9=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
 COVERED=$("$PY" -c "
 nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_not_called.txt')) if i)
-sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('SNP path', 'Final SNP', 'Query file')))
+sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('#', 'SNP path', 'Final SNP', 'Query file', 'Typing settings')))
 print(nc + sc)")
 if [ "$NODATA" -gt 0 ] && [ "$COVERED" = 328 ] && grep -q "no alignment data" "$LASTLOG"; then
     printf '  ok    %-52s %s positions listed, the two files cover all 328 SNPs\n' "SNPs without any alignment data are listed (#27)" "$NODATA"
@@ -287,8 +287,8 @@ fi
 cmd na-min-hits any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_na" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/na" \
     --skip_mauve --min_required_hits 999
-NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(SNP path|Final SNP|Query file)/' "$OUT/res_na/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$NA_ROWS" -gt 0 ] && grep -q "^SNP path: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null && grep -q "^Final SNP: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null; then
+NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(#|SNP path|Final SNP|Query file|Typing settings)/' "$OUT/res_na/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$NA_ROWS" -gt 0 ] && grep -q "^# SNP path: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null && grep -q "^# Final SNP: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null; then
     printf '  ok    %-52s %s called SNPs listed although the call is NA\n' "NA sample keeps its called SNPs (#35)" "$NA_ROWS"
     PASSED=$((PASSED+1))
 else
