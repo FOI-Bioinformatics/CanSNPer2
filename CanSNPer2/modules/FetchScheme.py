@@ -154,6 +154,16 @@ class SchemeSource(object):
 				self._config = {}
 			except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
 				raise SchemeError("schemes.toml of {loc} could not be read: {e}".format(loc=self.location(), e=e))
+			for name, entry in self._config.items():
+				if not isinstance(entry, dict):
+					self._config = None
+					raise SchemeError("schemes.toml of {loc}: the entry {name} is not a table, write it as [{name}]".format(
+						loc=self.location(), name=name))
+				for key in ("kind", "snp", "tree", "readme", "database_dir", "source_type"):
+					if key in entry and not isinstance(entry[key], str):
+						self._config = None
+						raise SchemeError("schemes.toml of {loc}: {key} of the entry [{name}] must be text, not {kind}".format(
+							loc=self.location(), key=key, name=name, kind=type(entry[key]).__name__))
 		return self._config
 
 	def scheme_files(self, name):
@@ -436,6 +446,15 @@ def provenance_path(database):
 	return base + ".source.json"
 
 
+def name_scheme_files(text, local, name):
+	'''text with the paths of the downloaded scheme files (local, {role: path}) replaced by the
+		file name and the scheme, such as "test_snp.txt of the scheme test"'''
+	paths = set(local.values()) | set(os.path.realpath(path) for path in local.values())
+	for path in sorted(paths, key=len, reverse=True):
+		text = text.replace(path, "{file} of the scheme {name}".format(file=os.path.basename(path), name=name))
+	return text
+
+
 def build_scheme(name, database, ref="master", overwrite=False, source=None, allow_unverified=False):
 	'''Fetch scheme name from CanSNPer2-data at ref and build it into database.
 		The database is built under a temporary name and moved into place only when complete,
@@ -480,7 +499,15 @@ def build_scheme(name, database, ref="master", overwrite=False, source=None, all
 								scheme_info=scheme_info)
 			except (sqlite3.Error, OSError, DatabaseConnectionError) as e:
 				raise SchemeError("The database {db} could not be built from the scheme {name}: {e}".format(
-					db=database, name=name, e=e))
+					db=database, name=name, e=name_scheme_files(str(e), local, name)))
+			except Exception as e:
+				## an error about a scheme file named the file in the temporary folder, which is
+				## deleted when the build ends; the scheme and the file within it are named instead
+				text = str(e)
+				renamed = name_scheme_files(text, local, name)
+				if renamed == text:
+					raise
+				raise SchemeError(renamed) from e
 			try:
 				os.replace(partial, database)
 			except OSError as e:
