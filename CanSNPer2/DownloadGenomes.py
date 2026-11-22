@@ -358,6 +358,9 @@ def command():
 	args = parser.parse_args()
 	if not (args.database or args.scheme or args.list_schemes):
 		parser.error("give a database with --database, a scheme with --scheme, or --list_schemes")
+	if args.no_references and not args.scheme:
+		'''with only a database there is nothing to build, the references are all the command does'''
+		parser.error("--no_references skips the download after building a database from --scheme, give --scheme or leave it out")
 	if args.data_dir and (args.repo or args.branch):
 		parser.error("--data_dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
 
@@ -439,6 +442,7 @@ def command():
 	if DG.run():
 		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
 		exit(1)
+	print("Downloaded the reference genomes of {db} from {source} into {d}".format(db=args.database, source=args.source, d=args.outdir))
 
 
 def main():

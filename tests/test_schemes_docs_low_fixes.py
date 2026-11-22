@@ -91,7 +91,7 @@ def test_readme_help_block_matches_the_help():
 
 def test_install_md_matches_setup():
 	text = open(os.path.join(ROOT, "INSTALL.md")).read()
-	for word in ("3.7", "ETE3", "PyQt5", "NumPy"):
+	for word in ("3.7", "[ETE3]", "pip install PyQt5", "[NumPy]"):
 		assert word not in text
 	assert "3.11" in text
 
@@ -114,7 +114,7 @@ def fake_path(tmp_path, programs):
 
 @pytest.mark.parametrize("programs,code,lines", [
 	(["minimap2"], 0, ["progressiveMauve: not found", "minimap2: ", "nucmer: not found"]),
-	(["nucmer"], 0, ["nucmer: not found", "delta-filter"]),
+	(["nucmer"], 1, ["delta-filter: not found"]),
 	(["nucmer", "delta-filter"], 0, ["nucmer: ", "delta-filter: "]),
 	(["progressiveMauve"], 0, ["progressiveMauve: "]),
 	([], 1, ["progressiveMauve: not found", "minimap2: not found"]),
@@ -138,3 +138,13 @@ def test_no_references_with_database_only_is_refused(tmp_path):
 	done = run("CanSNPer2.DownloadGenomes", "-db", db, "--no_references", "--logs", str(tmp_path / "l"), cwd=tmp_path)
 	assert done.returncode != 0
 	assert "--no_references" in done.stderr and "--scheme" in done.stderr
+
+
+def test_download_prints_one_line_on_success(tmp_path, monkeypatch, capsys):
+	from CanSNPer2 import DownloadGenomes
+	db = helpers.make_db(tmp_path / "x.db", [("A.1", "CP1", 10, "C", "T")])
+	monkeypatch.setattr(DownloadGenomes.DownloadGenomes, "run", lambda self: 0)
+	monkeypatch.setattr(sys, "argv", ["CanSNPer2-download", "-db", db, "-o", str(tmp_path / "refs"), "--logs", str(tmp_path / "l")])
+	DownloadGenomes.command()
+	out = capsys.readouterr().out.strip().splitlines()
+	assert len(out) == 1 and db in out[0] and str(tmp_path / "refs") in out[0]

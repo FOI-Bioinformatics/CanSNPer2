@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 '''
 CanSNPer self test for conda
-Check so that all required packages are installed
+Check that CanSNPer2 can be imported and which aligner programs are installed
 '''
 
 import shutil
@@ -20,7 +20,6 @@ def command():
 	parser.add_argument('--debug', action='store_true', help="print the traceback of an unexpected error")
 	parser.parse_args()
 
-	failed = []
 	'''CanSNPer2 needs no third party python packages any more: the ete3/PyQt tree drawing
 		was replaced by the html viewer in modules/NewickTree.py, so ete3 could be dropped
 		(it imports cgi, removed in python 3.13, which capped the package below 3.13, issue #184).
@@ -28,23 +27,30 @@ def command():
 	try:
 		import CanSNPer2.modules.NewickTree
 	except ImportError as e:
-		print("ERROR: CanSNPer2 could not be imported: {e}; install the requirements: pip install -r requirements.txt".format(e=e))
+		print("ERROR: CanSNPer2 could not be imported: {e}; reinstall CanSNPer2".format(e=e))
 		sys.exit(1)
 
-	'''the default aligner must be installed; the others are optional (--aligner)'''
+	'''each aligner is reported; at least one has to be usable (found, with delta-filter for nucmer)'''
 	from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
-	for name, aligner in sorted(ALIGNERS.items()):
+	usable = []
+	for name, cls in sorted(ALIGNERS.items()):
+		aligner = cls()
 		found = shutil.which(aligner.program)
-		if name == DEFAULT_ALIGNER and not found:
-			failed.append("{program} was not found in PATH, it is required to align the genomes".format(program=aligner.program))
-		elif name != DEFAULT_ALIGNER:
-			print("{program}: {state} (optional, --aligner {name})".format(program=aligner.program,state=found or "not found",name=name))
+		print("{program}: {state} (--aligner {name}{default})".format(program=aligner.program,
+			state=found or "not found", name=name, default=", default" if name == DEFAULT_ALIGNER else ""))
+		ready = found is not None
+		if hasattr(aligner, "filter_program"):
+			filter_found = shutil.which(aligner.filter_program())
+			print("{program}: {state} (needed by {name})".format(program=aligner.filter_program(),
+				state=filter_found or "not found", name=aligner.program))
+			ready = ready and filter_found is not None
+		if ready:
+			usable.append(name)
 
-	if failed:
-		for error in failed:
-			print("ERROR: "+error)
+	if not usable:
+		print("ERROR: no aligner was found in PATH; install progressiveMauve, minimap2 or MUMmer4 (nucmer and delta-filter)")
 		sys.exit(1)
-	print("required python packages installed!")
+	print("usable aligners: {names}".format(names=", ".join(usable)))
 
 
 def main():
