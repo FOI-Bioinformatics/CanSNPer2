@@ -27,9 +27,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: FOI-Bioinformatics/CanSNPer2-data
-          # the schemes keep their canSNPs in <name>_canSNPs.txt on this branch;
-          # set back to the default branch once it is merged there
-          ref: cansnps_source
           path: cansnper2-data
 
       - uses: actions/setup-python@v5
@@ -108,8 +105,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the anonymous API limit is shared by all jobs on a runner address
         run: |
           CanSNPer2-download --list_schemes
-          # --branch back to master once the canSNP files are merged there
-          CanSNPer2-download --scheme bacillus_anthracis --branch cansnps_source --no_references
+          CanSNPer2-download --scheme bacillus_anthracis --branch master --no_references
           test -s bacillus_anthracis.source.json
           CanSNPer2-database --database bacillus_anthracis.db --export -o export_scheme
           for f in tree canSNPs references; do
