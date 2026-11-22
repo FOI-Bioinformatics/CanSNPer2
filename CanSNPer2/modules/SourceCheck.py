@@ -31,6 +31,10 @@ POSITION_RE = re.compile(r"^[0-9]+$")
 COMMENT_COLUMNS = ("comment", "comments", "note", "notes", "free text", "free_text")
 ## a GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version
 ACCESSION_RE = re.compile(r"^GC[AF]_[0-9]{9}\.[0-9]+$")
+## the largest position that fits the INTEGER column of the database (a larger value is stored as a REAL)
+MAX_POSITION = 2**31 - 1
+## a genome name is used in file names: letters, digits, dot, underscore and hyphen, no leading dot
+GENOME_NAME_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")
 
 
 def _open(path):
@@ -81,8 +85,27 @@ def check_tree(path, problems):
 
 
 def _header(handle):
-	'''the header row as the loaders read it'''
-	return handle.readline().lstrip("#").strip().split("\t")
+	'''the header row as the loaders read it, None when the file is empty'''
+	line = handle.readline()
+	if line.strip() == "":
+		return None
+	return line.lstrip("#").strip().split("\t")
+
+
+def split_row(line, columns):
+	'''The fields of a data row. A row is read as the header is: trailing tabs after the last
+		column are dropped, so a file that ends every line with a tab is read alike. Only empty fields
+		beyond the number of header columns are dropped, an empty last value (such as a reference
+		without an assembly name) is kept.'''
+	data = [value.strip() for value in line.rstrip("\r\n").split("\t")]
+	while len(data) > columns and data[-1] == "":
+		data.pop()
+	return data
+
+
+def duplicate_columns(headers):
+	'''the column names that the header gives more than once'''
+	return [name for name, count in Counter(headers).items() if count > 1]
 
 
 def register_genome_names(owners, row, source):
@@ -115,6 +138,14 @@ def check_references(path, problems, known=None, database=None, known_accessions
 	accessions = {}
 	with open_source(path) as references:
 		headers = _header(references)
+		if headers is None:
+			problems.append("{0}: the references file is empty, it needs a header row and one row per genome".format(path))
+			return names
+		repeated = duplicate_columns(headers)
+		if repeated:
+			problems.append("{0}:1: the header names the column(s) {1} more than once".format(
+				path, ", ".join("'{0}'".format(name) for name in repeated)))
+			return names
 		missing = [column for column in GENOME_SOURCE_COLUMNS if column not in headers]
 		if missing:
 			problems.append("{0}:1: the header has no column(s) {1}, it must name {2}".format(
@@ -123,7 +154,7 @@ def check_references(path, problems, known=None, database=None, known_accessions
 		for number, line in enumerate(references, start=2):
 			if line.strip() == "":
 				continue
-			data = [value.strip() for value in line.rstrip("\r\n").split("\t")]
+			data = split_row(line, len(headers))
 			if len(data) != len(headers):
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(
 					path, number, len(headers), len(data)))
@@ -131,6 +162,9 @@ def check_references(path, problems, known=None, database=None, known_accessions
 			row = dict(zip(headers, data))
 			genome = row["genome"]
 			genomes[genome] += 1
+			if not GENOME_NAME_RE.match(genome):
+				problems.append("{0}:{1}: genome name '{2}' is not allowed, use letters, digits, '.', '_' and '-' "
+					"only and do not start with '.' (the name is used in file names)".format(path, number, genome))
 			if not ACCESSION_RE.match(row["genbank_id"]):
 				problems.append("{0}:{1}: genbank_id '{2}' is not an assembly accession (GCA_ or GCF_, nine digits "
 					"and a version, such as GCA_000008985.1); CanSNPer2-download needs it to fetch the genome".format(
@@ -176,6 +210,14 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 	positions = Counter()
 	with open_source(path) as snps:
 		headers = _header(snps)
+		if headers is None:
+			problems.append("{0}: the SNP file is empty, it needs a header row and one row per SNP".format(path))
+			return
+		repeated = duplicate_columns(headers)
+		if repeated:
+			problems.append("{0}:1: the header names the column(s) {1} more than once".format(
+				path, ", ".join("'{0}'".format(name) for name in repeated)))
+			return
 		if "position" in headers and "sequence_position" not in headers:
 			problems.append("{0}:1: this SNP file cannot be used. {1}".format(path, JOINED_FORMAT_HINT))
 			return
@@ -191,14 +233,16 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 			else:
 				break
 		required = len(headers) - optional
+		rows = 0
 		for number, line in enumerate(snps, start=2):
 			if line.strip() == "" or line.strip().startswith("#"):
 				continue
-			data = [value.strip() for value in line.rstrip("\r\n").split("\t")]
+			data = split_row(line, len(headers))
 			if not required <= len(data) <= len(headers):
 				expected = str(required) if optional == 0 else "{0} to {1}".format(required, len(headers))
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(path, number, expected, len(data)))
 				continue
+			rows += 1
 			row = dict(zip(headers, data))
 			snp_id, genome = row["snp_id"], row["genome"]
 			sequence, position = row["sequence"], row["sequence_position"]
@@ -219,6 +263,9 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 					path, number))
 			if not POSITION_RE.match(position) or int(position) < 1:
 				problems.append("{0}:{1}: sequence_position '{2}' is not a positive integer".format(path, number, position))
+			elif int(position) > MAX_POSITION:
+				problems.append("{0}:{1}: sequence_position {2} is larger than {3}, the largest position the "
+					"database can hold".format(path, number, position, MAX_POSITION))
 			elif sequence.strip() != "":
 				positions[(genome, sequence, int(position))] += 1
 				if existing is not None and (genome, sequence, int(position)) in existing[2]:
@@ -229,6 +276,8 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 					problems.append("{0}:{1}: {2} '{3}' is not one of A, C, G, T".format(path, number, column, base))
 			if derived == ancestral and derived in BASES:
 				problems.append("{0}:{1}: derived and ancestral base are both '{2}'".format(path, number, derived))
+	if rows == 0:
+		problems.append("{0}: the SNP file has a header but no SNP rows, a scheme without SNPs cannot be used".format(path))
 	for snp_id, count in snp_ids.items():
 		if count > 1:
 			problems.append("{0}: snp_id '{1}' is listed {2} times".format(path, snp_id, count))

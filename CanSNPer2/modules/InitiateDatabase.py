@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
-from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names
+from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names, split_row
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from importlib import import_module
 from datetime import date
@@ -164,7 +164,7 @@ class CanSNPDatabase(DatabaseFunctions):
 					continue
 				## only the line end is removed: strip() also removed empty trailing fields, so a
 				## reference without an assembly name was skipped as a short row
-				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
+				data = split_row(row, len(headers))
 				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
 					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
 					continue
@@ -208,7 +208,7 @@ class CanSNPDatabase(DatabaseFunctions):
 				if row.strip() == "" or row.strip().startswith("#"):
 					'''# lines are comments in the annotation file (issue #22)'''
 					continue
-				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
+				data = split_row(row, len(headers))
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
 					continue

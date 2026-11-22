@@ -134,8 +134,10 @@ class ModifyTree(object):
 			return False
 
 	def _taxfix(self, x):
-		'''Small function to fix taxid with NCBI, round up to nearest million in internal id'''
-		return int(math.ceil(x / 1000000.0)) * 1000000
+		'''The id of the first new node: the ids of a database are numbered from 1 and a new node gets
+			the next id after the highest one. They were rounded up to the next million (a flextaxd
+			convention for NCBI ids), which gave a small scheme the ids 1000000 and above.'''
+		return int(x)
 
 	def add_link(self, child=None, parent=None, rank="n"):
 		'''Add relationship in tree'''
@@ -363,6 +365,11 @@ class ModifyTree(object):
 			self.file_mod(input,self.replace_parent)
 		else:
 			raise InputError("Wrong modification input database or file must be supplied")
+		if self.replace and not self.new_links:
+			'''--replace removes every node of the branch that the modification does not give again,
+				so a modification without rows would delete the whole branch'''
+			raise InputError("The modification has no rows, --replace would remove the whole branch below {parent}. "
+				"Give the nodes that replace it, or leave out --replace".format(parent=self.parent))
 		### get links from current database
 		logger.info("Old links keep from duplicated taxonomy nodes {nodes}".format(nodes=self.do_not_delete_old))
 		self.old_nodes = self.existing_nodes - (self.new_nodes)
