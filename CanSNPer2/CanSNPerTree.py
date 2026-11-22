@@ -129,8 +129,8 @@ def command():
 
 	output_options = parser.add_argument_group("Output options")
 	output_options.add_argument('-o', '--outdir', 			metavar='DIR', default="results",		help="Output directory")
-	output_options.add_argument('--save_tree',				action='store_true',					help='Save tree as PDF using ETE3 (default False)')
-	output_options.add_argument('--no_snpfiles', 			action='store_false',					help="Don´t save output files.")
+	output_options.add_argument('--save_tree',				action='store_true',					help='Save the tree of each sample as <sample>_tree.html (default False)')
+	output_options.add_argument('--no_snpfiles', 			action='store_false',					help="Do not write the result files (<sample>_snps.txt, <sample>_not_called.txt); the call is still printed")
 	output_options.add_argument('--summary',				action='store_true',					help="Output a summary file and tree with all called SNPs\nnot affected by no_snpfiles")
 	output_options.add_argument('--annotations', metavar='FILE', default=None, help="TSV file annotating tree nodes: <snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]. 'node' draws a badge under the SNP dot, 'clade' a dashed box around its whole subtree; rank is a level carried by the annotation (type, subspecies, marker...), never a tree depth")
 

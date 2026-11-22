@@ -311,6 +311,11 @@ def command():
 			"used with an existing database".format(options=", ".join(scheme_options),
 			verb="is" if len(scheme_options) == 1 else "are"))
 		exit(1)
+	for option, value in (("--scheme_name", args.scheme_name), ("--scheme_source", args.scheme_source)):
+		if value is not None and any(c in value for c in "\t\n\r"):
+			logger.error("{option} contains a control character (tab, newline or carriage return), "
+				"remove it; the value is recorded in the database and shown by --info".format(option=option))
+			exit(1)
 	if args.scheme_status is not None and args.scheme_status not in STATUSES:
 		logger.error("--scheme_status {status} is not a known status, give verified, draft or unknown".format(
 			status=args.scheme_status))

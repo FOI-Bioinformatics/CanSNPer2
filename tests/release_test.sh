@@ -80,7 +80,7 @@ say()  { printf '\n%s\n' "$1"; }
 say "== the package itself"
 cmd compileall ok "" "$PY" -m compileall -q "$PKG/CanSNPer2"
 cmd unit-tests ok "" "$PY" -m pytest -q "$REPO/tests"
-cmd selftest ok "required python packages installed" "$PY" -m CanSNPer2.selftest
+cmd selftest ok "usable aligners" "$PY" -m CanSNPer2.selftest
 
 say "== the documentation names every command line option"
 DOCMISS=0

@@ -1,8 +1,8 @@
-##Installing CanSNPer2
-CanSNPer2 is written in Python and requires Python installed as well as several 
-dependencies listed below. The software is developed and tested with Python 
-version 3.7 but earlier (3.5, 3.6) may work just as well. Due to other 
-dependencies other versions of Python are not supported.
+## Installing CanSNPer2
+CanSNPer2 is written in Python and needs Python 3.11 or later (3.11 to 3.14 are
+listed in setup.py). It uses the Python standard library only, so there are no
+Python packages to install besides CanSNPer2 itself. An aligner program is
+needed as well, see the dependencies section below.
 
 ### Bioconda
 With an activated Bioconda channel (see [Set up channels](https://bioconda.github.io/index.html#set-up-channels)), 
@@ -11,27 +11,27 @@ install with:
 and update with:
 `conda update cansnper2`
 
-This will install CanSNPer2 with all Python and other dependencies (except progressivemauve).
+This will install CanSNPer2 and the programs it depends on (except progressiveMauve).
 
 Remark that Bioconda only supports MacOS and Linux systems. 
 
 ### Python Package Index
-An alternative way to install CanSNPer2 and Python dependencies is using PyPI with: 
+An alternative way to install CanSNPer2 is using PyPI with: 
 `pip install cansnper2`
 
-Non-Python dependencies needs to be installed manuelly. See dependency secion below.
+The aligner programs need to be installed separately. See the dependencies section below.
 
 ### Latest source code
 To install the latest source code, start by cloning this repo, change into the CanSNPer2 directory and
-run the setup file. This will install CanSNPer2 and the Python dependecies.
+install it with pip. CanSNPer2 has no Python dependencies.
 
 ```
 git clone https://github.com//CanSNPer2.git
 cd CanSNPer2
-python setup.py
+pip install .
 ```
 
-Non-Python dependencies needs to be installed manuelly. See dependency secion below.
+The aligner programs need to be installed separately. See the dependencies section below.
 
 ## Testing the installation
 When the dependencies are all installed CanSNPer2 can be run as it is from the 
@@ -55,25 +55,22 @@ file that came with the distribution.
 CanSNPer2 has been tested on Linux and MacOS (OSX), but feel free to tinker with setting up 
 a working version on your favorite OS. Mauve is available on other platforms.
 
-##Dependencies
-Software that must be installed before running CanSNPer2:
+## Dependencies
+CanSNPer2 needs Python 3.11 or later and at least one aligner program. It has
+no Python package dependencies (ETE3, PyQt5 and NumPy are not used; the tree
+view is written as a self-contained html file).
 
-[Python (3.7.X)](http://www.python.org/getit/)  
-Most Linux distributions come with Python installed. However we recommend using 
-[Conda](http://conda.pydata.org/docs/) to setup a flexible Python environment. 
-
-[ETE3](http://ete.cgenomics.org/)  
-ETE3 has a number of additional dependencies, listed in their install 
-notes. Most notably, there are several dependencies that are not needed 
-for CanSNPer2, but they may raise warnings as ETE3 is loaded. Note that
-ETE3 needs a Qt binding (PyQt5 for ete3 3.1.x) to draw trees, without it
-the drawing classes are silently left out of the ete3 namespace and no
-tree or summary output can be produced. Install it with `pip install PyQt5`.
-
-[NumPy](http://www.numpy.org/)  
-Simple install instructions are available for this package.
+CanSNPer2 aligns each query against the reference genomes with one of these
+programs, chosen with `--aligner` (default progressiveMauve):
 
 [progressiveMauve](http://darlinglab.org/mauve/mauve.html)  
 The progressiveMauve binary must be in the PATH, or be given with
 `--aligner_path` (the program itself or the folder that holds it).
 
+[minimap2](https://github.com/lh3/minimap2)  
+Used with `--aligner minimap2`.
+
+[MUMmer4](https://github.com/mummer4/mummer)  
+Used with `--aligner mummer4`; it needs both `nucmer` and `delta-filter`.
+
+`CanSNPer2-test` reports which of these programs are found in PATH.
