@@ -53,11 +53,28 @@ def reference_snps(database):
 	return snps
 
 
+class FastaFileError(ValueError):
+	'''a fasta file that cannot be read as text; the message names the file'''
+	pass
+
+
+def open_fasta(path):
+	'''a fasta file opened as text. A UTF-8 byte order mark is dropped (it hid the first
+		header), bytes that are not UTF-8 are replaced, as they can only be in headers and
+		comments of a usable file, and a gzip-compressed file is refused by name: the
+		aligners cannot read it and the decoder only reported a byte it could not decode'''
+	with open(path, "rb") as fin:
+		magic = fin.read(2)
+	if magic == b"\x1f\x8b":
+		raise FastaFileError("{path} is gzip-compressed, decompress it first".format(path=path))
+	return open(path, encoding="utf-8-sig", errors="replace")
+
+
 def read_sequences(path):
 	'''[(name, sequence), ...] of a fasta file in file order: the name is the first word of the
 		header line, the sequence is upper case and without whitespace'''
 	records = []
-	with open(path) as fin:
+	with open_fasta(path) as fin:
 		for line in fin:
 			if line.startswith(">"):
 				words = line[1:].split()
@@ -134,7 +151,10 @@ def check_reference(path, name, snps=None):
 		Checked in this order: unique and non-empty sequence names, every sequence named in
 		snps present, each sequence at least as long as its largest SNP position, and the
 		ancestral or derived base at enough SNPs.'''
-	records = read_sequences(path)
+	try:
+		records = read_sequences(path)
+	except FastaFileError as e:
+		return "reference {name}: {problem}".format(name=name, problem=e)
 	problem = duplicate_names([seq_name for seq_name, _seq in records])
 	if problem:
 		return "reference {name} ({path}) has {problem}".format(name=name, path=path, problem=problem)
@@ -150,7 +170,7 @@ def sequence_names(path):
 	'''the name of every sequence in a fasta file, in file order: the first word of the header
 		line, which is how minimap2, MUMmer and the result files identify a sequence'''
 	names = []
-	with open(path) as fin:
+	with open_fasta(path) as fin:
 		for line in fin:
 			if line.startswith(">"):
 				words = line[1:].split()

@@ -7,7 +7,7 @@ Ported from flextaxd.modules.ModifyTree to remove the flextaxd dependency (ISSUE
 using CanSNPer2's own database functions.
 '''
 
-from CanSNPer2.modules.DatabaseConnection import ModifyFunctions, NameNotFoundError
+from CanSNPer2.modules.DatabaseConnection import ModifyFunctions, NameNotFoundError, open_source
 import logging,os
 logger = logging.getLogger(__name__)
 import math,time
@@ -74,6 +74,7 @@ class ModifyTree(object):
 		self.remove = remove
 		self.ncbi_order = True
 		self.mod_genomes =False
+		self.sources_only = False ## true when only SNPs and reference genomes are added, the tree is not changed
 
 		self.fast_clean = True
 
@@ -115,10 +116,14 @@ class ModifyTree(object):
 			self.modsource = self.parse_modification(self.moddb,"database")
 		elif mod_file:
 			self.modsource = self.parse_modification(mod_file,"file")
+		elif kwargs.get("annotation") or kwargs.get("references"):
+			'''SNPs and reference genomes can be added without a change of the tree'''
+			self.sources_only = True
 		elif update_genomes or clean_database or update_node_names or rename_node or purge_database or remove:
 			pass
 		else:
-			raise InputError("No modification source could be found both mod_database and mod_file file are empty!")
+			raise InputError("Nothing to modify: give --mod_file with changes to the tree, --annotation with SNPs "
+				"to add, --references with reference genomes to add, or --remove with --parent to remove a branch")
 
 	def _is_int(self,s):
 		'''Small help function, test if value is int'''
@@ -129,8 +134,10 @@ class ModifyTree(object):
 			return False
 
 	def _taxfix(self, x):
-		'''Small function to fix taxid with NCBI, round up to nearest million in internal id'''
-		return int(math.ceil(x / 1000000.0)) * 1000000
+		'''The id of the first new node: the ids of a database are numbered from 1 and a new node gets
+			the next id after the highest one. They were rounded up to the next million (a flextaxd
+			convention for NCBI ids), which gave a small scheme the ids 1000000 and above.'''
+		return int(x)
 
 	def add_link(self, child=None, parent=None, rank="n"):
 		'''Add relationship in tree'''
@@ -264,10 +271,10 @@ class ModifyTree(object):
 		'''Handle file modification'''
 		logger.debug(modfile)
 		logger.info("Parse modification file...")
-		with open(modfile, "r") as f:
+		with open_source(modfile) as f:
 			headers = f.readline().strip().split(self.sep)
 			if replace_parent:
-				new_root = f.readline().strip().split(self.sep)
+				new_root = [field.strip() for field in f.readline().strip().split(self.sep)]
 				if len(new_root) == 2:
 					new_root.append("no rank")
 				if len(new_root) != 3 or not new_root[0].strip(): ## branch root row must name parent, child and level (issue #81)
@@ -288,7 +295,7 @@ class ModifyTree(object):
 			for row in f:
 				if row.strip() == "":
 					continue
-				line = row.strip().split(self.sep)
+				line = [field.strip() for field in row.strip().split(self.sep)]
 				if len(line) == 2:
 					line +=["no rank"] ## Add no specified rank to line
 				if len(line) != 3: ## malformed row, too few or too many columns (issue #82)
@@ -358,6 +365,11 @@ class ModifyTree(object):
 			self.file_mod(input,self.replace_parent)
 		else:
 			raise InputError("Wrong modification input database or file must be supplied")
+		if self.replace and not self.new_links:
+			'''--replace removes every node of the branch that the modification does not give again,
+				so a modification without rows would delete the whole branch'''
+			raise InputError("The modification has no rows, --replace would remove the whole branch below {parent}. "
+				"Give the nodes that replace it, or leave out --replace".format(parent=self.parent))
 		### get links from current database
 		logger.info("Old links keep from duplicated taxonomy nodes {nodes}".format(nodes=self.do_not_delete_old))
 		self.old_nodes = self.existing_nodes - (self.new_nodes)
@@ -382,12 +394,12 @@ class ModifyTree(object):
 			logger.info("Modification type is file...")
 			if self.replace_parent:  ## Update the name of the parent to match with parent of "incoming" file
 				logger.info("Replace parent option initiated,  change the name of parent in the database to allow merge")
-				with open(self.modfile, "r") as f:
+				with open_source(self.modfile) as f:
 					headers = f.readline().strip().split(self.sep)
 					branchroot = f.readline().strip().split(self.sep)
 					if not branchroot[0].strip(): ## replace_parent needs the branch root name in the first data row (issue #83/#84)
 						raise InputError("The replace_parent option needs the first data row of the modification file to contain the branch root name, none was found")
-					new_name = branchroot[0]
+					new_name = branchroot[0].strip()
 					#logger.info("New root name: {nn}".format(nn=new_name))
 				logger.info("New name of parent, changing from {oldp}, to {newp}".format(oldp=self.parent, newp=new_name))
 				self._name_update(self.parent,new_name)
@@ -414,7 +426,7 @@ class ModifyTree(object):
 		updated = 0
 		added = 0
 		skipped = []
-		with open(genomeid2taxid) as f:
+		with open_source(genomeid2taxid) as f:
 			for row in f:
 				try:
 					if len(row.strip().split(self.sep)) > 2:
@@ -534,7 +546,7 @@ class ModifyTree(object):
 		logger.info("Update node names in the database from {refdict}".format(refdict=refdict))
 		updated = 0
 		added = 0
-		with open(refdict) as f:
+		with open_source(refdict) as f:
 			for row in f:
 				try:
 					old_name,name = row.strip().split(self.sep)

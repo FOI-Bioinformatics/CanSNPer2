@@ -4,6 +4,7 @@ Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 '''
 
 import os
+import re
 import shutil
 import hashlib
 import tempfile
@@ -63,6 +64,26 @@ MauveError = AlignmentError
 class CanSNPer2Error(Error):
 	"""docstring for CanSNPer2Error"""
 	pass
+
+SEQUENCE_LINE = re.compile(r"^[ACGTUNRYSWKMBDHVacgtunryswkmbdhv*-]+$") ## a line of nucleotide sequence
+
+
+def ensure_directory(path, option):
+	'''Create the folder when it is missing and check that it can be written to. A path that is a file,
+		or a folder without write permission, used to be found only after the alignments were made.
+		makedirs with exist_ok is safe when another run creates the same folder at the same time.
+		Raises CanSNPer2Error naming the option.'''
+	if os.path.exists(path) and not os.path.isdir(path):
+		raise CanSNPer2Error("{option} {path} is not a directory; give another path".format(option=option, path=path))
+	try:
+		os.makedirs(path, exist_ok=True)
+	except FileExistsError:
+		raise CanSNPer2Error("{option} {path} is not a directory; give another path".format(option=option, path=path))
+	except OSError as e:
+		raise CanSNPer2Error("{option} {path} cannot be created: {error}; give another path".format(option=option, path=path, error=e.strerror or e))
+	if not os.access(path, os.W_OK | os.X_OK):
+		raise CanSNPer2Error("{option} {path} is not writable; change its permissions or give another path".format(option=option, path=path))
+
 
 class CanSNPer2(object):
 	"""docstring for CanSNPer2"""
@@ -124,14 +145,24 @@ class CanSNPer2(object):
 		self.workdir = kwargs.get("workdir","./")
 		if not os.path.exists(self.workdir):
 			logger.info("Creating working directory {workdir}".format(workdir=self.workdir))
-			os.makedirs(self.workdir)
+		ensure_directory(self.workdir, "--workdir")
 
 		'''Resolve the working paths against workdir instead of changing the
 			process working directory, which is global state (issue #2)'''
 		self.tmpdir = os.path.join(self.workdir, tmpdir)
 		if not os.path.exists(self.tmpdir):
 			logger.info("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
-			os.makedirs(self.tmpdir)
+		ensure_directory(self.tmpdir, "--tmpdir")
+		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
+		if not os.path.exists(self.logdir):
+			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
+		ensure_directory(self.logdir, "--logdir")
+
+		self.outdir = os.path.join(self.workdir, kwargs.get("outdir","results"))
+		if not os.path.exists(self.outdir):
+			logger.info("Creating output directory {outdir}".format(outdir=self.outdir))
+		ensure_directory(self.outdir, "--outdir")
+
 		'''An aligning run works in its own run_* directory below the shared tmpdir. All runs
 			used to write their staged genomes and alignments straight into the shared folder
 			(by default /tmp/CanSNPer2), and cleanup() removed every file in it, so two runs on
@@ -148,26 +179,21 @@ class CanSNPer2(object):
 			self.own_tmpdir = True
 			logger.info("Temporary files of this run are written to {tmpdir}".format(tmpdir=self.tmpdir))
 
-		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
-		if not os.path.exists(self.logdir):
-			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
-			os.makedirs(self.logdir)
-
-		self.outdir = os.path.join(self.workdir, kwargs.get("outdir","results"))
-		if not os.path.exists(self.outdir):
-			logger.info("Creating output directory {outdir}".format(outdir=self.outdir))
-			os.makedirs(self.outdir)
-
 		self.refdir = os.path.join(self.workdir, self.refdir)
 
 		'''Fetch other key word arguments'''
 		self.save_tree = kwargs.get("save_tree",False)
 		'''tree annotations for the html views: a file path (load_annotations parses it) or
-			an already built list of {node, kind, rank, label} dicts'''
+			an already built list of {node, kind, rank, label} dicts. A file that cannot be read
+			must not leave the run directory made above behind.'''
 		annotations = kwargs.get("annotations",None)
 		if isinstance(annotations,str):
 			from CanSNPer2.modules.NewickTree import load_annotations
-			annotations = load_annotations(annotations)
+			try:
+				annotations = load_annotations(annotations)
+			except BaseException:
+				self.cleanup()
+				raise
 		self.annotations = annotations or []
 		self.keep_temp = kwargs.get("keep_temp",False)
 		self.keep_going = keep_going
@@ -252,6 +278,16 @@ class CanSNPer2(object):
 				"against them; export it with CanSNPer2-database --export, correct the files and build it again".format(
 				db=self.database, e=e))
 		return self.reference_snps
+
+	def check_aligner(self):
+		'''Stop before the first sample when the aligner program cannot be found: this used to show
+			up after the run had started, once for every sample, as a raw "No such file" error.
+			--skip_alignment reads alignments that exist and needs no aligner.'''
+		if self.skip_alignment or self.aligner.available():
+			return
+		raise CanSNPer2Error("The aligner {name} was not found (looked for {program}); install it, give its location with "
+			"--aligner_path, or choose another --aligner. CanSNPer2-test lists the aligners that are installed".format(
+			name=self.aligner.name, program=self.aligner.executable()))
 
 	def check_start(self):
 		'''Check the database, and the reference folder when the query is aligned, before any
@@ -485,8 +521,19 @@ class CanSNPer2(object):
 		dirty = False
 		lines = []
 		names = []
-		with open(path) as seq_in:
+		with open(path,"rb") as raw:
+			start = raw.read(3)
+		if start[:2] == b"\x1f\x8b":
+			raise CanSNPer2Error("{path} is gzip-compressed, decompress it first".format(path=path))
+		if start == b"\xef\xbb\xbf":
+			dirty = True ## a byte order mark is removed, aligners read it as part of the first header
+		'''utf-8-sig drops a byte order mark, and bytes that are not UTF-8 (a latin-1 character in a header)
+			become U+FFFD instead of stopping the run with a decoding error; sequence characters
+			that are not ACGT become N below in any case'''
+		with open(path,encoding="utf-8-sig",errors="replace") as seq_in:
 			for line in seq_in:
+				if "\ufffd" in line:
+					dirty = True
 				if line.startswith(">"):
 					lines.append(line)
 					words = line[1:].split()
@@ -506,6 +553,14 @@ class CanSNPer2(object):
 			a query with two sequences of the same name gave bases and positions of the wrong
 			contig. References are checked once per run in check_reference_file.'''
 		if kind == "query":
+			'''an empty file, a file without a header and a header without sequence gave a silent NA result'''
+			if not lines:
+				raise CanSNPer2Error("query {path} is empty; give a FASTA file".format(path=path))
+			if not any(line.startswith(">") for line in lines):
+				raise CanSNPer2Error("query {path} has no FASTA header (a line starting with \">\"); give a FASTA file, "
+					"or a list of file paths as the only query argument".format(path=path))
+			if not any(not line.startswith(">") for line in lines):
+				raise CanSNPer2Error("query {path} has a header but no sequence".format(path=path))
 			problem = duplicate_names(names)
 			if problem:
 				raise CanSNPer2Error("query {path} has {problem}; rename them, for example with seqkit rename".format(path=path, problem=problem))
@@ -538,7 +593,7 @@ class CanSNPer2(object):
 		names = []     # (reference, query) of each command
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
-		query_file = self.stage_input(self.clean_input_fasta(query,"query"),"query")
+		query_file = self.not_an_option(self.stage_input(self.clean_input_fasta(query,"query"),"query"))
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
@@ -550,7 +605,7 @@ class CanSNPer2(object):
 				reference folder fails before this point (a known defect, tracked separately).'''
 			if not self.skip_alignment or os.path.isfile(ref_path):
 				self.check_reference_file(ref_path, ref_name)
-			ref_file = self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref")
+			ref_file = self.not_an_option(self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref"))
 			commands.append(self.aligner.command(ref_file, query_file, output))
 			if not self.skip_alignment:
 				self.aligner.prepare(ref_file, query_file, output)
@@ -559,6 +614,11 @@ class CanSNPer2(object):
 			self.alignment_files.append(output)        ## the alignment files are read later
 			self.alignment_references.append(ref_name)
 		return commands,logs,names
+
+	def not_an_option(self, path):
+		'''a relative path that starts with "-" (a query file named -x.fasta) was read by the aligner
+			as an option; it is passed as ./-x.fasta'''
+		return os.path.join(".", path) if path.startswith("-") else path
 
 	def create_mauve_command(self,query,references=[]):
 		'''the name from the time progressiveMauve was the only aligner'''
@@ -597,12 +657,50 @@ class CanSNPer2(object):
 			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
-		final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations)
+		try:
+			final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations)
+		finally:
+			newickTree.close()
 		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
 		return final_snp
 
+	def is_list_file(self,path):
+		'''A query list is an existing text file whose first non-blank line is not a FASTA header
+			(">"); a FASTA file is told from it by its content, not by its file name. Empty and
+			gzip-compressed files are not lists, the FASTA checks name them.'''
+		if not os.path.isfile(path):
+			return False
+		try:
+			with open(path,"rb") as handle:
+				head = handle.read(4096)
+		except OSError:
+			return False
+		head = head[3:] if head.startswith(b"\xef\xbb\xbf") else head
+		head = head.lstrip()
+		return bool(head) and not head.startswith((b">", b"\x1f\x8b"))
+
+	def resolve_queries(self,queries):
+		'''The query files of the run. A file whose first non-blank line is not a FASTA header is a
+			query list, one file path per line; it must be the only query argument. All other
+			arguments are query FASTA files, whatever their file name.'''
+		lists = [q for q in queries if self.is_list_file(q)]
+		if not lists:
+			return list(queries)
+		if len(queries) > 1:
+			raise CanSNPer2Error("{lst} is a query list (it does not start with a FASTA header) and a list must be the only query argument, "
+				"not combined with {n} other query argument(s); put all files in the list, or give the FASTA files without a list".format(
+				lst=lists[0], n=len(queries)-1))
+		logger.info("A query list was found, reading file paths from {q}".format(q=lists[0]))
+		paths = self.read_query_textfile_input(lists[0])
+		'''a FASTA file without its header line is read as a list too; its lines are sequence, not
+			file paths, and each was reported as a missing query file'''
+		if all(SEQUENCE_LINE.match(line) for line in paths[:20]) and not any(os.path.exists(line) for line in paths[:20]):
+			raise CanSNPer2Error("{lst} has no FASTA header: its lines are sequence, not file paths of a query list; "
+				"add a header line (>name) before the sequence".format(lst=lists[0]))
+		return paths
+
 	def read_query_textfile_input(self,query_file):
-		'''If query input is a text file, parse file
+		'''Read a query list: one file path per line.
 
 			query_file is the query list from the command line, so the text file is its
 			first entry; passing the list itself to open() raised TypeError and the
@@ -613,7 +711,7 @@ class CanSNPer2(object):
 		with open(query_file, "r") as f:
 			query = [query.strip() for query in f if query.strip()]
 		if not query:
-			raise CanSNPer2Error("The query input file {query_file} contained no filepaths".format(query_file=query_file))
+			raise CanSNPer2Error("The query input file {query_file} is empty, it contained no filepaths".format(query_file=query_file))
 		return query
 
 	def cleanup(self):
@@ -829,6 +927,10 @@ class CanSNPer2(object):
 		unique, seen, clashes = [], {}, {}
 		for q in queries:
 			name = self.sample_name(q)
+			if not name:
+				raise CanSNPer2Error("{q} gives an empty sample name (samples are named after the file name without its extension); rename the file".format(q=q))
+			if name == "summary" and self.summary and self.save_tree:
+				raise CanSNPer2Error("{q} gives the sample name summary, whose tree would overwrite the summary tree of --summary; rename the file".format(q=q))
 			real = os.path.realpath(q)
 			if name in seen:
 				if seen[name] == real:
@@ -842,6 +944,24 @@ class CanSNPer2(object):
 			raise CanSNPer2Error("Samples are named after their file name, which must be unique: {clashes}; rename one or type them into separate --outdir".format(
 					clashes="; ".join("{name} = {files}".format(name=name, files=", ".join(files)) for name, files in clashes.items())))
 		return unique
+
+	def query_record(self):
+		'''the file next to the alignments of the current sample that records the sha256 of its query'''
+		return os.path.join(self.tmpdir, "{name}.query_sha256".format(name=self.query_name))
+
+	def check_alignment_query(self, q):
+		'''--skip_alignment finds the alignments by sample name only, so a different file with the same
+			name was typed from them. Alignments from versions that did not record their query are
+			read as before.'''
+		record = self.query_record()
+		if not os.path.isfile(record):
+			logger.info("{tmpdir} does not record which query {name} was aligned from (older version)".format(tmpdir=self.tmpdir, name=self.query_name))
+			return
+		with open(record) as handle:
+			recorded = handle.read().strip()
+		if recorded != self.query_sha256:
+			raise CanSNPer2Error("the alignments of {name} in {tmpdir} were made from a different query file; align {q} again without --skip_alignment".format(
+				name=self.query_name, tmpdir=self.tmpdir, q=q))
 
 	def file_sha256(self, path):
 		digest = hashlib.sha256()
@@ -865,6 +985,22 @@ class CanSNPer2(object):
 	def query_source_line(self, query):
 		'''the trailer line that records which input a result file was made from'''
 		return "Query file: {path} sha256:{sha}".format(path=os.path.abspath(query), sha=self.query_sha256)
+
+	def settings_line(self):
+		'''the trailer line that records the database and the settings a result was made with:
+			a result file from another database or another threshold was reused without a word'''
+		if getattr(self, "_database_sha256", None) is None:
+			self._database_sha256 = self.file_sha256(self.database)
+		return "Typing settings: database sha256:{sha} min_required_hits={hits} strictness={strict} mask={mask}".format(
+			sha=self._database_sha256, hits=self.min_required_hits, strict=self.strictness, mask=self.mask)
+
+	def read_result_settings(self, resultfile):
+		'''the settings line of a result file, None for files from versions that did not record it'''
+		with open(resultfile) as handle:
+			for row in handle:
+				if row.startswith("Typing settings:"):
+					return row.rstrip("\n")
+		return None
 
 	def read_result_file(self,resultfile):
 		'''Read the final SNP and the SNP path from a sample's result file, used for samples
@@ -929,21 +1065,40 @@ class CanSNPer2(object):
 		except ValueError as e:
 			logger.warning("No results overview written: {error}".format(error=e))
 			return
-		dashboard = newickTree.write_dashboard([self.sample_reports[name] for name in self.sample_reports],
-				"{outdir}/summary.html".format(outdir=self.outdir), self.annotations)
+		try:
+			dashboard = newickTree.write_dashboard([self.sample_reports[name] for name in self.sample_reports],
+					"{outdir}/summary.html".format(outdir=self.outdir), self.annotations)
+		finally:
+			newickTree.close()
 		logger.info("Results overview: open {dashboard} in a browser".format(dashboard=dashboard))
 
 	def run(self,database):
-		'''Run CanSNPer2'''
+		'''Run CanSNPer2. On a failure the run directory is removed unless --keep_temp is set; an
+			unexpected error used to leave it behind.'''
+		try:
+			return self._run(database)
+		except BaseException:
+			if not self.keep_temp:
+				self.cleanup()
+			raise
+
+	def _run(self,database):
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
 		if len(self.query) > 0:
-			'''Read query input file if a txt file is supplied insead of fasta files'''
-			if self.query[0].endswith(".txt"):
-				logger.info("Textfile input was found, parsing filepaths in {q} file".format(q=self.query[0]))
-				self.query=self.read_query_textfile_input(self.query)
+			'''A query list file (file paths, one per line) is read, see resolve_queries'''
+			self.query = self.resolve_queries(self.query)
 			self.query = self.check_sample_names(self.query)
+			'''a missing query used to be found only after the queries before it were aligned'''
+			unusable = [q for q in self.query if not os.path.isfile(q)]
+			if unusable and not self.keep_going:
+				shown = ", ".join(unusable[:5]) + (" and {n} more".format(n=len(unusable)-5) if len(unusable) > 5 else "")
+				raise CanSNPer2Error("{n} query file(s) were not found or are not files: {files}".format(n=len(unusable), files=shown))
 			'''the database and the reference folder are checked once, before the first sample'''
 			self.check_start()
+			'''the aligner is checked only when a sample will be aligned: a run whose samples all have a
+				result from an earlier run (made again for a summary, for example) needs no aligner'''
+			if self.rerun or any(not os.path.exists(os.path.join(self.outdir, "{name}_snps.txt".format(name=self.sample_name(q)))) for q in self.query):
+				self.check_aligner()
 
 			'''Main function of CanSNPer2
 					1. Align sequences with the selected aligner (progressiveMauve by default)
@@ -965,6 +1120,8 @@ class CanSNPer2(object):
 					self.query_name = self.sample_name(q)  ## get name of file and remove ending
 
 					qfile = q.rsplit("/")[-1]   ## Remove path from query name
+					if os.path.isdir(q):
+						raise CanSNPer2Error("Input file: {qfile} is a directory, not a FASTA file".format(qfile=q))
 					if not os.path.exists(q):
 						raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
 
@@ -978,6 +1135,10 @@ class CanSNPer2(object):
 						if old_sha is not None and old_sha != self.query_sha256:
 							raise CanSNPer2Error("{outputfile} exists for a different input ({old}); use --rerun to replace it or choose another --outdir".format(
 									outputfile=outputfile, old=old_path or "unknown file"))
+						old_settings = self.read_result_settings(outputfile)
+						if old_settings is not None and old_settings != self.settings_line():
+							raise CanSNPer2Error("{outputfile} was made with a different database or settings ({old}); use --rerun to replace it or choose another --outdir".format(
+									outputfile=outputfile, old=old_settings.split(":",1)[1].strip()))
 						if old_sha is None:
 							logger.info("{outputfile} does not record its input (older version), it is used again as it is".format(outputfile=outputfile))
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
@@ -996,8 +1157,13 @@ class CanSNPer2(object):
 					'''For each query fasta align to all CanSNP references the reference folder
 						with --skip_alignment the align function only lists the alignment file paths
 					'''
+					if self.skip_alignment:
+						self.check_alignment_query(q)
 					alignment_files = self.align(q)
 					logger.debug(alignment_files)
+					if alignment_files and not self.skip_alignment:
+						with open(self.query_record(), "w") as record:
+							print(self.query_sha256, file=record)
 					if len(alignment_files) == 0: ## if keep going is set and the aligner exits with an error continue to next sequence
 						logger.debug("{program} exited with a non zero exit status, continue with next sample!".format(program=self.aligner.name))
 						logger.warning("{program} error skip {sample}".format(program=self.aligner.name,sample=q))
@@ -1014,12 +1180,11 @@ class CanSNPer2(object):
 						SNPS,SNP_info,called_snps = self.find_snps_multiproc(xmfa_obj=alignment_reader,xmfa_files=alignment_files,export=True,references=list(self.alignment_references))
 					except FileNotFoundError as e:
 						'''the message has to carry the reason: the default log level only shows
-							warnings, and the folder that was searched is what the user needs (issue #176, #177)'''
-						logger.warning("One or several xmfa files were not found for {qfile}, continue with next file: {error}".format(qfile=qfile,error=e))
-						self.skipped[self.query_name] = str(e)
-						self.add_sample_report(self.query_name,"failed","NA","NA",["alignment files missing: {error}".format(error=e)])
+							warnings, and the folder that was searched is what the user needs (issue #176, #177).
+							A sample without its alignments is a failed sample: it stops the run unless
+							--keep_going is set, as other failures do, instead of being skipped quietly.'''
 						self.alignment_files = []
-						continue
+						raise CanSNPer2Error("alignment files of {qfile} are missing: {error}".format(qfile=qfile,error=e)) from e
 					'''If file export is requested print the result for each SNP location to file'''
 					if self.export:
 						outputfile = "{outdir}/{xmfa}_not_called.txt".format(outdir=self.outdir,xmfa=self.query_name)
@@ -1042,7 +1207,19 @@ class CanSNPer2(object):
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
 						tree_result = (False,"No SNP call was produced.",[],[])
 					final_snp,message,called,no_data_snps = tree_result
-					self.result_paths[self.query_name] = ";".join([snp[1] for snp in called]) if called else "NA"
+					'''The SNP path of a confirmed call is the chain of the final SNP: the called SNPs from the
+						root of the tree down to the final SNP. Derived SNPs that were called outside that chain
+						(a competing branch) are not part of the path, they are listed in the dashboard
+						report for review. The table of called SNPs keeps one row for every called SNP.
+						Without a confirmed call (NA) the path lists all called SNPs, as before.'''
+					called_names = [snp[1] for snp in called] if called else []
+					path_names = called_names
+					off_chain = []
+					if final_snp and final_snp[2][0] and len(final_snp) > 5:
+						chain = final_snp[5]
+						path_names = [name for name in chain if name in set(called_names)]
+						off_chain = sorted(name for name in called_names if name not in set(chain))
+					self.result_paths[self.query_name] = ";".join(path_names) if path_names else "NA"
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
@@ -1053,9 +1230,10 @@ class CanSNPer2(object):
 									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 									for snp in called:
 										print("\t".join(self.csnpdict[snp[1]]),file=called_out)
-								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called])),file=called_out)
+								print("SNP path: {path}".format(path=";".join(path_names)),file=called_out)
 								print("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]),file=called_out)
 								print(self.query_source_line(q),file=called_out)
+								print(self.settings_line(),file=called_out)
 						logger.info("Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1]))
 					else:
 						if self.export:
@@ -1070,9 +1248,10 @@ class CanSNPer2(object):
 									print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 									for row in called_rows:
 										print("\t".join(row),file=called_out)
-								print("SNP path: {path}".format(path=";".join([snp[1] for snp in called]) if called else "NA"),file=called_out)
+								print("SNP path: {path}".format(path=";".join(path_names) if path_names else "NA"),file=called_out)
 								print("Final SNP: {snp}".format(snp=SNP), file=called_out)
 								print(self.query_source_line(q),file=called_out)
+								print(self.settings_line(),file=called_out)
 							logger.info(message)
 					'''SNP positions of the tree that no alignment carried a base for had no data at all,
 						and were missing from both result files, so the only place they showed up was the
@@ -1092,7 +1271,7 @@ class CanSNPer2(object):
 						manual look (positions on the path with no alignment data, SNPs flagged at an
 						alignment edge, a competing unconfirmed path); states/called let the embedded
 						tree paint the sample when it is selected'''
-					called_path = [snp[1] for snp in called] if called else []
+					called_path = path_names
 					edge_flags = set(row[0] for row in SNP_info if len(row) > EDGE_COLUMN and row[EDGE_COLUMN] == "edge")
 					edge_on_path = [s for s in edge_flags if s in set(called_path)]
 					path_missing = final_snp[4] if final_snp and len(final_snp) > 4 else []
@@ -1109,11 +1288,14 @@ class CanSNPer2(object):
 						if severity == "clean":
 							severity = "review"
 						reasons.append("SNPs flagged at an alignment edge on the called path: {ids}".format(ids=", ".join(sorted(edge_on_path))))
+					if off_chain and SNP != "NA":
+						if severity == "clean":
+							severity = "review"
+						reasons.append("{k} derived SNP(s) called outside the path to the final SNP, on another branch: {ids}".format(k=len(off_chain),ids=", ".join(off_chain)))
 					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
 							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),
 							no_data=[row[0] for row in no_data_snps])
-					if self.export:
-						print("{query}: {SNP}".format(query=self.query_name, SNP=SNP))
+					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP)) ## the call is printed whether or not result files are written
 					'''Clean references to aligned xmfa files between queries if several was supplied'''
 					self.alignment_files = []
 				except Exception as e:
@@ -1145,7 +1327,7 @@ class CanSNPer2(object):
 		if len(self.query) > 0:
 			self.write_dashboard()
 		'''Finally clean up temporary folder when all alignments and trees has been printed!'''
-		if not self.keep_temp and len(self.query) > 0: ## if keep temp is turned on do not remove away alignments also if no input files were given
+		if not self.keep_temp: ## a run without queries also removes its (empty) run directory
 			self.cleanup()
 		elif self.own_tmpdir:
 			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip_alignment --tmpdir {tmpdir}".format(tmpdir=self.tmpdir))

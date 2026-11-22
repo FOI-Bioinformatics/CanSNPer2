@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime
 
 '''
@@ -30,13 +31,20 @@ def get_logpath(logdir, tag, now=None):
 
 
 def setup_logging(logdir, tag, level=logging.WARNING, now=None):
-	'''Log to the console and to the log file of this command, and return that path'''
-	logpath = get_logpath(logdir, tag, now=now)
+	'''Log to the console and to the log file of this command, and return that path.
+		When the log folder cannot be made or written (a read-only working directory), one
+		warning is written to stderr, the command logs to stderr only and None is returned.'''
+	handlers = [logging.StreamHandler()]
+	logpath = None
+	try:
+		logpath = get_logpath(logdir, tag, now=now)
+		handlers.insert(0, logging.FileHandler(logpath))
+	except OSError as e:
+		logpath = None
+		print("Warning: the log folder {logdir} cannot be used ({error}), logging to stderr only".format(
+			logdir=logdir, error=e.strerror or e), file=sys.stderr)
 	logging.basicConfig(
 			level=level,
 			format="%(asctime)s %(module)s [%(levelname)-5.5s]  %(message)s",
-		    handlers=[
-		        logging.FileHandler(logpath),
-		        logging.StreamHandler()
-		    ])
+			handlers=handlers)
 	return logpath

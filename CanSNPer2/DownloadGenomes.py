@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import sys, os
 import textwrap
+import time
 import gzip
 import zlib
 import queue
 import shutil
 import tempfile
+import http.client
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 
@@ -26,6 +28,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 120 ## seconds per connection, urlretrieve had no timeout at all (issue #218)
+DOWNLOAD_DEADLINE = 60*60 ## seconds for the whole download of one genome; the timeout above is per read
+
+
+def join_workers(processes, deadline):
+	'''Wait for the download processes, together at most deadline seconds (plus a short margin);
+		processes still running then are stopped. Returns the stopped processes.'''
+	end = time.monotonic() + deadline
+	late = []
+	for p in processes:
+		p.join(max(0, end - time.monotonic()))
+		if p.is_alive():
+			p.terminate()
+			p.join(5)
+			late.append(p)
+	return late
 
 def assembly_report_url(genome_url):
 	'''the assembly report in the same NCBI folder as the genomic fasta file'''
@@ -71,7 +88,8 @@ def rename_sequences(path, names):
 	fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".tmp")
 	try:
 		set_default_mode(tmp) ## the renamed genome gets the mode of open(), not the 0600 of mkstemp
-		with os.fdopen(fd, "w") as out, open(path) as fin:
+		## surrogateescape keeps bytes that are not UTF-8 as they are, so a header is not altered or lost
+		with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as out, open(path, encoding="utf-8", errors="surrogateescape") as fin:
 			for line in fin:
 				if line.startswith(">"):
 					words = line[1:].rstrip("\n").split(None, 1)
@@ -100,8 +118,9 @@ class DownloadGenomes(object):
 		self.database_path = database
 		self.source = source
 		self.directory = directory
-		if not os.path.exists(self.directory):
-			os.makedirs(self.directory)
+		if os.path.exists(self.directory) and not os.path.isdir(self.directory):
+			raise NotADirectoryError("--outdir {d} is not a directory, give a folder for the references".format(d=self.directory))
+		os.makedirs(self.directory, exist_ok=True)
 
 	def get_genomes(self, database=False,source="genbank"):
 		'''The reference genomes of the database, one (accession, assembly name, genome) record per
@@ -122,10 +141,19 @@ class DownloadGenomes(object):
 		logging.info(records)
 		return records
 
-	def retrieve(self, link, target, timeout=DOWNLOAD_TIMEOUT):
-		'''Fetch link into target; urlopen takes a timeout, urlretrieve never did (issue #218)'''
+	def retrieve(self, link, target, timeout=DOWNLOAD_TIMEOUT, deadline=DOWNLOAD_DEADLINE):
+		'''Fetch link into target; urlopen takes a timeout, urlretrieve never did (issue #218). The
+			timeout applies to each read, so a server that keeps sending a little at a time was never
+			stopped; deadline limits the whole download.'''
+		end = time.monotonic() + deadline
 		with urlopen(link, timeout=timeout) as response, open(target,"wb") as out:
-			shutil.copyfileobj(response, out)
+			while True:
+				block = response.read(1 << 20)
+				if not block:
+					break
+				out.write(block)
+				if time.monotonic() > end:
+					raise TimeoutError("the download of {link} did not finish within {minutes:g} minutes".format(link=link, minutes=deadline/60))
 
 	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, snps=None):
 		'''Download genomes from refseq or genbank on request
@@ -141,6 +169,12 @@ class DownloadGenomes(object):
 			if results is not None:
 				results.put((refid, success, reason))
 		sourceD = {"refseq":"F", "genbank": "A"}
+		if not refid or refid in (".", "..") or any(c in str(refid) for c in ("/", "\\", "\0")) or ".." in str(refid):
+			'''the name becomes the file name <refid>.fna in the reference folder'''
+			reason = "the genome name '{refid}' contains a path separator or '..', rename the genome in the references file and build the database again".format(refid=refid)
+			logger.error("Could not download {refid}: {reason}".format(refid=refid, reason=reason))
+			report(False, reason)
+			return
 		if not genome_id:
 			'''a NULL accession raised an AttributeError in the worker, which was reported as a
 				process that ended without reporting, with a traceback'''
@@ -170,8 +204,8 @@ class DownloadGenomes(object):
 			problem = check_reference(ungzipped, refid, snps)
 			if problem is None:
 				logger.debug("Reference file for {refid} already exists!".format(refid=refid))
-				self.link_reference(ungzipped, link, refid)
-				report(True)
+				problem = self.link_reference(ungzipped, link, refid)
+				report(problem is None, problem or "")
 				return
 			logger.warning("Downloading {refid} again: {problem}".format(refid=refid, problem=problem))
 			os.remove(ungzipped)
@@ -181,7 +215,8 @@ class DownloadGenomes(object):
 			temp file next to its final name and only renamed once gzip has read the whole stream:
 			the gzip trailer carries the CRC and the length of the data, so a transfer that was cut
 			short fails here (EOFError) instead of leaving a shorter genome behind'''
-		tmpfile = tempfile.mkstemp(suffix=".fna.gz")[1]
+		fd, tmpfile = tempfile.mkstemp(suffix=".fna.gz")
+		os.close(fd) ## only the name is used, the descriptor was never closed
 		partial = ungzipped + ".part"
 		try:
 			self.retrieve(link_url, tmpfile)
@@ -193,8 +228,16 @@ class DownloadGenomes(object):
 			if source == "refseq":
 				'''the database names sequences by GenBank accession, the RefSeq assembly by NC_ or NZ_'''
 				self.rename_to_genbank(link_url, ungzipped)
-		except (HTTPError,URLError,OSError,EOFError,zlib.error) as e:
-			reason = "the download was incomplete ({error})".format(error=e) if isinstance(e, (EOFError, zlib.error)) else str(e)
+		except Exception as e:
+			'''any failure of the worker is reported with its reason: IncompleteRead and InvalidURL
+				are not OSError, and an exception that is not reported shows only as a process that
+				ended without reporting'''
+			if isinstance(e, (EOFError, zlib.error, http.client.IncompleteRead)):
+				reason = "the download was incomplete ({error})".format(error=e)
+			elif isinstance(e, (HTTPError, URLError, OSError, http.client.HTTPException, ValueError)):
+				reason = str(e)
+			else:
+				reason = "{kind}: {error}".format(kind=type(e).__name__, error=e)
 			logger.error("Could not download {refid} from {link}: {reason}".format(refid=refid,link=link_url,reason=reason))
 			report(False, reason)
 			return
@@ -207,15 +250,16 @@ class DownloadGenomes(object):
 			logger.error("Downloaded {refid}, but {problem}".format(refid=refid, problem=problem))
 			report(False, problem)
 			return
-		self.link_reference(ungzipped, link, refid)
-		report(True)
+		problem = self.link_reference(ungzipped, link, refid)
+		report(problem is None, problem or "")
 
 	def rename_to_genbank(self, link_url, path):
 		'''fetch the assembly report of a RefSeq genome and rename its sequences to the GenBank accessions'''
-		report_file = tempfile.mkstemp(suffix=".txt")[1]
+		fd, report_file = tempfile.mkstemp(suffix=".txt")
+		os.close(fd)
 		try:
 			self.retrieve(assembly_report_url(link_url), report_file)
-			with open(report_file) as fin:
+			with open(report_file, encoding="utf-8", errors="replace") as fin: ## a report that is not UTF-8 is read, not fatal
 				names = genbank_names(fin.read())
 			rename_sequences(path, names)
 		except BaseException:
@@ -227,11 +271,24 @@ class DownloadGenomes(object):
 	def link_reference(self, ungzipped, link, refid):
 		'''the <refid>.fna link CanSNPer2 reads; a run that found the genome already unpacked
 			used to report success without making it'''
+		target = "source/{bname}".format(bname=os.path.basename(ungzipped))
 		if os.path.lexists(link):
-			logger.debug("{link} already exists, skip!".format(link=link))
+			if not os.path.islink(link):
+				return "{link} is a file, not a link to {target}; it was kept, so CanSNPer2 reads that file. Remove it to use the downloaded genome".format(link=link, target=target)
+			if os.readlink(link) == target and os.path.exists(link):
+				logger.debug("{link} already exists, skip!".format(link=link))
+				return
+			'''a link to another genome or to nothing is replaced: the new link is made under a
+				temporary name and renamed over the old one, so the name never goes missing'''
+			logger.warning("{link} pointed to {old}, now {target}".format(link=link, old=os.readlink(link), target=target))
+			tmp_link = "{link}.{pid}.tmp".format(link=link, pid=os.getpid())
+			if os.path.lexists(tmp_link):
+				os.remove(tmp_link)
+			os.symlink(target, tmp_link)
+			os.replace(tmp_link, link)
 			return
 		### symlink target is relative to the link location, so no chdir needed (issue #8)
-		os.symlink("source/{bname}".format(bname=os.path.basename(ungzipped)), link)
+		os.symlink(target, link)
 
 	def run(self):
 		'''Start download and collect what each worker actually managed to fetch (issue #218)'''
@@ -266,8 +323,9 @@ class DownloadGenomes(object):
 			p = _MP_CTX.Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
 			p.start()
 			threads.append(p)
-		for p in threads:
-			p.join() # this blocks until the process terminates
+		'''each worker stops its own download at the deadline; the margin covers unpacking and checking'''
+		for p in join_workers(threads, DOWNLOAD_DEADLINE + 15*60):
+			logger.error("A download process was still running after {minutes:g} minutes and was stopped".format(minutes=(DOWNLOAD_DEADLINE + 15*60)/60))
 		'''the workers are separate processes: this is the only way their outcome
 			reaches the log and the exit code (issue #218)'''
 		reports = {}
@@ -326,6 +384,9 @@ def command():
 	args = parser.parse_args()
 	if not (args.database or args.scheme or args.list_schemes):
 		parser.error("give a database with --database, a scheme with --scheme, or --list_schemes")
+	if args.no_references and not args.scheme:
+		'''with only a database there is nothing to build, the references are all the command does'''
+		parser.error("--no_references skips the download after building a database from --scheme, give --scheme or leave it out")
 	if args.data_dir and (args.repo or args.branch):
 		parser.error("--data_dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
 
@@ -397,11 +458,17 @@ def command():
 		from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 		log_scheme_notice(args.database, logger)
 
+	'''the folder is checked before anything is downloaded: a file in its place was found only when the first genome was unpacked'''
+	if os.path.exists(args.outdir) and not os.path.isdir(args.outdir):
+		logger.error("--outdir {d} exists and is not a directory, give a folder for the references".format(d=args.outdir))
+		print("--outdir {d} is not a directory, give a folder for the references".format(d=args.outdir), file=sys.stderr)
+		exit(1)
 	# create a database connection
 	DG = DownloadGenomes(args.database,args.source,args.outdir)
 	if DG.run():
 		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
 		exit(1)
+	print("Downloaded the reference genomes of {db} from {source} into {d}".format(db=args.database, source=args.source, d=args.outdir))
 
 
 def main():

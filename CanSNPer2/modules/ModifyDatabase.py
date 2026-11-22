@@ -3,16 +3,17 @@
 '''
 
 from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
-from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError
+from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
+from CanSNPer2.modules.SourceCheck import register_genome_names, split_row
 from datetime import date
 import logging
 logger = logging.getLogger(__name__)
 
 class ModifyCanSNPer2Database(ModifyTree):
 	"""ModifyCanSNPer2Database adds a few important functions only nessesary when modifying a database"""
-	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,remove=False,**kwargs):
+	def __init__(self, database, mod_database=False, mod_file=False, separator="\t",verbose=False,parent=False,replace=False,remove=False,annotation=False,references=False,**kwargs):
 		logger.info("Load ModifyFunctions")
-		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace,remove=remove)
+		super().__init__(database, mod_database=mod_database, mod_file=mod_file, separator=separator,verbose=verbose,parent=parent,replace=replace,remove=remove,annotation=annotation,references=references)
 		self.genomes = {}
 		self.today = date.today()
 
@@ -90,7 +91,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 					genomes[key] = genome_i
 		genomes.update(self.genomes)
 		self.genomes = genomes
-		with open(annotation_file) as af:
+		with open_source(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
@@ -106,7 +107,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 			for row in af:
 				if row.strip() == "" or row.strip().startswith("#"):
 					continue
-				data = row.rstrip("\r\n").split("\t")
+				data = split_row(row, len(headers))
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					'''a skipped row used to be a warning only; SourceCheck.check_modification
 						refuses the file before this point, this is the last guard'''
@@ -134,17 +135,22 @@ class ModifyCanSNPer2Database(ModifyTree):
 
 	def load_genome_reference_file(self,reference_file):
 		'''Add new reference genomes from file!'''
-		with open(reference_file) as af:
+		with open_source(reference_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
 			check_source_headers(headers,GENOME_SOURCE_COLUMNS,reference_file)
+			owners = {}
+			for genome, genbank_id, refseq_id in self.taxonomydb.query("SELECT genome, genbank_id, refseq_id FROM snp_references").fetchall():
+				for key in (genome, genbank_id, refseq_id):
+					if key:
+						owners[key] = genome
 			dataArr = []
 			for row in af:
 				if row.strip() == "":
 					continue
 				## only the line end is removed: strip() also removed empty trailing fields, so a
 				## reference without an assembly name was skipped as a short row
-				data = row.rstrip("\r\n").split("\t")
+				data = split_row(row, len(headers))
 				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #89)
 					raise SourceFileError("{file}: short row '{row}'".format(file=reference_file,row=row.strip()))
 				ddict = {}
@@ -152,10 +158,11 @@ class ModifyCanSNPer2Database(ModifyTree):
 					head,val = headers[i],data[i]
 					ddict[head] = val
 				dataArr.append(ddict)
+				register_genome_names(owners, ddict, reference_file)
 				genome_i = self.add_genome(ddict)
-				self.genomes[ddict["genome"]] = genome_i
-				self.genomes[ddict["genbank_id"]] = genome_i
-				self.genomes[ddict["refseq_id"]] = genome_i
+				for column in ("genome", "genbank_id", "refseq_id"):
+					if ddict[column]:
+						self.genomes[ddict[column]] = genome_i
 		self.taxonomydb.commit()
 		return dataArr
 
@@ -166,6 +173,9 @@ class ModifyCanSNPer2Database(ModifyTree):
 			ModifyTree never sets, so every --mod_file run died with an AttributeError (issue #133),
 			the names below follow ModifyTree.parse_modification
 		'''
+		if self.sources_only:
+			logger.info("No change to the tree was given, only SNPs and reference genomes are added")
+			return
 		removed_links = (self.old_links | self.non_overlapping_old_links) - set(self.parent_link)
 		if self.replace:
 			self.taxonomydb.delete_links(removed_links)

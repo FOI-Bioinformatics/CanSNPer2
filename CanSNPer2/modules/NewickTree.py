@@ -20,6 +20,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+_WARNED_NODES = set() ## nodes without a SNP that were already warned about in this process
+
+
 def load_annotations(path):
 	'''Read a tree annotation file: one annotation per line, tab separated
 		<snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]
@@ -697,6 +700,17 @@ if (document.querySelectorAll("#rows tr").length !== samples.length || !svgEl) {
 </html>
 '''
 
+NEWICK_SPECIAL = re.compile(r"[\s(),:;'\[\]]")
+
+
+def quote_newick(name):
+	'''A node name as it is written in a newick tree: a name with whitespace or one of ( ) , : ; [ ]
+		or a single quote is put in single quotes, and a quote inside the name is doubled.'''
+	if NEWICK_SPECIAL.search(name):
+		return "'" + name.replace("'", "''") + "'"
+	return name
+
+
 class NewickNode(object):
 	"""The NewickNode class stores the information of a taxonomy node
 			ID
@@ -734,22 +748,44 @@ class NewickNode(object):
 			else:
 				return "root"
 		elif self.__class__.print_opt == "newick":
-			'''children are rendered in name order: the children container is a set, and its
-				iteration order changes between processes with the python hash seed, which made
-				the newick export (and with it the drawn trees and the release gate's check on
-				them) different from one run to the next'''
-			children = sorted(self.children, key=lambda child: child.name)
-			if len(self.children) > 0 and self.parent:
-				return "({children}){name}".format(name=self.name,children=",".join(str(child) for child in children))
-			elif not self.parent:  #Only the root node has this property
-				return "(({children}){parent})ROOT;".format(children=",".join(str(child) for child in children),parent=self.name)
-			else:
-				return "{name}".format(name=self.name)
+			return self.newick()
 		else:
 			return "{id}: {name}; children: {nchildren} ".format(id=self.id, name=self.name, nchildren = len(self.children))
 
 	def __repr__(self):
 		return "NewickNode()"
+
+	def newick(self):
+		'''The subtree of the node in newick format, written without recursion: a tree of several
+			thousand levels exceeded the recursion limit. Children are rendered in name order: the
+			children container is a set, and its iteration order changes between processes with the
+			python hash seed, which made the newick export (and with it the drawn trees and the
+			release gate's check on them) different from one run to the next. Names with characters
+			that are special in newick are written in single quotes.'''
+		out = []
+		stack = [self]
+		while stack:
+			item = stack.pop()
+			if isinstance(item, str):
+				out.append(item)
+				continue
+			children = sorted(item.children, key=lambda child: child.name)
+			if not item.parent:  #Only the root node has this property
+				tail = ")" + quote_newick(item.name) + ")ROOT;"
+				head = "(("
+			elif children:
+				tail = ")" + quote_newick(item.name)
+				head = "("
+			else:
+				out.append(quote_newick(item.name))
+				continue
+			stack.append(tail)
+			for position, child in enumerate(reversed(children)):
+				if position:
+					stack.append(",")
+				stack.append(child)
+			out.append(head)
+		return "".join(out)
 
 	def add_child(self,child):
 		'''Add a NewickNode object as child'''
@@ -796,6 +832,14 @@ class NewickTree(object):
 	def __repr__(self):
 		return "NewickTree()"
 
+	def close(self):
+		'''close the database connection; one tree is made per sample, and the connections stayed
+			open until the garbage collector freed them'''
+		try:
+			self.database.disconnect()
+		except Exception:
+			pass
+
 	def print(self):
 		print(self.newickTree)
 
@@ -813,7 +857,10 @@ class NewickTree(object):
 			if snp_id != None:
 				nt[id] = snp_id
 			else:
-				logger.warning("#Node has no snp_annotation {node}".format(node=name))
+				'''the tree is read once per sample and again for the dashboard: warn once per node'''
+				if name not in _WARNED_NODES:
+					_WARNED_NODES.add(name)
+					logger.warning("#Node has no snp_annotation {node}".format(node=name))
 				nt[id] = "-"+name+"-"
 		return nt
 
@@ -831,33 +878,46 @@ class NewickTree(object):
 		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
 		return res
 
+	def _attach(self,child,nodes,parent):
+		'''Add the node of child below the node of parent, raises KeyError when the parent has no node yet'''
+		if len(self.c_p_set & set([(child,parent)])) == 0:
+			node = NewickNode(child, nodes[child], self.nodeDict[parent])  		## this works also for root as root has itself as child
+			'''Make sure link to parent was not made before'''
+			self.c_p_set |= set([(child,parent)])
+			self.c_p_set |= set([(parent,child)])
+			self.nodeDict[child] = node
+		else:
+			logger.debug("Link {child}-{parent} already exists, retrieve node!".format(child=child,parent=parent))
+			node = self.nodeDict[child]										## add a reference to the node so that children can be added
+		pnode = self.nodeDict[parent]										## add child to the parent node
+		pnode.add_child(node)
+		logger.debug("NewickNode p:{parent} c: {child} added".format(parent=parent,child=child))
+
 	def new_node(self,child,nodes,parent):
-		'''Function that adds a new node to the newick tree'''
-		try:
-			if len(self.c_p_set & set([(child,parent)])) == 0:
-				node = NewickNode(child, nodes[child], self.nodeDict[parent])  		## this works also for root as root has itself as child
-				'''Make sure link to parent was not made before'''
-				self.c_p_set |= set([(child,parent)])
-				self.c_p_set |= set([(parent,child)])
-				self.nodeDict[child] = node
-			else:
-				logger.debug("Link {child}-{parent} already exists, retrieve node!".format(child=child,parent=parent))
-				node = self.nodeDict[child]										## add a reference to the node so that children can be added
-			pnode = self.nodeDict[parent]										## add child to the parent node
-			pnode.add_child(node)
-		except KeyError:
-			logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add parent".format(parent=parent))
-			parent_link = self.get_parent(parent)
+		'''Function that adds a new node to the newick tree. A parent that has no node yet is added
+			first, walking up the tree table without recursion (a tree of thousands of levels whose
+			ids run against the order of the levels exceeded the recursion limit)'''
+		pending = [(child,parent)]
+		waiting = set([child])
+		while pending:
+			current,current_parent = pending[-1]
+			try:
+				self._attach(current,nodes,current_parent)
+				pending.pop()
+				continue
+			except KeyError:
+				logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add parent".format(parent=current_parent))
+			parent_link = self.get_parent(current_parent)
 			if parent_link is None:	## parent has no link in the tree table, node can not be attached
-				logger.warning("Not adding node {child}: parent {parent} does not exist and has no parent link in the tree table".format(child=child,parent=parent))
+				logger.warning("Not adding node {child}: parent {parent} does not exist and has no parent link in the tree table".format(child=current,parent=current_parent))
 				return
 			t_parent,t_child,rank = parent_link
+			if t_child in waiting:
+				logger.warning("Not adding node {child}: the tree table links {node} to itself through its parents".format(child=current,node=t_child))
+				return
 			logger.debug("Adding parent: {parent} of parent: {child}".format(parent=t_parent,child=t_child))
-			self.new_node(t_child,nodes,t_parent)
-			self.new_node(child,nodes,parent)
-			return
-		logger.debug("NewickNode p:{parent} c: {child} added".format(parent=parent,child=child))
-		return
+			waiting.add(t_child)
+			pending.append((t_child,t_parent))
 
 	def build_tree(self):
 		'''Build newick tree from database
@@ -904,12 +964,13 @@ class NewickTree(object):
 					 "depth": 0 if parent is None else entries[parent]["depth"] + 1}
 			entries.append(entry)
 			return entry["id"]
-		def walk(node, parent):
-			entry_id = add(node.name, parent)
-			for child in sorted(node.children, key=lambda child: child.name):
-				walk(child, entry_id)
 		root_id = add("ROOT", None)
-		walk(self.root, root_id)
+		stack = [(self.root, root_id)]
+		while stack:  ## preorder without recursion, children in name order
+			node, parent = stack.pop()
+			entry_id = add(node.name, parent)
+			for child in sorted(node.children, key=lambda child: child.name, reverse=True):
+				stack.append((child, entry_id))
 		return entries
 
 	def _parent_snp(self,entry,entries):
@@ -920,6 +981,17 @@ class NewickTree(object):
 				return entry["name"]
 			entry = entries[entry["parent"]]
 		return None
+
+	def _chain_names(self,entry,entries):
+		'''the SNP names from the root of the tree down to the entry, the entry included; "-name-" label
+			nodes and the ROOT wrapper are not SNPs and are left out'''
+		names = []
+		while entry["name"] != "ROOT":
+			name = entry["name"]
+			if not (name.startswith("-") and name.endswith("-")):
+				names.append(name)
+			entry = entries[entry["parent"]]
+		return names[::-1]
 
 	def _confirm_path(self,entry,entries,called_snps,snplist):
 		'''Confirm the ACTUAL ancestor chain of the node, from the root of the tree down to the
@@ -1099,8 +1171,9 @@ class NewickTree(object):
 					dist,tsnp,count,on_chain,missing = candidates[0]
 					'''on_chain and missing are appended for the results dashboard: a call that
 						needed the strictness tolerance over positions without data must stand
-						out for manual review; consumers that index 0-2 are unaffected'''
-					called = [dist,tsnp,(True,count),on_chain,missing]
+						out for manual review; the sixth item is the SNP chain from the root to the final SNP;
+						consumers that index 0-2 are unaffected'''
+					called = [dist,tsnp,(True,count),on_chain,missing,self._chain_names(entries[node_index[tsnp]],entries)]
 					msg = "Final SNP called: {snp} ({count}/{n} SNPs on the path called)".format(snp=tsnp,count=count,n=on_chain)
 					if missing:
 						'''a call that relies on the strictness tolerance says which SNPs had no data'''

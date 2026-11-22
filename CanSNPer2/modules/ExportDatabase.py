@@ -6,13 +6,19 @@ Export a CanSNPer2 database to the source files that CanSNPer2-database --create
 	<name>_references.txt  the reference genomes
 
 These are the files kept in CanSNPer2-data/source. Creating a database from an export gives
-the same tree, SNPs and references. The children of a node are written in the order of their
-node ids, so a database built from source files also gets the same node ids back.
+the same tree (node names and links), SNPs and references. The children of a node are written in
+the order of their node ids. The node ids themselves are not kept: a database built from the
+files numbers its nodes in the order of the tree file, which is the same as the original only
+when the original numbered its nodes depth first.
+
+The files are never overwritten. They are written to temporary files in the target folder and
+renamed into place when all of them are written, so a failed export leaves no partial files.
 '''
 
 import logging
 import os
 import sqlite3
+import tempfile
 
 from CanSNPer2.modules.DatabaseConnection import GENOME_SOURCE_COLUMNS
 
@@ -75,6 +81,51 @@ def tree_paths(conn):
 	return paths
 
 
+def write_outputs(contents):
+	'''Write {path: text} so that either all files exist afterwards or none does. An existing
+		file is never replaced. The text goes to temporary files in the folder of each file and
+		is renamed into place when all are written. Raises ExportError.'''
+	for path in contents:
+		if os.path.lexists(path):
+			raise ExportError("{path} already exists, it is not overwritten; choose another folder with "
+				"-o or remove the file".format(path=path))
+	temporary = {}
+	placed = []
+	try:
+		for path, content in contents.items():
+			folder = os.path.dirname(path) or "."
+			os.makedirs(folder, exist_ok=True)
+			fd, partial = tempfile.mkstemp(prefix=".{name}.".format(name=os.path.basename(path)), suffix=".part", dir=folder)
+			temporary[path] = partial
+			with os.fdopen(fd, "w") as out:
+				out.write(content)
+			os.chmod(partial, 0o666 & ~_umask())
+		for path, partial in temporary.items():
+			os.replace(partial, path)
+			placed.append(path)
+	except OSError as e:
+		for path in placed:
+			try:
+				os.remove(path)
+			except OSError:
+				pass
+		raise ExportError("the files could not be written to {folder}: {error}; nothing was exported".format(
+			folder=os.path.dirname(next(iter(contents))) or ".", error=e.strerror or e))
+	finally:
+		for partial in temporary.values():
+			if os.path.exists(partial):
+				try:
+					os.remove(partial)
+				except OSError:
+					pass
+
+
+def _umask():
+	mask = os.umask(0)
+	os.umask(mask)
+	return mask
+
+
 def export_source(database, outdir, name=None):
 	'''Write the tree, SNP and reference source files of database into outdir and return
 		their paths. name is the file prefix, by default the database file name.'''
@@ -96,20 +147,14 @@ def export_source(database, outdir, name=None):
 		raise ExportError("{n} SNP(s) point to a reference genome that is not in the snp_references table: "
 			"{snps}".format(n=len(without_genome), snps=", ".join(map(str, without_genome[:10]))))
 
-	os.makedirs(outdir, exist_ok=True)
 	files = {key: os.path.join(outdir, "{name}_{key}.txt".format(name=name, key=key))
 		for key in ("tree", "snp", "references")}
-	with open(files["tree"], "w") as out:
-		for path in paths:
-			print(*path, sep="\t", file=out)
-	with open(files["snp"], "w") as out:
-		print(*SNP_COLUMNS, sep="\t", file=out)
-		for row in snps:
-			print(*[text(value) for value in row], sep="\t", file=out)
-	with open(files["references"], "w") as out:
-		print(*GENOME_SOURCE_COLUMNS, sep="\t", file=out)
-		for row in references:
-			print(*[text(value) for value in row], sep="\t", file=out)
+	lines = lambda rows: "".join("\t".join(row) + "\n" for row in rows)
+	write_outputs({
+		files["tree"]: lines(paths),
+		files["snp"]: lines([SNP_COLUMNS] + [[text(value) for value in row] for row in snps]),
+		files["references"]: lines([GENOME_SOURCE_COLUMNS] + [[text(value) for value in row] for row in references]),
+	})
 	logger.info("Exported {nodes} nodes, {snps} SNPs and {refs} reference genomes to {outdir}".format(
 		nodes=len(paths), snps=len(snps), refs=len(references), outdir=outdir))
 	return files

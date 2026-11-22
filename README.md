@@ -357,35 +357,40 @@ T/N.1	T.1	A/M.1	M.1
 CanSNPer2 help
 ```
 usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
-               [--summary] [--annotations FILE] [--refdir] [--workdir] [--read_input]
-               [--min_required_hits MIN_REQUIRED_HITS]
-               [--strictness STRICTNESS] [--mask MASK] [--keep_going]
-               [--rerun] [--aligner] [--alignment_timeout MINUTES]
-               [--aligner_path] [--skip_alignment]
-               [--keep_temp] [--tmpdir]
-               [--logdir] [--verbose] [--debug] [--supress]
-               [query [query ...]]
+                       [--summary] [--annotations FILE] [--refdir]
+                       [--allow_missing_references] [--workdir] [--read_input]
+                       [--min_required_hits MIN_REQUIRED_HITS]
+                       [--strictness STRICTNESS] [--mask MASK] [--keep_going]
+                       [--rerun] [--aligner] [--alignment_timeout MINUTES]
+                       [--aligner_path] [--skip_alignment] [--keep_temp]
+                       [--tmpdir] [--logdir] [--verbose] [--debug] [--supress]
+                       [query ...]
 
-CanSNPer2
+CanSNPer2 - type query assemblies (or reads) against a CanSNP database
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
 
 Required arguments:
-  query                 File(s) to align (fasta)
+  query                 File(s) to align (fasta), or one list file with a file
+                        path per line (a file that does not start with '>'; a
+                        list must be the only query argument)
   -db , --database      CanSNP database
 
 Output options:
   -o DIR, --outdir DIR  Output directory
-  --save_tree           Save tree as PDF using ETE3 (default False)
-  --no_snpfiles         Don´t save output files.
+  --save_tree           Save the tree of each sample as <sample>_tree.html
+                        (default False)
+  --no_snpfiles         Do not write the result files (<sample>_snps.txt,
+                        <sample>_not_called.txt); the call is still printed
   --summary             Output a summary file and tree with all called SNPs
                         not affected by no_snpfiles
-  --annotations FILE    TSV file annotating tree nodes: <snp name>  <node|clade>
-                        <rank> <label> [<color>]. 'node' draws a badge under the
-                        SNP dot, 'clade' a dashed box around its whole subtree;
-                        rank is a level carried by the annotation (type,
-                        subspecies, marker...), never a tree depth
+  --annotations FILE    TSV file annotating tree nodes: <snp name>
+                        <node|clade> <rank> <label>[ <color>]. 'node' draws a
+                        badge under the SNP dot, 'clade' a dashed box around
+                        its whole subtree; rank is a level carried by the
+                        annotation (type, subspecies, marker...), never a tree
+                        depth
 
 Run options:
   --refdir              Specify reference directory
@@ -397,10 +402,12 @@ Run options:
   --workdir             Change workdir default (./)
   --read_input          Select if input is reads not fasta
   --min_required_hits MIN_REQUIRED_HITS
-                        Minimum sequential hits to call a SNP!
+                        Minimum number of derived SNPs on the path from the
+                        root to the final SNP for a call (at least 1, default
+                        3)
   --strictness STRICTNESS
-                        Fraction of the SNPs on the path to the final SNP
-                        that must be called; SNPs without alignment data count
+                        Fraction of the SNPs on the path to the final SNP that
+                        must be called; SNPs without alignment data count
                         against it, an ancestral SNP stops the path (0-1,
                         default 0.7)
   --mask MASK           Ignore SNPs closer than this many bases to the edge of
@@ -422,13 +429,9 @@ Run options:
   --keep_temp           keep temporary files
 
 Logging and debug options:
-  --tmpdir              Specify tmp directory default (/tmp/CanSNPer2)
-
-Each run that aligns writes its temporary files to its own directory,
-`<tmpdir>/CanSNPer2/run_<random>`, and removes only that directory when it
-finishes, so several runs can share the same `--tmpdir`. With `--keep_temp` the
-directory is kept and its path is logged; the alignments in it can be reused
-with `--skip_alignment --tmpdir <that directory>`.
+  --tmpdir              Specify tmp directory (default: CanSNPer2 in the
+                        system temporary folder, see TMPDIR; a folder in
+                        --outdir is used when that cannot be written to)
   --logdir              Specify log directory
   --verbose             Verbose output
   --debug               Debug output
@@ -461,6 +464,16 @@ B.6	clade	marker	AMR feature (separated at the B.6 / B.12 split)	#c0392b
   annotations by rank.
 - `color` is optional; without it ranks get a stable palette color. Annotations naming a
   SNP that is not in the database are skipped with a warning.
+
+### Query input
+
+Queries are FASTA files (plain text; gzip-compressed files must be decompressed first). A
+file is a query list instead when its first non-blank line does not start with `>`: the
+list holds one file path per line. This is decided by the content, not by the file name, so
+a FASTA file named `x.txt` is typed as a FASTA file. A query list must be the only query
+argument; combining it with other arguments stops the run with a message. An empty file, a
+file without a `>` header and a file that has a header but no sequence stop the run (or the
+sample, with `--keep_going`) with a message naming the file.
 
 ### Sample and sequence names
 
@@ -507,6 +520,13 @@ The tables `x_snps.txt` and `x_not_called.txt` have the columns `Name`, `Referen
 `Target base` and `Edge flag`. `Sequence` and `Pos` are the reference sequence and the
 position on it. The columns `ReferenceSeq` and `ReferenceSeqPosition` of version 2.2 are
 removed, as `Sequence` and `Pos` now carry that information.
+
+`x_snps.txt` has one table row for every called SNP, followed by the line `SNP path:`
+and the line `Final SNP:`. For a called sample the SNP path is the chain of the final SNP,
+the called SNPs from the root of the tree down to the final SNP. Derived SNPs that were
+called outside that chain, on a competing branch, are not in the path; the sample is marked
+`review` in `summary.html` with a reason that names them. For a sample that is not called
+the path lists all called SNPs.
 
 ### Upgrading from 2.2
 

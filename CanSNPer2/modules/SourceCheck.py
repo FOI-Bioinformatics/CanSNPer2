@@ -18,12 +18,11 @@ check_modification() checks the files given to modify an existing database again
 nodes and the reference genomes that database already holds.
 '''
 
-import gzip
 import re
 import sqlite3
 from collections import Counter, OrderedDict
 
-from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT
+from CanSNPer2.modules.DatabaseConnection import ANNOTATION_SOURCE_COLUMNS, GENOME_SOURCE_COLUMNS, JOINED_FORMAT_HINT, SourceFileError, open_source
 
 BASES = ("A", "C", "G", "T")
 ## ASCII digits only: str.isdigit() also accepts characters such as superscripts
@@ -32,12 +31,14 @@ POSITION_RE = re.compile(r"^[0-9]+$")
 COMMENT_COLUMNS = ("comment", "comments", "note", "notes", "free text", "free_text")
 ## a GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version
 ACCESSION_RE = re.compile(r"^GC[AF]_[0-9]{9}\.[0-9]+$")
+## the largest position that fits the INTEGER column of the database (a larger value is stored as a REAL)
+MAX_POSITION = 2**31 - 1
+## a genome name is used in file names: letters, digits, dot, underscore and hyphen, no leading dot
+GENOME_NAME_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")
 
 
 def _open(path):
-	if str(path).endswith(".gz"):
-		return gzip.open(path, "rt")
-	return open(path)
+	return open_source(path)
 
 
 def check_tree(path, problems):
@@ -51,12 +52,13 @@ def check_tree(path, problems):
 			if line.strip() == "":
 				continue
 			## the same reading as ReadTaxonomyCanSNPer.parse_taxonomy
-			fields = line.strip().replace("\t", ";").split(";")
-			empty = [i + 1 for i, field in enumerate(fields) if field.strip() == ""]
+			## every name is stripped, as the loader does, so "A " and "A" are one node
+			fields = [field.strip() for field in line.strip().replace("\t", ";").split(";")]
+			empty = [i + 1 for i, field in enumerate(fields) if field == ""]
 			if empty:
 				where = "at the end" if empty == [len(fields)] else "between populated columns"
 				problems.append("{0}:{1}: empty column {2} {3}".format(path, number, empty[0], where))
-				fields = [field for field in fields if field.strip() != ""]
+				fields = [field for field in fields if field != ""]
 				if not fields:
 					continue
 			if root is None:
@@ -83,21 +85,67 @@ def check_tree(path, problems):
 
 
 def _header(handle):
-	'''the header row as the loaders read it'''
-	return handle.readline().lstrip("#").strip().split("\t")
+	'''the header row as the loaders read it, None when the file is empty'''
+	line = handle.readline()
+	if line.strip() == "":
+		return None
+	return line.lstrip("#").strip().split("\t")
 
 
-def check_references(path, problems, known=None, database=None, known_accessions=None):
+def split_row(line, columns):
+	'''The fields of a data row. A row is read as the header is: trailing tabs after the last
+		column are dropped, so a file that ends every line with a tab is read alike. Only empty fields
+		beyond the number of header columns are dropped, an empty last value (such as a reference
+		without an assembly name) is kept.'''
+	data = [value.strip() for value in line.rstrip("\r\n").split("\t")]
+	while len(data) > columns and data[-1] == "":
+		data.pop()
+	return data
+
+
+def duplicate_columns(headers):
+	'''the column names that the header gives more than once'''
+	return [name for name, count in Counter(headers).items() if count > 1]
+
+
+def register_genome_names(owners, row, source):
+	'''Record the names a SNP may use for a genome (the genome column and both accessions) in
+		owners, {name: genome}, and raise SourceFileError when a name already belongs to another
+		genome: a SNP that names that genome would be attached to the wrong one.
+		source: the file or database named in the message'''
+	genome = row["genome"]
+	for column in ("genome", "genbank_id", "refseq_id"):
+		name = row[column]
+		if not name:
+			continue
+		if owners.get(name, genome) != genome:
+			raise SourceFileError("{0}: the name '{1}' ({2} of genome '{3}') is already used for genome '{4}'; "
+				"a genome, a genbank_id and a refseq_id must not repeat the name of another genome".format(
+				source, name, column, genome, owners[name]))
+		owners[name] = genome
+
+
+def check_references(path, problems, known=None, database=None, known_accessions=None, known_names=None):
 	'''Return the names a SNP may use for its genome (the genome column and both
 		accessions, as the loaders accept all three), mapped to the genome name.
 		known: the genome names a database already holds, which a new row must not repeat;
 		known_accessions: {genbank_id: genome} of that database, an accession a new row must
-		not give for another genome; database: the name of that database in the messages'''
+		not give for another genome; known_names: {name: genome} of the names that database accepts
+		(genome and both accessions), a name a new row must not use for another genome;
+		database: the name of that database in the messages'''
 	names = {}
 	genomes = Counter()
 	accessions = {}
-	with open(path) as references:
+	with open_source(path) as references:
 		headers = _header(references)
+		if headers is None:
+			problems.append("{0}: the references file is empty, it needs a header row and one row per genome".format(path))
+			return names
+		repeated = duplicate_columns(headers)
+		if repeated:
+			problems.append("{0}:1: the header names the column(s) {1} more than once".format(
+				path, ", ".join("'{0}'".format(name) for name in repeated)))
+			return names
 		missing = [column for column in GENOME_SOURCE_COLUMNS if column not in headers]
 		if missing:
 			problems.append("{0}:1: the header has no column(s) {1}, it must name {2}".format(
@@ -106,7 +154,7 @@ def check_references(path, problems, known=None, database=None, known_accessions
 		for number, line in enumerate(references, start=2):
 			if line.strip() == "":
 				continue
-			data = line.rstrip("\r\n").split("\t")
+			data = split_row(line, len(headers))
 			if len(data) != len(headers):
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(
 					path, number, len(headers), len(data)))
@@ -114,6 +162,9 @@ def check_references(path, problems, known=None, database=None, known_accessions
 			row = dict(zip(headers, data))
 			genome = row["genome"]
 			genomes[genome] += 1
+			if not GENOME_NAME_RE.match(genome):
+				problems.append("{0}:{1}: genome name '{2}' is not allowed, use letters, digits, '.', '_' and '-' "
+					"only and do not start with '.' (the name is used in file names)".format(path, number, genome))
 			if not ACCESSION_RE.match(row["genbank_id"]):
 				problems.append("{0}:{1}: genbank_id '{2}' is not an assembly accession (GCA_ or GCF_, nine digits "
 					"and a version, such as GCA_000008985.1); CanSNPer2-download needs it to fetch the genome".format(
@@ -131,9 +182,19 @@ def check_references(path, problems, known=None, database=None, known_accessions
 					path, number, accession, genome, known_accessions[accession], database))
 			if known is not None and genome in known:
 				problems.append("{0}:{1}: genome '{2}' is already in {3}".format(path, number, genome, database))
-			for column in ("refseq_id", "genbank_id", "genome"):
-				if row[column]:
-					names[row[column]] = genome
+			for column in ("genome", "genbank_id", "refseq_id"):
+				name = row[column]
+				if not name:
+					continue
+				owner = names.get(name)
+				if owner is None and known_names:
+					owner = known_names.get(name)
+				if owner is not None and owner != genome:
+					problems.append("{0}:{1}: the name '{2}' ({3} of genome '{4}') is already used for genome '{5}'; "
+						"a genome, a genbank_id and a refseq_id must not repeat the name of another genome".format(
+						path, number, name, column, genome, owner))
+				else:
+					names[name] = genome
 	for genome, count in genomes.items():
 		if count > 1:
 			problems.append("{0}: genome '{1}' is listed {2} times".format(path, genome, count))
@@ -147,8 +208,16 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 		already holds, which a new row must not repeat'''
 	snp_ids = Counter()
 	positions = Counter()
-	with open(path) as snps:
+	with open_source(path) as snps:
 		headers = _header(snps)
+		if headers is None:
+			problems.append("{0}: the SNP file is empty, it needs a header row and one row per SNP".format(path))
+			return
+		repeated = duplicate_columns(headers)
+		if repeated:
+			problems.append("{0}:1: the header names the column(s) {1} more than once".format(
+				path, ", ".join("'{0}'".format(name) for name in repeated)))
+			return
 		if "position" in headers and "sequence_position" not in headers:
 			problems.append("{0}:1: this SNP file cannot be used. {1}".format(path, JOINED_FORMAT_HINT))
 			return
@@ -164,14 +233,16 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 			else:
 				break
 		required = len(headers) - optional
+		rows = 0
 		for number, line in enumerate(snps, start=2):
 			if line.strip() == "" or line.strip().startswith("#"):
 				continue
-			data = line.rstrip("\r\n").split("\t")
+			data = split_row(line, len(headers))
 			if not required <= len(data) <= len(headers):
 				expected = str(required) if optional == 0 else "{0} to {1}".format(required, len(headers))
 				problems.append("{0}:{1}: expected {2} columns, found {3}".format(path, number, expected, len(data)))
 				continue
+			rows += 1
 			row = dict(zip(headers, data))
 			snp_id, genome = row["snp_id"], row["genome"]
 			sequence, position = row["sequence"], row["sequence_position"]
@@ -192,6 +263,9 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 					path, number))
 			if not POSITION_RE.match(position) or int(position) < 1:
 				problems.append("{0}:{1}: sequence_position '{2}' is not a positive integer".format(path, number, position))
+			elif int(position) > MAX_POSITION:
+				problems.append("{0}:{1}: sequence_position {2} is larger than {3}, the largest position the "
+					"database can hold".format(path, number, position, MAX_POSITION))
 			elif sequence.strip() != "":
 				positions[(genome, sequence, int(position))] += 1
 				if existing is not None and (genome, sequence, int(position)) in existing[2]:
@@ -202,6 +276,8 @@ def check_snps(path, problems, tree_nodes=None, genomes=None, references_path=No
 					problems.append("{0}:{1}: {2} '{3}' is not one of A, C, G, T".format(path, number, column, base))
 			if derived == ancestral and derived in BASES:
 				problems.append("{0}:{1}: derived and ancestral base are both '{2}'".format(path, number, derived))
+	if rows == 0:
+		problems.append("{0}: the SNP file has a header but no SNP rows, a scheme without SNPs cannot be used".format(path))
 	for snp_id, count in snp_ids.items():
 		if count > 1:
 			problems.append("{0}: snp_id '{1}' is listed {2} times".format(path, snp_id, count))
@@ -254,7 +330,7 @@ def check_modification(database, annotation=None, references=None, name=None):
 	known = set(genomes.values())
 	if references:
 		genomes.update(check_references(references, problems, known=known, database=name,
-			known_accessions=accessions))
+			known_accessions=accessions, known_names=dict(genomes)))
 	if annotation:
 		check_snps(annotation, problems, tree_nodes=tree_nodes, genomes=genomes,
 			references_path=name if not references else "{0} or {1}".format(name, references),

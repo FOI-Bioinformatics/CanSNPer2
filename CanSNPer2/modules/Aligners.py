@@ -129,9 +129,10 @@ class ProgressiveMauve(Aligner):
 			"not free of gaps", so both are retried with every "-" replaced by N (issue #127)'''
 		new_query = os.path.join(tmpdir, os.path.basename(query) + ".tmp")
 		logger.debug("Replacing all '-' with 'N' in {query}, writing copy to {tmp}".format(query=query,tmp=new_query))
-		with open(query, "r") as seq_in, open(new_query, "w") as seq_out:
+		'''read as bytes: a header that is not UTF-8 stopped the retry with a UnicodeDecodeError'''
+		with open(query, "rb") as seq_in, open(new_query, "wb") as seq_out:
 			for line in seq_in:
-				seq_out.write(line.replace("-", "N"))
+				seq_out.write(line.replace(b"-", b"N"))
 		return new_query
 
 

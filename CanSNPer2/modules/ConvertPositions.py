@@ -21,13 +21,14 @@ Two kinds of input are converted:
 '''
 
 import bisect
+import io
 import os
 import shutil
 import sqlite3
 import tempfile
 import logging
 
-from CanSNPer2.modules.ReferenceCheck import read_sequences, listing
+from CanSNPer2.modules.ReferenceCheck import read_sequences, listing, FastaFileError
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.InitiateDatabase import snp_annotation_sql
 from CanSNPer2.modules.FileMode import set_default_mode
@@ -47,11 +48,28 @@ class ConversionError(Exception):
 	pass
 
 
+def read_text(path, newline=None):
+	'''the text of a SNP or references file as a file object. A UTF-8 byte order mark is
+		removed; a gzip-compressed file or one that is not UTF-8 is refused with the name of
+		the file, where the decoder named only the byte it stopped at'''
+	with open(path, "rb") as fin:
+		data = fin.read()
+	if data[:2] == b"\x1f\x8b":
+		raise ConversionError("{path} is gzip-compressed, decompress it first".format(path=path))
+	try:
+		return io.StringIO(data.decode("utf-8-sig"), newline=newline)
+	except UnicodeDecodeError as e:
+		raise ConversionError("{path} is not UTF-8 text ({error}), save it as UTF-8 and run again".format(path=path, error=e))
+
+
 class JoinedReference(object):
 	'''the sequences of a reference fasta file in file order, addressed by joined position'''
 	def __init__(self, path):
 		self.path = path
-		self.records = read_sequences(path)
+		try:
+			self.records = read_sequences(path)
+		except FastaFileError as e:
+			raise ConversionError(str(e))
 		if not self.records:
 			raise ConversionError("The reference file {path} contains no sequences".format(path=path))
 		self.starts = []  ## 0-based joined start of each sequence
@@ -123,6 +141,8 @@ def _convert_position(references, genome, position, derived, ancestral):
 		joined = int(position)
 	except (TypeError, ValueError):
 		return None, "the position {position} is not a whole number".format(position=position)
+	if joined < 1:
+		return None, "the joined position {pos} is not a positive position, positions count from 1".format(pos=joined)
 	located = reference.locate(joined)
 	if located is None:
 		return None, ("joined position {pos} is beyond the end of the joined sequences of {path} "
@@ -164,7 +184,7 @@ def convert_table(source, target, genome_files, sequences=None):
 	placed = set()
 	header = None
 	count = 0
-	with open(source, newline="") as fin:
+	with read_text(source, newline="") as fin:
 		for number, raw in enumerate(fin, start=1):
 			line, ending = _split_ending(raw)
 			if line.strip() == "" or line.startswith("#"):
@@ -196,6 +216,8 @@ def convert_table(source, target, genome_files, sequences=None):
 				continue
 			placed.add(converted[0])
 			count += 1
+			for key in ("derived_base", "ancestral_base"):
+				fields[column[key]] = fields[column[key]].upper() ## --create and --import refuse lower case bases
 			output.append("\t".join(fields[:pos_i] + [converted[0], str(converted[1])] + fields[pos_i + 1:]) + ending)
 	if header is None:
 		raise ConversionError("{source} has no header row".format(source=source))
@@ -243,7 +265,7 @@ def convert_database(source_db, target_db, genome_files, sequences=None, scheme_
 			refused.append("{db}: {snp} (node {node}): {reason}".format(db=source_db, snp=snp_id, node=node_id, reason=reason))
 			continue
 		placed.add(converted[0])
-		converted_rows.append((node_id, snp_id, converted[0], converted[1], ancestral, derived, reference, date, genome_i))
+		converted_rows.append((node_id, snp_id, converted[0], converted[1], str(ancestral).upper(), str(derived).upper(), reference, date, genome_i))
 	if refused:
 		raise ConversionError(_refusal(source_db, refused))
 	partial = _temporary(target_db)
@@ -303,11 +325,37 @@ def database_genomes(path):
 		conn.close()
 
 
+def check_table_format(path):
+	'''Raise ConversionError when a SNP source file is already in the current format, before any
+		reference is fetched'''
+	with read_text(path) as fin:
+		for line in fin:
+			line = line.rstrip("\r\n")
+			if line.strip() == "" or line.startswith("#"):
+				continue
+			if "sequence_position" in line.split("\t"):
+				raise ConversionError("{source} already has a sequence_position column, it is in the current format, "
+					"nothing to convert".format(source=path))
+			return
+
+
+def check_database_format(path):
+	'''Raise ConversionError when a database already stores positions per reference sequence'''
+	conn = sqlite3.connect(path)
+	try:
+		columns = set(row[1] for row in conn.execute("PRAGMA table_info(snp_annotation)").fetchall())
+	finally:
+		conn.close()
+	if "sequence_position" in columns:
+		raise ConversionError("The database {path} already stores positions per reference sequence, it is in the "
+			"current format, nothing to convert".format(path=path))
+
+
 def table_genomes(path):
 	'''the genomes named in the genome column of a source file'''
 	genomes = []
 	header = None
-	with open(path) as fin:
+	with read_text(path) as fin:
 		for line in fin:
 			line = line.rstrip("\r\n")
 			if line.strip() == "" or line.startswith("#"):
@@ -338,7 +386,7 @@ def references_from_file(path):
 	'''{genome: (genbank_id, assembly_name)} from a references source file'''
 	references = {}
 	header = None
-	with open(path) as fin:
+	with read_text(path) as fin:
 		for line in fin:
 			line = line.rstrip("\r\n")
 			if line.strip() == "" or line.startswith("#"):

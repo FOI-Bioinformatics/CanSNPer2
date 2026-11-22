@@ -321,3 +321,37 @@ def test_progressive_mauve_through_the_whole_alignment_step(tmp_path):
 		references=obj.alignment_references)
 	assert states == {"B.1": 1, "B.2": 2, "B.3": 1}
 	assert {row[0]: (row[2], row[3]) for row in info} == {"B.1": ("chr1", "1500"), "B.2": ("chr1", "4500"), "B.3": ("chr2", "2000")}
+
+
+@pytest.mark.parametrize("ref_name,query_name", [
+	("/data/a=b/ref.fna", "/data/q.fna"),
+	("/data/ref.fna", "/data/x=y=z/query.fna"),
+	("/data/a> b/ref.fna", "/data/q.fna"),
+	("/data/ref.fna", "/data/q> r/query.fna"),
+	("/data/=a/ref.fna", "/data/=> q/query.fna"),
+])
+def test_file_paths_with_delimiters_in_sequence_headers(tmp_path, ref_name, query_name):
+	# the sequence headers carry the file paths; "=" and "> " inside them must not split the block
+	rows = [("B.1", 15, "C", "T")]
+	ref, target = pair(11, {5: ("C", "T")})
+	xmfa = tmp_path / "REF_hdr.xmfa"
+	xmfa.write_text("#FormatVersion Mauve1\n============\n> 1:10-20 + {0}\n{1}\n> 1:10-20 + {2}\n{3}\n=\n".format(ref_name, ref, query_name, target))
+	write_table(xmfa)
+	db = tmp_path / "hdr.db"
+	make_db(db, on_sequence(rows))
+	parser = ParseXMFA()
+	snps = parser.run(xmfa=str(xmfa), reference="REF", database=str(db))
+	assert snps == {"B.1": 1}
+
+
+def test_block_terminator_with_text_after_the_equals_sign(tmp_path):
+	rows = [("B.1", 15, "C", "T"), ("B.2", 45, "G", "T")]
+	ref1, target1 = pair(11, {5: ("C", "T")})
+	ref2, target2 = pair(21, {15: ("G", "T")})
+	xmfa = tmp_path / "REF_term.xmfa"
+	xmfa.write_text("#FormatVersion Mauve1\n=\n> 1:10-20 + ref\n{0}\n> 1:10-20 + query\n{1}\n= block 1\n> 1:30-50 + ref\n{2}\n> 1:30-50 + query\n{3}\n=".format(ref1, target1, ref2, target2))
+	write_table(xmfa)
+	db = tmp_path / "term.db"
+	make_db(db, on_sequence(rows))
+	parser = ParseXMFA()
+	assert parser.run(xmfa=str(xmfa), reference="REF", database=str(db)) == {"B.1": 1, "B.2": 1}

@@ -14,8 +14,17 @@ import pytest
 
 import helpers
 from CanSNPer2.DownloadGenomes import DownloadGenomes
+from CanSNPer2.modules.Aligners import ProgressiveMauve
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, sequence_names
+
+
+class InstalledMauve(ProgressiveMauve):
+	'''the run now stops up front when the aligner is not installed; these tests are about what
+		happens after that check, so the program is reported as found'''
+	def available(self):
+		return True
+
 
 GENOME = ">chr1 test\n" + "ACGT" * 250 + "\n"
 
@@ -36,6 +45,7 @@ def project(tmp_path, queries, **kwargs):
 	refdir = tmp_path / "refs"
 	refdir.mkdir(exist_ok=True)
 	(refdir / "REF.fna").write_text(GENOME)
+	kwargs.setdefault("aligner", InstalledMauve())
 	return CanSNPer2(queries, workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
 		database=db, **kwargs), db
 
@@ -52,7 +62,8 @@ def test_different_files_with_the_same_name_stop_before_anything_is_aligned(tmp_
 	obj, db = project(tmp_path, [a, b], keep_going=True)
 	with pytest.raises(CanSNPer2Error, match="x = .*a/x.fasta, .*b/x.fasta"):
 		obj.run(database=db)
-	assert not [f for f in os.listdir(obj.tmpdir) if f.endswith(".xmfa")], "nothing was aligned"
+	# a refused run removes its run directory; if it is kept, it holds no alignment
+	assert not os.path.isdir(obj.tmpdir) or not [f for f in os.listdir(obj.tmpdir) if f.endswith(".xmfa")], "nothing was aligned"
 
 
 def test_the_same_file_given_twice_is_typed_once(tmp_path, caplog):
@@ -157,3 +168,32 @@ def test_a_downloaded_reference_with_duplicate_names_is_reported(tmp_path):
 	refid, ok, reason = results[0]
 	assert not ok and "more than one sequence named chr" in reason
 	assert not os.path.lexists(os.path.join(obj.directory, "Ames.fna"))
+
+
+def test_an_earlier_result_is_used_only_with_the_same_database_and_settings(tmp_path):
+	q = write(tmp_path / "in" / "x.fasta")
+	obj, db = project(tmp_path, [q], keep_going=True)
+	source = "Query file: /elsewhere/x.fasta sha256:{0}\n".format(obj.file_sha256(q))
+	same = obj.settings_line() + "\n"
+	assert same.startswith("Typing settings: database sha256:")
+	# same database and settings: used again
+	result_file(obj, "x", source + same)
+	obj.run(database=db)
+	assert "x" in obj.reused
+	# another database: the sample is refused with the reason
+	obj, db = project(tmp_path, [q], keep_going=True)
+	other = same.replace("database sha256:", "database sha256:0")
+	result_file(obj, "x", source + other)
+	obj.run(database=db)
+	assert "x" not in obj.reused
+	assert "different database or settings" in obj.not_typed["x"]
+	# another threshold: refused as well
+	obj, db = project(tmp_path, [q], keep_going=True, min_required_hits=2)
+	result_file(obj, "x", source + same.replace("min_required_hits=2", "min_required_hits=3"))
+	obj.run(database=db)
+	assert "different database or settings" in obj.not_typed["x"]
+	# --rerun replaces it
+	obj, db = project(tmp_path, [q], keep_going=True, rerun=True)
+	result_file(obj, "x", source + other)
+	obj.run(database=db)
+	assert "different database or settings" not in obj.not_typed.get("x", "")
