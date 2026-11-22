@@ -197,7 +197,7 @@ function render(){
 \t\tif (!n || n.y === undefined || !keep(n)) { return; }
 \t\tvar col = annColor(a);
 \t\tvar cx0 = n.x, cx1 = n.x, cy0 = n.y, cy1 = n.y;
-\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); })(n);
+\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); }); })(n);
 \t\tparts.push('<rect x="' + (cx0 - 16) + '" y="' + (cy0 - ROW) + '" width="' + (cx1 - cx0 + 32) + '" height="' + (cy1 - cy0 + 2 * ROW) + '" rx="12" fill="' + col + '" fill-opacity="0.08" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="6,4" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
 \t\tparts.push('<text x="' + (cx0 - 12) + '" y="' + (cy0 - ROW + 2) + '" fill="' + col + '" font-weight="700" font-size="12">' + esc(a.label) + "</text>");
 \t});
@@ -380,7 +380,8 @@ input[type="checkbox"] { width: 13px; height: 13px; accent-color: #3a7d5c; }
 #detail a { color: #2563eb; }
 #search { margin: 8px 12px; padding: 6px 9px; border: 1px solid #d4d9de; border-radius: 7px; font: inherit; font-size: 13px; }
 #tableWrap { flex: 1; overflow-y: auto; }
-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; table-layout: fixed; }
+td.cut { overflow-wrap: anywhere; }
 th { position: sticky; top: 0; background: #f4f6f8; text-align: left; padding: 6px 8px; font-weight: 600; border-bottom: 1px solid #e3e6e9; }
 td { padding: 5px 8px; border-bottom: 1px solid #eef1f3; vertical-align: top; }
 tr.row { cursor: pointer; }
@@ -417,7 +418,7 @@ text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
 <div id="side">
 <div id="detail"></div>
 <input id="search" type="text" placeholder="filter samples by name...">
-<div id="tableWrap"><table><thead><tr><th>sample</th><th>final SNP</th><th>call</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div id="tableWrap"><table><colgroup><col><col style="width: 34%"><col style="width: 112px"></colgroup><thead><tr><th>sample</th><th>final SNP</th><th>call</th></tr></thead><tbody id="rows"></tbody></table></div>
 </div>
 <div id="tree"></div>
 <script>
@@ -509,7 +510,7 @@ function paint(i){
 \t\t\t+ '<a href="' + encodeURIComponent(s.name) + '_not_called.txt">' + esc(s.name) + '_not_called.txt</a>';
 \t}
 \td.innerHTML = "<h2>" + esc(s.name) + ' <span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span></h2>"
-\t\t+ "Final SNP: <b>" + esc(s.final) + "</b> &middot; path: <span class=\"path\">" + esc(s.path) + "</span><br>" + reasons + links;
+\t\t+ "Final SNP: <b>" + esc(s.final) + "</b> &middot; path: <span class='path'>" + esc(s.path) + "</span><br>" + reasons + links;
 \tvar rows = document.querySelectorAll("#rows tr");
 \tfor (var k = 0; k < rows.length; k++) { rows[k].className = rows[k].className.replace(" selected", ""); }
 \tvar sel = document.querySelector("#rows tr[data-i='" + i + "']");
@@ -545,7 +546,7 @@ function render(){
 \t\tif (!n || n.y === undefined || !keep(n)) { return; }
 \t\tvar col = annColor(a);
 \t\tvar cx0 = n.x, cx1 = n.x, cy0 = n.y, cy1 = n.y;
-\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); })(n);
+\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); }); })(n);
 \t\tparts.push('<rect x="' + (cx0 - 16) + '" y="' + (cy0 - ROW) + '" width="' + (cx1 - cx0 + 32) + '" height="' + (cy1 - cy0 + 2 * ROW) + '" rx="12" fill="' + col + '" fill-opacity="0.08" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="6,4" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
 \t\tparts.push('<text x="' + (cx0 - 12) + '" y="' + (cy0 - ROW + 2) + '" fill="' + col + '" font-weight="700" font-size="12">' + esc(a.label) + "</text>");
 \t});
@@ -635,7 +636,7 @@ function buildTable(filter){
 \t\ttr.className = "row";
 \t\ttr.setAttribute("data-i", i);
 \t\tvar note = (s.reasons || []).length ? '<span class="warn" title="' + esc(s.reasons.join("; ")) + '">&#9888; ' + s.reasons.length + "</span>" : "";
-\t\ttr.innerHTML = "<td>" + esc(s.name) + "</td><td>" + esc(s.final) + "</td>"
+\t\ttr.innerHTML = '<td class="cut" title="' + esc(s.name) + '">' + esc(s.name) + '</td><td class="cut" title="' + esc(s.final) + '">' + esc(s.final) + "</td>"
 \t\t\t+ '<td><span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span> " + note + "</td>";
 \t\ttr.onclick = function(){ paint(i); };
 \t\trows.appendChild(tr);
