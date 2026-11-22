@@ -197,7 +197,7 @@ function render(){
 \t\tif (!n || n.y === undefined || !keep(n)) { return; }
 \t\tvar col = annColor(a);
 \t\tvar cx0 = n.x, cx1 = n.x, cy0 = n.y, cy1 = n.y;
-\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); })(n);
+\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); }); })(n);
 \t\tparts.push('<rect x="' + (cx0 - 16) + '" y="' + (cy0 - ROW) + '" width="' + (cx1 - cx0 + 32) + '" height="' + (cy1 - cy0 + 2 * ROW) + '" rx="12" fill="' + col + '" fill-opacity="0.08" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="6,4" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
 \t\tparts.push('<text x="' + (cx0 - 12) + '" y="' + (cy0 - ROW + 2) + '" fill="' + col + '" font-weight="700" font-size="12">' + esc(a.label) + "</text>");
 \t});
@@ -509,7 +509,7 @@ function paint(i){
 \t\t\t+ '<a href="' + encodeURIComponent(s.name) + '_not_called.txt">' + esc(s.name) + '_not_called.txt</a>';
 \t}
 \td.innerHTML = "<h2>" + esc(s.name) + ' <span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span></h2>"
-\t\t+ "Final SNP: <b>" + esc(s.final) + "</b> &middot; path: <span class=\"path\">" + esc(s.path) + "</span><br>" + reasons + links;
+\t\t+ "Final SNP: <b>" + esc(s.final) + "</b> &middot; path: <span class='path'>" + esc(s.path) + "</span><br>" + reasons + links;
 \tvar rows = document.querySelectorAll("#rows tr");
 \tfor (var k = 0; k < rows.length; k++) { rows[k].className = rows[k].className.replace(" selected", ""); }
 \tvar sel = document.querySelector("#rows tr[data-i='" + i + "']");
@@ -545,7 +545,7 @@ function render(){
 \t\tif (!n || n.y === undefined || !keep(n)) { return; }
 \t\tvar col = annColor(a);
 \t\tvar cx0 = n.x, cx1 = n.x, cy0 = n.y, cy1 = n.y;
-\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); })(n);
+\t\t(function walk(m){ (children[m.id] || []).forEach(function(k){ if (k.y === undefined || !keep(k)) { return; } cx0 = Math.min(cx0, k.x); cx1 = Math.max(cx1, k.x + 140); cy0 = Math.min(cy0, k.y); cy1 = Math.max(cy1, k.y); walk(k); }); })(n);
 \t\tparts.push('<rect x="' + (cx0 - 16) + '" y="' + (cy0 - ROW) + '" width="' + (cx1 - cx0 + 32) + '" height="' + (cy1 - cy0 + 2 * ROW) + '" rx="12" fill="' + col + '" fill-opacity="0.08" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="6,4" pointer-events="none"><title>' + esc((a.rank ? a.rank + ": " : "") + a.label) + "</title></rect>");
 \t\tparts.push('<text x="' + (cx0 - 12) + '" y="' + (cy0 - ROW + 2) + '" fill="' + col + '" font-weight="700" font-size="12">' + esc(a.label) + "</text>");
 \t});
