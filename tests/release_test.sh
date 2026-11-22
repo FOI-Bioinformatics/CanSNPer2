@@ -100,7 +100,7 @@ fi
 say "== database build and exports"
 DB=$OUT/gate.db
 cmd build-db ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --create \
-    --tree "$SRC/francisella_tularensis_tree.txt" --annotation "$SRC/francisella_tularensis_snp.txt" \
+    --tree "$SRC/francisella_tularensis_tree.txt" --annotation "$SRC/francisella_tularensis_canSNPs.txt" \
     --references "$SRC/francisella_tularensis_references.txt" --source_type CanSNPer \
     --logs "$OUT/logs/db"
 COUNTS=$("$PY" -c "import sqlite3;c=sqlite3.connect('$DB');print(' '.join(str(c.execute('SELECT COUNT(*) FROM '+t).fetchone()[0]) for t in ('nodes','tree','rank','snp_annotation','snp_references')))")
@@ -112,15 +112,15 @@ expect "row counts nodes/tree/rank/annotation/references" "328 328 2 328 5" "$CO
 # exported again and must give the same files
 cmd export-source ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$DB" --export \
     -o "$OUT/export_src" --logs "$OUT/logs/export"
-expect "source export tree/snp/references rows" "328 329 6" \
-    "$(wc -l < "$OUT/export_src/gate_tree.txt" | tr -d ' ') $(wc -l < "$OUT/export_src/gate_snp.txt" | tr -d ' ') $(wc -l < "$OUT/export_src/gate_references.txt" | tr -d ' ')"
+expect "source export tree/canSNPs/references rows" "328 329 6" \
+    "$(wc -l < "$OUT/export_src/gate_tree.txt" | tr -d ' ') $(wc -l < "$OUT/export_src/gate_canSNPs.txt" | tr -d ' ') $(wc -l < "$OUT/export_src/gate_references.txt" | tr -d ' ')"
 cmd rebuild-from-export ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$OUT/rebuilt.db" --create \
-    --tree "$OUT/export_src/gate_tree.txt" --annotation "$OUT/export_src/gate_snp.txt" \
+    --tree "$OUT/export_src/gate_tree.txt" --annotation "$OUT/export_src/gate_canSNPs.txt" \
     --references "$OUT/export_src/gate_references.txt" --logs "$OUT/logs/db"
 cmd export-rebuilt ok "" "$PY" "$PKG/CanSNPer2/SNPDatabase.py" --database "$OUT/rebuilt.db" --export \
     --export_format tab -o "$OUT/export_rebuilt" --logs "$OUT/logs/export"
 SAME=same
-for f in tree snp references; do
+for f in tree canSNPs references; do
     cmp -s "$OUT/export_src/gate_$f.txt" "$OUT/export_rebuilt/rebuilt_$f.txt" || SAME="gate_$f.txt differs"
 done
 expect "export of the rebuilt database" "same" "$SAME"

@@ -159,7 +159,7 @@ class SchemeSource(object):
 					self._config = None
 					raise SchemeError("schemes.toml of {loc}: the entry {name} is not a table, write it as [{name}]".format(
 						loc=self.location(), name=name))
-				for key in ("kind", "snp", "tree", "readme", "database_dir", "source_type"):
+				for key in ("kind", "canSNPs", "snp", "tree", "readme", "database_dir", "source_type"):
 					if key in entry and not isinstance(entry[key], str):
 						self._config = None
 						raise SchemeError("schemes.toml of {loc}: {key} of the entry [{name}] must be text, not {kind}".format(
@@ -177,6 +177,7 @@ class SchemeSource(object):
 		folder = "schemes/{name}".format(name=name)
 		database_dir = entry.get("database_dir", "database")
 		return {
+			"canSNPs": entry.get("canSNPs", "{folder}/{name}_canSNPs.txt".format(folder=folder, name=name)),
 			"snp": entry.get("snp", "{folder}/{name}_snp.txt".format(folder=folder, name=name)),
 			"tree": entry.get("tree", "{folder}/{name}_tree.txt".format(folder=folder, name=name)),
 			"references": "{folder}/{name}_references.txt".format(folder=folder, name=name),
@@ -200,10 +201,12 @@ class SchemeSource(object):
 		names = set()
 		for path in paths:
 			parts = path.split("/")
-			if len(parts) == 3 and parts[0] == "schemes" and parts[2] == "{n}_snp.txt".format(n=parts[1]):
+			if len(parts) == 3 and parts[0] == "schemes" and parts[2] in (
+					"{n}_canSNPs.txt".format(n=parts[1]), "{n}_snp.txt".format(n=parts[1])):
 				names.add(parts[1])
 		for name, entry in self.config().items():
-			if isinstance(entry, dict) and entry.get("kind", "snp") == "snp" and entry.get("snp") in paths:
+			if isinstance(entry, dict) and entry.get("kind", "snp") == "snp" and (
+					entry.get("canSNPs") in paths or entry.get("snp") in paths):
 				names.add(name)
 		schemes = []
 		for name in sorted(names):
@@ -217,15 +220,25 @@ class SchemeSource(object):
 		files = self.scheme_files(name)
 		local = {}
 		hashes = {}
-		for role in ("snp", "tree", "references"):
+		for role in ("canSNPs", "tree", "references"):
 			path = files[role]
 			try:
 				data = self.raw(path)
 			except NotFound:
-				if role == "snp":
-					raise SchemeError("There is no scheme {name} in {loc}, {hint} lists those there are".format(name=name, loc=self.location(), hint=self.list_hint()))
-				raise SchemeError("The scheme {name} has no {path} in {loc}".format(name=name, path=path, loc=self.location()))
-			if role == "snp":
+				if role == "canSNPs":
+					'''a collection from before the canSNP file keeps its canSNPs in a SNP file,
+						one per node; it is still built, as --annotation still reads that format'''
+					path = files["snp"]
+					try:
+						data = self.raw(path)
+					except NotFound:
+						raise SchemeError("There is no scheme {name} in {loc}, {hint} lists those there are".format(name=name, loc=self.location(), hint=self.list_hint()))
+					logger.warning("The scheme {name} in {loc} has no {file}, its canSNPs come from {old}: one canSNP "
+						"per node, without the ranks and the alternatives".format(name=name, loc=self.location(),
+						file=os.path.basename(files["canSNPs"]), old=os.path.basename(path)))
+				else:
+					raise SchemeError("The scheme {name} has no {path} in {loc}".format(name=name, path=path, loc=self.location()))
+			if role == "canSNPs":
 				self.check_format(name, data)
 			local[role] = os.path.join(directory, os.path.basename(path))
 			with open(local[role], "wb") as out:
@@ -494,7 +507,7 @@ def build_scheme(name, database, ref="master", overwrite=False, source=None, all
 				fd, partial = tempfile.mkstemp(suffix=".db.part", dir=target_dir)
 				os.close(fd)
 				os.remove(partial) ## the database loader creates the file itself
-				CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["snp"],
+				CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["canSNPs"],
 								references=local["references"], source_type=provenance["source_type"], verbose=False,
 								scheme_info=scheme_info)
 			except (sqlite3.Error, OSError, DatabaseConnectionError) as e:
