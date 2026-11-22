@@ -62,7 +62,8 @@ def test_different_files_with_the_same_name_stop_before_anything_is_aligned(tmp_
 	obj, db = project(tmp_path, [a, b], keep_going=True)
 	with pytest.raises(CanSNPer2Error, match="x = .*a/x.fasta, .*b/x.fasta"):
 		obj.run(database=db)
-	assert not [f for f in os.listdir(obj.tmpdir) if f.endswith(".xmfa")], "nothing was aligned"
+	# a refused run removes its run directory; if it is kept, it holds no alignment
+	assert not os.path.isdir(obj.tmpdir) or not [f for f in os.listdir(obj.tmpdir) if f.endswith(".xmfa")], "nothing was aligned"
 
 
 def test_the_same_file_given_twice_is_typed_once(tmp_path, caplog):

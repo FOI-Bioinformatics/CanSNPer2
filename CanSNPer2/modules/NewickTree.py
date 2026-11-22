@@ -20,6 +20,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+_WARNED_NODES = set() ## nodes without a SNP that were already warned about in this process
+
+
 def load_annotations(path):
 	'''Read a tree annotation file: one annotation per line, tab separated
 		<snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]
@@ -813,7 +816,10 @@ class NewickTree(object):
 			if snp_id != None:
 				nt[id] = snp_id
 			else:
-				logger.warning("#Node has no snp_annotation {node}".format(node=name))
+				'''the tree is read once per sample and again for the dashboard: warn once per node'''
+				if name not in _WARNED_NODES:
+					_WARNED_NODES.add(name)
+					logger.warning("#Node has no snp_annotation {node}".format(node=name))
 				nt[id] = "-"+name+"-"
 		return nt
 

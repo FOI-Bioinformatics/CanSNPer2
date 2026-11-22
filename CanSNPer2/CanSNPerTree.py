@@ -83,6 +83,40 @@ def fraction(value):
 	return number
 
 
+def positive_int(value):
+	'''argparse type for --min_required_hits: a whole number of at least 1'''
+	try:
+		number = int(value)
+	except ValueError:
+		raise argparse.ArgumentTypeError("{value} is not a whole number".format(value=value))
+	if number < 1:
+		raise argparse.ArgumentTypeError("{value} is below 1".format(value=value))
+	return number
+
+
+def non_negative_int(value):
+	'''argparse type for --mask: a whole number of 0 or more'''
+	try:
+		number = int(value)
+	except ValueError:
+		raise argparse.ArgumentTypeError("{value} is not a whole number".format(value=value))
+	if number < 0:
+		raise argparse.ArgumentTypeError("{value} is below 0".format(value=value))
+	return number
+
+
+def minutes(value):
+	'''argparse type for --alignment_timeout: a finite number of minutes, 0 or more. A negative
+		value stopped every alignment at once, and nan meant no limit.'''
+	try:
+		number = float(value)
+	except ValueError:
+		raise argparse.ArgumentTypeError("{value} is not a number".format(value=value))
+	if number != number or number in (float("inf"), float("-inf")) or number < 0:
+		raise argparse.ArgumentTypeError("{value} is not a number of minutes of 0 or more".format(value=value))
+	return number
+
+
 def command():
 	'''Initiate CanSNPer2 object'''
 	parser = argparse.ArgumentParser(
@@ -105,13 +139,13 @@ def command():
 	run_options.add_argument('--allow_missing_references', action='store_true',		help="Type even when reference genomes of the database have no <genome>.fna in --refdir; one warning names them, and their SNPs are not compared (default: stop with an error)")
 	run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
 	run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
-	run_options.add_argument('--min_required_hits', type=int, default=3, 				help="Minimum sequential hits to call a SNP!")
+	run_options.add_argument('--min_required_hits', type=positive_int, default=3, 		help="Minimum number of derived SNPs on the path from the root to the final SNP for a call (at least 1, default 3)")
 	run_options.add_argument('--strictness', 		type=fraction, default=0.7,			help="Fraction of the SNPs on the path to the final SNP that must be called; SNPs without alignment data count against it, an ancestral SNP stops the path (0-1, default 0.7)")
-	run_options.add_argument('--mask',				type=int, default=0,					help="Ignore SNPs closer than this many bases to the edge of an alignment (default 0, off)")
+	run_options.add_argument('--mask',				type=non_negative_int, default=0,		help="Ignore SNPs closer than this many bases to the edge of an alignment (default 0, off)")
 	run_options.add_argument('--keep_going', 		action='store_true', 				help="If Error occurs, continue with the rest of samples")
 	run_options.add_argument('--rerun', 			action='store_true', 				help="Rerun already processed files (else skip if result file exists)")
 	run_options.add_argument('--aligner',			metavar='', default=DEFAULT_ALIGNER, choices=sorted(ALIGNERS),	help="Program that aligns the query against each reference: {names} (default {default})".format(names=", ".join(sorted(ALIGNERS)),default=DEFAULT_ALIGNER))
-	run_options.add_argument('--alignment_timeout',	type=float, default=60,	metavar='MINUTES',	help="Stop the alignments of a query that take longer than this, in minutes (0 for no limit, default 60)")
+	run_options.add_argument('--alignment_timeout',	type=minutes, default=60,	metavar='MINUTES',	help="Stop the alignments of a query that take longer than this, in minutes (0 for no limit, default 60)")
 	run_options.add_argument('--aligner_path',		metavar='', default="",				help="The aligner program, or the folder that holds it (default: found in PATH)")
 
 	'''Remove the two below when script is complete, possibly keep as hidden for debug'''
@@ -145,6 +179,10 @@ def command():
 	if not args.database:
 		print("A database is required: CanSNPer2 --database database.db query.fasta")
 		exit(1)
+	if not args.query:
+		'''a run without queries used to warn, exit 0 and leave an empty run directory'''
+		print("No query files were given: CanSNPer2 --database database.db query.fasta", file=sys.stderr)
+		exit(1)
 	'''fail with a clear message on a bad database path instead of creating an empty database'''
 	try:
 		check_database(args.database)
@@ -160,6 +198,14 @@ def command():
 
 	if args.skip_alignment and not args.keep_temp: ## Make sure keep temp is default if --skip_alignment is used
 		args.keep_temp = True
+
+	'''--logdir, --tmpdir and --outdir are relative to --workdir. The log and temporary folders used to
+		be created relative to the current folder before CanSNPer2 resolved them against the workdir,
+		so the main log and an empty tmp folder ended up outside it.'''
+	in_workdir = lambda path: os.path.abspath(os.path.join(args.workdir, path))
+	args.logdir = in_workdir(args.logdir)
+	if args.tmpdir is not None and args.tmpdir.strip():
+		args.tmpdir = in_workdir(args.tmpdir)
 
 	'''Make sure log directory path exists'''
 	logdircreated = False
@@ -179,12 +225,12 @@ def command():
 	log_scheme_notice(args.database, logger) ## which scheme is typed against, before any work starts
 
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
-	if args.tmpdir is not None and not args.tmpdir.rstrip("/"):
+	if args.tmpdir is not None and not args.tmpdir.strip():
 		parser.error("--tmpdir cannot be empty")
 	if args.tmpdir is None:
 		'''no --tmpdir: use the first folder that can be written to'''
 		problems = []
-		for candidate in default_tmpdir_candidates(args.outdir):
+		for candidate in default_tmpdir_candidates(in_workdir(args.outdir)):
 			candidate = resolve_tmpdir(candidate)
 			try:
 				ensure_directory(candidate, "--tmpdir")
@@ -198,6 +244,10 @@ def command():
 			exit(1)
 	else:
 		args.tmpdir = resolve_tmpdir(args.tmpdir)
+		if args.skip_alignment and not os.path.isdir(args.tmpdir):
+			'''alignments are only read with --skip_alignment: a missing folder is not created'''
+			logger.error("--skip_alignment reads the alignments in --tmpdir, but {path} does not exist".format(path=args.tmpdir))
+			exit(1)
 		if not os.path.exists(args.tmpdir):
 			logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
 		try:
@@ -237,7 +287,8 @@ def command():
 	except CanSNPer2Error as e:
 		logger.error(e.value) ## an unusable output, log or tmp folder is reported before anything is aligned
 		exit(1)
-	print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))
+	if args.keep_temp:
+		print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))
 
 	'''Run CanSNPer2'''
 	try:
@@ -246,6 +297,8 @@ def command():
 		'''Ctrl-C or SIGTERM: the alignment processes are already stopped in run_alignments, report it
 			plainly instead of dumping a traceback (issue #151)'''
 		logger.warning("CanSNPer2 was interrupted, the {program} processes were stopped".format(program=args.aligner))
+		if not args.keep_temp:
+			CanSNPer2_obj.cleanup()
 		exit(130)
 	except CanSNPer2Error as e:
 		'''a refused run (for example two samples with the same name) is reported as a message,
