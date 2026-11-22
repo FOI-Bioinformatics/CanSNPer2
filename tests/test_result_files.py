@@ -1,4 +1,4 @@
-"""The per-sample result files.
+"""The per-sample result files and snps_summary.txt.
 
 <sample>_snps.txt and <sample>_not_called.txt start with the table (a header row and the rows);
 the SNP path, the final SNP, the query file and the typing settings follow as # comment lines,
@@ -103,4 +103,29 @@ def test_a_result_of_an_earlier_run_is_used_again_in_both_forms(tmp_path, prefix
 			out.write(prefix + line + "\n")
 	obj.run(database=db)
 	assert "x" in obj.reused
-	assert obj.sample_reports["x"]["final"] == "A.1"
+	report = obj.sample_reports["x"]
+	assert report["final"] == "A.1" and report["support"] == "1/2"
+
+
+def test_the_summary_starts_with_the_run_and_a_header_row(tmp_path):
+	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, summary=True)
+	path = os.path.join(obj.outdir, "snps_summary.txt")
+	notes = comments(path)
+	text = "\n".join(notes)
+	assert notes and all(line.startswith("# ") for line in notes)
+	assert "CanSNPer2 version" in text
+	assert "Date" in text
+	assert "Database: t.db sha256:" in text
+	assert "Scheme" in text
+	assert "min_required_hits=2" in text and "strictness=0.7" in text and "mask=0" in text
+	lines = open(path).read().splitlines()
+	assert lines[:len(notes)] == notes, "the comment lines come first"
+	rows = table_rows(path)
+	assert rows[0] == ["sample", "final_snp", "support", "snp_path"]
+	assert rows[1] == ["x", "B.1", "2/2", "A.1;B.1"]
+
+
+def test_the_summary_gives_na_support_for_a_sample_without_a_call(tmp_path):
+	obj, q = typed(tmp_path, [], {"A.1": 2}, summary=True)
+	rows = table_rows(os.path.join(obj.outdir, "snps_summary.txt"))
+	assert rows[1] == ["x", "NA", "NA", "NA"]

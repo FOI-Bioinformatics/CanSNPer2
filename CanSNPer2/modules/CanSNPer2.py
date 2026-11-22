@@ -7,13 +7,14 @@ import os
 import re
 import shutil
 import hashlib
+import datetime
 import tempfile
 import logging
 logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
 from CanSNPer2.modules.Aligners import Aligner, get_aligner
-from CanSNPer2.modules.NewickTree import NewickTree
+from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
 from CanSNPer2 import __version__
@@ -121,6 +122,8 @@ class CanSNPer2(object):
 		self.sample_reports = {}
 		'''the SNP path per sample, so the summary can print it for every sample (issue #24)'''
 		self.result_paths = {}
+		'''the support of the call per sample, found/n SNPs on the SNP path, NA when not called'''
+		self.sample_supports = {}
 		'''samples whose result file from an earlier run was used again; only these are read
 			back for the summary: a sample skipped because its alignment failed used to show
 			the call of whatever result file an earlier run had left under its name'''
@@ -652,13 +655,14 @@ class CanSNPer2(object):
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False):
+	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False, snp_info=None):
 		'''This function colors the SNP tree of the database with the SNPS found in the query and
 			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
 		try:
-			final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations)
+			final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations,
+					snp_info=snp_info,run_info=self.run_info())
 		finally:
 			newickTree.close()
 		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
@@ -1003,6 +1007,23 @@ class CanSNPer2(object):
 		return "Typing settings: database sha256:{sha} min_required_hits={hits} strictness={strict} mask={mask}".format(
 			sha=self._database_sha256, hits=self.min_required_hits, strict=self.strictness, mask=self.mask)
 
+	def run_info(self):
+		'''What the result pages and snps_summary.txt record about the run: the CanSNPer2
+			version, the date, the database file and its sha256, the scheme and reference genomes
+			of the database, the aligner and the typing settings'''
+		if getattr(self, "_run_info", None) is None:
+			info = database_provenance(self.database)
+			if getattr(self, "_database_sha256", None) is None:
+				self._database_sha256 = self.file_sha256(self.database)
+			info.update({"version": __version__,
+				"date": getattr(self, "run_date", None) or datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+				"database": os.path.basename(self.database), "database_sha256": self._database_sha256,
+				"aligner": self.aligner.name, "min_required_hits": self.min_required_hits,
+				"strictness": self.strictness, "mask": self.mask, "save_tree": bool(self.save_tree),
+				"snp_files": bool(self.export)})
+			self._run_info = info
+		return self._run_info
+
 	def read_result_settings(self, resultfile):
 		'''the settings line of a result file, None for files from versions that did not record it'''
 		for row in self.result_trailer(resultfile):
@@ -1041,33 +1062,49 @@ class CanSNPer2(object):
 		return final_snp,snp_path
 
 	def print_summary(self):
-		'''Create summary file and tree. Every sample of the run is listed, NA included, as
-			three tab separated columns "ID final_snp snp_path" matching what the run reported
-			on stdout: the old summary only contained samples that had a final SNP, silently
-			omitting the rest of the run (issue #24)'''
+		'''Create summary file and tree. Every sample of the run is listed, NA included, matching
+			what the run reported on stdout: the old summary only contained samples that had a
+			final SNP, silently omitting the rest of the run (issue #24). The file starts with #
+			lines on the run (version, date, database, scheme, settings), followed by the header
+			row "sample final_snp support snp_path" and one tab separated row per sample; support
+			is found/n, the derived SNPs on the SNP path out of the SNPs on it, NA when the
+			sample was not called'''
 		summarypath = "{outdir}/snps_summary.txt".format(outdir=self.outdir)
 		final_snps = set()
 		with open(summarypath,"w") as summaryout:
+			for line in provenance_lines(self.run_info()):
+				print("# " + line,file=summaryout)
+			print("\t".join(["sample","final_snp","support","snp_path"]),file=summaryout)
 			for q in self.query:
 				name = self.sample_name(q)
 				if name in self.reused:
-					final_snp,snp_path = self.read_result_file("{outdir}/{name}_snps.txt".format(outdir=self.outdir,name=name))
+					resultfile = "{outdir}/{name}_snps.txt".format(outdir=self.outdir,name=name)
+					final_snp,snp_path = self.read_result_file(resultfile)
+					support = self.read_result_support(resultfile)
 				else:
 					final_snp = self.typed.get(name,"NA")
 					snp_path = self.result_paths.get(name,"NA")
-				print("{name}\t{final_snp}\t{snp_path}".format(name=name,final_snp=final_snp,snp_path=snp_path),file=summaryout)
+					support = self.sample_supports.get(name,"NA") if final_snp != "NA" else "NA"
+				print("{name}\t{final_snp}\t{support}\t{snp_path}".format(name=name,final_snp=final_snp,support=support,snp_path=snp_path),file=summaryout)
 				if final_snp != "NA":
 					final_snps.add(final_snp)
 
 		'''Print summary tree showing all unique SNPs in the final tree'''
 		self.create_tree([],"summary",final_snps,True,min_required_hits=self.min_required_hits,summary=True)
 
-	def add_sample_report(self,name,severity,final_snp,snp_path,reasons,states=None,called=None,edge=None,no_data=None):
+	def add_sample_report(self,name,severity,final_snp,snp_path,reasons,states=None,called=None,edge=None,no_data=None,
+			support="NA",path_no_data=None,path_snps=None):
 		'''one row of the results dashboard: what the sample became, why a manual look may be
-			wanted, and the SNP states the embedded tree paints when it is selected'''
+			wanted, and the SNP states the embedded tree paints when it is selected. support is
+			found/n, the derived SNPs on the SNP path out of the SNPs on it (NA when not called),
+			path_no_data the SNPs on the SNP path without alignment data and path_snps the SNP
+			path with the bases of each SNP (NewickTree.path_details)'''
 		self.sample_reports[name] = {"name":name,"severity":severity,"final":final_snp,"path":snp_path,
 				"reasons":list(reasons),"states":dict(states or {}),"called":list(called or []),
-				"edge":sorted(edge or []),"no_data":sorted(no_data or [])}
+				"edge":sorted(edge or []),"no_data":sorted(no_data or []),"support":support,
+				"path_no_data":list(path_no_data or [])}
+		if path_snps is not None:
+			self.sample_reports[name]["path_snps"] = list(path_snps)
 
 	def write_dashboard(self):
 		'''summary.html: the results overview for runs with many samples. The samples sit in a
@@ -1085,7 +1122,7 @@ class CanSNPer2(object):
 			return
 		try:
 			dashboard = newickTree.write_dashboard([self.sample_reports[name] for name in self.sample_reports],
-					"{outdir}/summary.html".format(outdir=self.outdir), self.annotations)
+					"{outdir}/summary.html".format(outdir=self.outdir), self.annotations, run_info=self.run_info())
 		finally:
 			newickTree.close()
 		logger.info("Results overview: open {dashboard} in a browser".format(dashboard=dashboard))
@@ -1102,6 +1139,7 @@ class CanSNPer2(object):
 
 	def _run(self,database):
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
+		self.run_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 		if len(self.query) > 0:
 			'''A query list file (file paths, one per line) is read, see resolve_queries'''
 			self.query = self.resolve_queries(self.query)
@@ -1167,7 +1205,7 @@ class CanSNPer2(object):
 						old_final,old_path = self.read_result_file(outputfile)
 						self.add_sample_report(self.query_name,"reused",old_final,old_path,
 								["result from an earlier run, use --rerun to recompute it and see it in the tree"],
-)
+								support=self.read_result_support(outputfile))
 						continue
 					logger.info("Running CanSNPer2 on {query}".format(query=qfile))
 					if not self.skip_alignment: ### alignments made before (--skip_alignment) are only read
@@ -1213,7 +1251,7 @@ class CanSNPer2(object):
 
 					'''Color the tree with the states of the sample and call the final SNP'''
 					SNP = "NA" ## Default message if SNP cannot be confirmed
-					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness)
+					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness,snp_info=SNP_info)
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
 						tree_result = (False,"No SNP call was produced.",[],[])
 					final_snp,message,called,no_data_snps = tree_result
@@ -1230,10 +1268,14 @@ class CanSNPer2(object):
 						path_names = [name for name in chain if name in set(called_names)]
 						off_chain = sorted(name for name in called_names if name not in set(chain))
 					self.result_paths[self.query_name] = ";".join(path_names) if path_names else "NA"
+					'''the support of a call: the derived SNPs on the SNP path out of the SNPs on it'''
+					support = "NA"
 					if final_snp:
 						SNP = final_snp[1]
 						if not final_snp[2][0]:  ## if snp was never confirmed print NA
 							SNP = "NA"
+						else:
+							support = "{found}/{n}".format(found=final_snp[2][1], n=final_snp[3] if len(final_snp) > 3 else int(final_snp[0]))
 						called_rows = [self.csnpdict[snp[1]] for snp in called] if self.export else []
 						final_line = "Final SNP: {snp} found/depth: {found}/{depth}".format(snp=SNP,depth=int(final_snp[0]),found=final_snp[2][1])
 						path_text = ";".join(path_names)
@@ -1248,6 +1290,7 @@ class CanSNPer2(object):
 						final_line = "Final SNP: {snp}".format(snp=SNP)
 						path_text = ";".join(path_names) if path_names else "NA"
 						logger.info(message)
+					self.sample_supports[self.query_name] = support
 					if self.export:
 						'''Both files start with the table, a header row and the rows; the lines on the
 							call and the input follow as # comment lines, so that a table reader that skips
@@ -1305,7 +1348,8 @@ class CanSNPer2(object):
 						reasons.append("{k} derived SNP(s) called outside the SNP path, on another branch: {ids}".format(k=len(off_chain),ids=", ".join(off_chain)))
 					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
 							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),
-							no_data=[row[0] for row in no_data_snps])
+							no_data=[row[0] for row in no_data_snps],support=support,
+							path_no_data=path_missing if SNP != "NA" else [],path_snps=path_details(called_path,SNP_info))
 					print("{query}: {SNP}".format(query=self.query_name, SNP=SNP)) ## the call is printed whether or not result files are written
 					'''Clean references to aligned xmfa files between queries if several was supplied'''
 					self.alignment_files = []

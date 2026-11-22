@@ -3,7 +3,10 @@ Module to read and write newick trees
 
 '''
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+from CanSNPer2.modules import SchemeInfo
+from urllib.request import pathname2url
 import html
+import sqlite3
 import json
 import os
 import re
@@ -58,6 +61,87 @@ def load_annotations(path):
 				annotation["color"] = fields[4].strip()
 			annotations.append(annotation)
 	return annotations
+
+
+def database_provenance(path):
+	'''What a result page records about the database at path: the scheme name, status and
+		description from its scheme_info table (SchemeInfo.describe), the notice that
+		SchemeInfo.scheme_notice logs when the scheme is not verified (empty otherwise), the
+		database file name and its reference genomes'''
+	info = {"database": os.path.basename(str(path)), "scheme": "", "status": "", "scheme_line": "",
+		"notice": "", "references": []}
+	try:
+		scheme = SchemeInfo.read_scheme_info(path)
+		level, notice = SchemeInfo.scheme_notice(path)
+	except sqlite3.Error as e:
+		logger.debug("No scheme information read from {db}: {e}".format(db=path, e=e))
+		return info
+	info["scheme"] = scheme.get("scheme") or ""
+	info["status"] = scheme.get("status") or ""
+	info["scheme_line"] = SchemeInfo.describe(scheme) if scheme else SchemeInfo.MISSING_TEXT
+	if level >= logging.WARNING:
+		info["notice"] = notice
+	try:
+		conn = sqlite3.connect("file:{path}?mode=ro".format(path=pathname2url(os.path.abspath(str(path)))), uri=True)
+		try:
+			rows = conn.execute("SELECT genome, genbank_id, refseq_id FROM snp_references ORDER BY id").fetchall()
+		finally:
+			conn.close()
+	except sqlite3.Error:
+		rows = []
+	for genome, genbank, refseq in rows:
+		accession = genbank or refseq
+		info["references"].append("{genome} ({acc})".format(genome=genome, acc=accession) if accession else str(genome))
+	return info
+
+
+## the drawing class of a SNP state: 1 derived, 2 ancestral, 3 another base, 0 no data
+SNP_KINDS = {1: "derived", 2: "ancestral", 3: "other_base", 0: "no_data"}
+
+
+def path_details(path, snp_info, snplist=None):
+	'''The SNPs of a SNP path with what the result file gives for each: the reference sequence
+		and position, the ancestral and derived base and the base found in the query (target).
+		snp_info: rows in the columns of SNP_FILE_COLUMNS (CanSNPer2.py)'''
+	rows = {}
+	for row in snp_info or []:
+		if len(row) > 8:
+			rows.setdefault(row[0], row)
+	details = []
+	for name in path:
+		row = rows.get(name)
+		item = {"name": name}
+		if row:
+			item.update({"pos": "{seq}:{pos}".format(seq=row[2], pos=row[3]), "ancestral": row[6],
+				"derived": row[7], "target": row[8]})
+		details.append(item)
+	return details
+
+
+def provenance_lines(info):
+	'''The run as "key: value" lines, in the order the result pages and snps_summary.txt
+		show them; keys that info does not hold are left out'''
+	info = info or {}
+	lines = []
+	if info.get("version"):
+		lines.append("CanSNPer2 version: {v}".format(v=info["version"]))
+	if info.get("date"):
+		lines.append("Date: {d}".format(d=info["date"]))
+	if info.get("database"):
+		lines.append("Database: {db}{sha}".format(db=info["database"],
+			sha=" sha256:" + info["database_sha256"] if info.get("database_sha256") else ""))
+	if info.get("scheme_line"):
+		lines.append("Scheme: {line}".format(line=info["scheme_line"]))
+	if info.get("references"):
+		lines.append("Reference genomes: {refs}".format(refs=", ".join(info["references"])))
+	if info.get("aligner"):
+		lines.append("Aligner: {a}".format(a=info["aligner"]))
+	if "min_required_hits" in info:
+		lines.append("Typing settings: min_required_hits={hits} strictness={strict} mask={mask}".format(
+			hits=info["min_required_hits"], strict=info.get("strictness"), mask=info.get("mask")))
+	if info.get("notice"):
+		lines.append("Note: {n}".format(n=info["notice"]))
+	return lines
 
 
 __version__ = "2.0.1"
@@ -701,6 +785,12 @@ if (document.querySelectorAll("#rows tr").length !== samples.length || !svgEl) {
 </html>
 '''
 
+
+def render_template(template):
+	'''the page template as it is written'''
+	return template
+
+
 NEWICK_SPECIAL = re.compile(r"[\s(),:;'\[\]]")
 
 
@@ -815,6 +905,7 @@ class NewickTree(object):
 	def __init__(self, database,name="newick",outdir="./",min_required_hits=3,strictness=0.7):
 		super(NewickTree, self).__init__()
 		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
+		self.database_path = database
 		self.nodeDict = {}							## Dictionary to store references to all newick nodes
 		self.c_p_set = set()
 		self.tree_file = "{outdir}/{name}_tree.html".format(outdir=outdir.rstrip("/"),name=name) ## output file
@@ -1026,7 +1117,7 @@ class NewickTree(object):
 			if name in called and state != 2:
 				count +=1
 			elif state in (2,3):
-				logger.debug("Chain broken at {node} ({state}), {count} called SNPs below it".format(
+				logger.debug("SNP path broken at {node} ({state}), {count} called SNPs below it".format(
 						node=name,state="ancestral" if state == 2 else "other base",count=count))
 				return False,count,on_chain,missing
 			else:
@@ -1046,79 +1137,99 @@ class NewickTree(object):
 				count=count,n=on_chain,strictness=self.strictness,minhit=self.min_required_hits))
 		return False,count,on_chain,missing
 
-	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False,annotations=None):
-		'''Colors the SNP tree with the states found in the query alignments and writes the
-			self-contained html viewer described in the module header.
+	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False,annotations=None,snp_info=None,run_info=None):
+		'''Colors the SNP tree with the states found in the query alignments, calls the final SNP
+			(_final_call) and writes the self-contained html viewer described in the module header.
 		Keyword arguments:
 		snplist -- a dict of the SNP names and their state
+		snp_info -- the SNP_info rows of the sample, for the target base of each SNP on the path
+		run_info -- what the page records about the run (CanSNPer2.run_info)
 		'''
 		logger.debug("Draw tree from snplist")
 		entries = self._tree_entries()
 		'''nodes of the tree that no alignment carried any base for: they have to be reported,
 			not left out of the viewer and out of both result files (issue #27)'''
 		no_data_nodes = set()
+		called_set = set(called_snps) if called_snps else set()
 		for entry in entries:
 			n = entry["name"]
-			# The ancestral node is set to have a red colour, a node missing due to a gap is grey
 			entry["fill"] = self.snp_colors["non_aligned"]
 			entry["r"] = 5           ## ete3 "size" was a diameter: 10 drew as r=5, keep that scale
 			entry["line"] = "#DDDDDD"
 			entry["dash"] = True
 			entry["dot"] = True
-			entry["called"] = bool(called_snps) and n in set(called_snps)
+			entry["kind"] = "untested"
+			entry["called"] = n in called_set
 			if n == "ROOT" or (n.startswith("-") and n.endswith("-")):
 				'''ROOT and the "-name-" labels that get_nodes gives to nodes without any
 					snp_annotation (the root of a database like that) are not SNPs: they are only
 					meant to be line junctions and a label node must not be drawn as a grey SNP
 					dot (issue #52, with #32 and #34)'''
 				entry["dot"] = False
+				entry["kind"] = "label"
 				continue
 			if len(snplist) > 0:
-				if n in snplist:
-					snpvalue = snplist[n]
-					if snpvalue == 2:
-						## Ancestral: purple
-						entry["fill"] = self.snp_colors["ancestral"]
-						entry["line"] = "#000000"
-						entry["dash"] = False
-					elif snpvalue == 1:
-						## If the SNP was derived make it green
-						entry["fill"] = self.snp_colors["derived"]
+				snpvalue = snplist.get(n)
+				entry["kind"] = SNP_KINDS.get(snpvalue, "no_data")
+				if snpvalue in (1, 2, 3):
+					entry["fill"] = self.snp_colors[entry["kind"]]
+					entry["line"] = "#000000"
+					entry["dash"] = False
+					if snpvalue != 2:
 						entry["r"] = 7.5
-						entry["line"] = "#000000"
-						entry["dash"] = False
-					elif snpvalue == 3:
-						## If the SNP was neither of ancestral or derived make it blue
-						entry["fill"] = self.snp_colors["other_base"]
-						entry["r"] = 7.5
-						entry["line"] = "#000000"
-						entry["dash"] = False
-				else:
-					'''SNP not in list: no alignment covered this position at all, keep the grey
-						"non aligned" style set above. The node used to be skipped with a continue,
-						which also skipped the style and left it at the ete default size, invisible
-						in the pdf (issue #27)'''
+				elif n not in snplist:
+					'''SNP not in list: no alignment covered this position at all. The node used
+						to be skipped with a continue, which also skipped the style and left it at
+						the ete default size, invisible in the pdf (issue #27)'''
 					no_data_nodes.add(n)
 			elif called_snps:
-				### Only care about called SNPs and color all green
+				### Only care about called SNPs (the final SNPs of the summary tree) and color them
 				if entry["called"]:
 					entry["fill"] = self.snp_colors["derived"]
 					entry["r"] = 7.5
+					entry["kind"] = "derived"
 				entry["line"] = "#000000"
 				entry["dash"] = False
-		'''the nodes without data are drawn grey now, and their database annotation is returned as
-			well, so the per sample files can list them instead of hiding that they were never
-			compared at all (issue #27)'''
+		'''the nodes without data are drawn as open circles, and their database annotation is
+			returned as well, so the per sample files can list them instead of hiding that they
+			were never compared at all (issue #27)'''
 		no_data_info = []
 		if no_data_nodes:
 			logger.warning("{n} SNP positions in the tree had no alignment data at all, no reference block covered them or --mask dropped them: {ids}".format(
 					n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])))
 			no_data_info = self.get_no_data_info(no_data_nodes)
+		if summary:
+			if save_tree:
+				self.write_tree_html(entries, annotations, page=self._summary_page(called_snps), run_info=run_info)
+			return
+		result = self._final_call(entries, snplist, called_snps, no_data_info)
 		## Write the tree viewer
 		if save_tree:
-			self.write_tree_html(entries, annotations)
-			if summary:
-				return
+			self.write_tree_html(entries, annotations, page=self._sample_page(result, snplist, called_snps, snp_info), run_info=run_info)
+		return result
+
+	def _summary_page(self, final_snps):
+		'''the header of the summary tree: the final SNPs of the run'''
+		return {"sample": "summary", "summary": True, "finals": sorted(final_snps or [])}
+
+	def _sample_page(self, result, snplist, called_snps, snp_info):
+		'''the header of a sample tree: the final SNP, the support of the call and the SNP path
+			(as in <sample>_snps.txt) with the bases of each SNP on it'''
+		final_snp, _msg, called, _no_data = result
+		called_names = [snp[1] for snp in called] if called else []
+		path = called_names
+		final, support, missing = "NA", "NA", []
+		if final_snp and final_snp[2][0] and len(final_snp) > 5:
+			path = [name for name in final_snp[5] if name in set(called_names)]
+			final = final_snp[1]
+			support = "{found}/{n}".format(found=final_snp[2][1], n=final_snp[3])
+			missing = list(final_snp[4])
+		return {"sample": os.path.basename(self.tree_file)[:-len("_tree.html")], "summary": False,
+			"final": final, "support": support, "no_data": len(missing) if final != "NA" else "NA",
+			"path": path_details(path, snp_info, snplist)}
+
+	def _final_call(self, entries, snplist, called_snps, no_data_info):
+		'''The final SNP call of the sample from the colored tree entries (see draw_tree)'''
 		dlist = []
 		logger.info("Called snps: {called}".format(called=called_snps))
 		if called_snps:
@@ -1222,34 +1333,53 @@ class NewickTree(object):
 					n=len(unknown), ids=", ".join(sorted(set(unknown)))))
 		return kept
 
-	def write_tree_html(self,entries,annotations=None):
+	def provenance(self, run_info=None):
+		'''what the pages record about the database (database_provenance) and the run (run_info,
+			CanSNPer2.run_info; optional, so other callers can leave it out)'''
+		info = database_provenance(self.database_path)
+		info.update(run_info or {})
+		return info
+
+	def write_tree_html(self,entries,annotations=None,page=None,run_info=None):
 		'''Write the self-contained viewer: the colored tree and its data are embedded in a single
 			html file, no server, no javascript downloads, opens in any browser on any OS'''
 		annotations = self._check_annotations(annotations or [], entries)
-		payload = json.dumps({"colors": self.snp_colors, "nodes": entries, "annotations": annotations}, separators=(",", ":"))
+		page = dict(page or {"sample": os.path.basename(self.tree_file)[:-len("_tree.html")], "path": []})
+		info = self.provenance(run_info)
+		payload = json.dumps({"colors": self.snp_colors, "nodes": entries, "annotations": annotations,
+			"page": page, "info": info, "provenance": provenance_lines(info)}, separators=(",", ":"))
 		'''The payload sits inside a <script> block, and json.dumps leaves "<" as it is, so a node
 			name from the database such as "B.1</script><script>..." closed the block and the rest
 			ran as script when the tree was opened. "<" only occurs inside json strings, where
 			\\u003c is the same character, so the data the viewer reads is unchanged.
-			The title comes from the query file name and is escaped as html text. Both
+			The title names the sample and the scheme and is escaped as html text. Both
 			placeholders are filled in one pass, so a placeholder inside a name is not expanded.'''
-		values = {"TITLE": html.escape(os.path.basename(self.tree_file)),
+		title = "CanSNPer2 tree: {sample}".format(sample=page.get("sample") or os.path.basename(self.tree_file))
+		if info.get("scheme"):
+			title += " ({scheme})".format(scheme=info["scheme"])
+		values = {"TITLE": html.escape(title),
 				  "PAYLOAD": payload.replace("<", "\\u003c")}
-		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], TREE_HTML_TEMPLATE)
+		page_html = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], render_template(TREE_HTML_TEMPLATE))
 		with open(self.tree_file, "w") as out:
-			out.write(page)
+			out.write(page_html)
 
-	def write_dashboard(self, reports, dashboard_file, annotations=None):
+	def write_dashboard(self, reports, dashboard_file, annotations=None, run_info=None):
 		'''Write the results overview (DASHBOARD_HTML_TEMPLATE): the sample table and the
 			database tree embedded once, recolored per sample on click. Only the topology and
-			the per-sample SNP states are stored, so the file stays small even for 100+ samples'''
+			the per-sample SNP states are stored, so the file stays small even for 100+ samples.
+			run_info (CanSNPer2.run_info) is shown in the header; it is optional'''
 		entries = self._tree_entries()
 		annotations = self._check_annotations(annotations or [], entries)
 		nodes = [{"id": entry["id"], "name": entry["name"], "parent": entry["parent"], "depth": entry["depth"]} for entry in entries]
-		payload = json.dumps({"colors": self.snp_colors, "nodes": nodes, "samples": reports, "annotations": annotations}, separators=(",", ":"))
+		info = self.provenance(run_info)
+		payload = json.dumps({"colors": self.snp_colors, "nodes": nodes, "samples": reports, "annotations": annotations,
+			"info": info, "provenance": provenance_lines(info)}, separators=(",", ":"))
 		'''same "<" escaping as write_tree_html: a database name must not close the script block'''
-		values = {"TITLE": "CanSNPer2 results", "PAYLOAD": payload.replace("<", "\\u003c")}
-		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], DASHBOARD_HTML_TEMPLATE)
+		title = "CanSNPer2 results"
+		if info.get("scheme"):
+			title += " ({scheme})".format(scheme=info["scheme"])
+		values = {"TITLE": html.escape(title), "PAYLOAD": payload.replace("<", "\\u003c")}
+		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], render_template(DASHBOARD_HTML_TEMPLATE))
 		with open(dashboard_file, "w") as out:
 			out.write(page)
 		return dashboard_file

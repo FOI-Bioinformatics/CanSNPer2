@@ -122,10 +122,16 @@ def test_a_failed_sample_does_not_show_an_old_result_in_the_summary(tmp_path, mo
 	obj.skipped["x"] = "progressiveMauve produced no alignments"
 	monkeypatch.setattr(obj, "create_tree", lambda *args, **kwargs: None)
 	obj.print_summary()
-	assert open(os.path.join(obj.outdir, "snps_summary.txt")).read() == "x\tNA\tNA\n"
+	assert summary_rows(obj) == ["sample\tfinal_snp\tsupport\tsnp_path", "x\tNA\tNA\tNA"]
 	obj.reused.add("x")
 	obj.print_summary()
-	assert open(os.path.join(obj.outdir, "snps_summary.txt")).read() == "x\tS.1\tS.1\n"
+	assert summary_rows(obj) == ["sample\tfinal_snp\tsupport\tsnp_path", "x\tS.1\t1/1\tS.1"]
+
+
+def summary_rows(obj):
+	'''the lines of snps_summary.txt after its # lines on the run'''
+	lines = open(os.path.join(obj.outdir, "snps_summary.txt")).read().splitlines()
+	return [line for line in lines if not line.startswith("#")]
 
 
 def test_query_sequence_names_must_be_unique(tmp_path):
