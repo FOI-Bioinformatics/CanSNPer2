@@ -19,7 +19,7 @@ from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.DatabaseConnection import TreeError as DatabaseTreeError
 from CanSNPer2.modules.SourceCheck import check_modification
 from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
-from CanSNPer2.modules.ExportDatabase import export_source, tree_paths, ExportError
+from CanSNPer2.modules.ExportDatabase import export_source, tree_paths, ExportError, write_outputs
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.SchemeInfo import (STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice,
@@ -90,7 +90,7 @@ def get_arguments():
 
 	export_database = parser.add_argument_group("Export database")
 	export_database.add_argument('--export',  action='store_true',					help="Export the database to text files")
-	export_database.add_argument('--export_format', metavar='', default='source',  			choices=supported_output, help="source: the tree, SNP and reference files that --create reads; newick: the tree; tab is the old name of source (default source)")
+	export_database.add_argument('--export_format', metavar='', default=None,  			choices=supported_output, help="source: the tree, SNP and reference files that --create reads; newick: the tree; tab is the old name of source (default source), only with --export")
 	export_database.add_argument('-o', '--outdir', metavar='',									help="outdir for database export!")
 
 
@@ -133,7 +133,8 @@ def convert(args, logger):
 		sequences (the format before 2.3.0) is converted to positions on each reference sequence.
 		It is handled before the database checks, which refuse the old format. Returns the exit code.'''
 	from CanSNPer2.modules.ConvertPositions import (ConversionError, convert_table, convert_database,
-		genome_files, table_genomes, database_genomes, references_from_file, references_from_database, check_target)
+		genome_files, table_genomes, database_genomes, references_from_file, references_from_database, check_target,
+		check_table_format, check_database_format)
 	if bool(args.annotation) == bool(args.database):
 		logger.error("--convert converts either a SNP source file (--annotation) or a database (--database), give one of them!")
 		return 1
@@ -149,6 +150,7 @@ def convert(args, logger):
 	try:
 		check_target(source, target)
 		if args.annotation:
+			check_table_format(source) ## before any reference is fetched
 			references = references_from_file(args.references) if args.references else None
 			files = genome_files(args.refdir, table_genomes(source), references)
 			count = convert_table(source, target, files, sequences=sequences)
@@ -157,6 +159,7 @@ def convert(args, logger):
 				check_database(source, current_format=False)
 			except ConnectionError as e:
 				raise ConversionError(str(e))
+			check_database_format(source) ## before any reference is fetched
 			references = references_from_database(source)
 			if args.references:
 				references.update(references_from_file(args.references))
@@ -173,6 +176,44 @@ def convert(args, logger):
 		n=count, snps="SNP" if count == 1 else "SNPs", name=os.path.basename(source), m=len(sequences),
 		noun="sequence" if len(sequences) == 1 else "sequences", target=target))
 	return 0
+
+
+def check_mode(args, logger):
+	'''The modes are --create, --import, --export, --info, --convert and a modification
+		(--mod_file, --remove, --replace); the source files (--tree, --annotation, --references)
+		and the options of a mode are not modes. More than one mode used to be resolved by
+		precedence, one of them silently dropped. Returns False after an error message.'''
+	modes = []
+	for flag, given in (("--create", args.create), ("--import", args.do_import), ("--export", args.export),
+			("--info", args.info), ("--convert", args.convert)):
+		if given:
+			modes.append(flag)
+	modification = [flag for flag, given in (("--mod_file", args.mod_file), ("--remove", args.remove),
+		("--replace", args.replace)) if given]
+	if modification:
+		modes.append(" ".join(modification))
+	if len(modes) > 1:
+		logger.error("{given} cannot be combined, give one of --create, --import, --export, --info, --convert "
+			"or a modification (--mod_file, --remove) at a time".format(given=" and ".join(modes)))
+		return False
+	if args.export_format is not None and not args.export:
+		logger.error("--export_format {format} only applies with --export, add --export or remove --export_format".format(
+			format=args.export_format))
+		return False
+	if args.replace and not args.mod_file:
+		logger.error("--replace replaces a node with the tree in --mod_file, give --mod_file (and --parent) with --replace!")
+		return False
+	return True
+
+
+def check_folder(database, logger):
+	'''The folder of a database that is to be written must exist. Returns False after an error message.'''
+	folder = os.path.dirname(database) or "."
+	if not os.path.isdir(folder):
+		logger.error("The folder {folder} for the database {db} does not exist, make the folder or choose "
+			"another path".format(folder=folder, db=database))
+		return False
+	return True
 
 
 def modify(args, logger):
@@ -260,6 +301,9 @@ def command():
 	args = get_arguments()
 	logger = get_logger(args)
 	logger.debug(args)
+	if not check_mode(args, logger):
+		exit(1)
+	args.export_format = args.export_format or "source"
 	scheme_options = [option for option, value in (("--scheme_name", args.scheme_name),
 		("--scheme_status", args.scheme_status), ("--scheme_source", args.scheme_source)) if value is not None]
 	if scheme_options and not (args.create or args.do_import):
@@ -286,6 +330,8 @@ def command():
 			exit(1)
 		if not args.database:
 			logger.error("--import needs the new database to write, give it with --database!")
+			exit(1)
+		if not check_folder(args.database, logger):
 			exit(1)
 		try:
 			counts = import_from_sources(args.tree, args.annotation, args.references,
@@ -341,11 +387,12 @@ def command():
 			if args.outdir:
 				'''-o is documented as the export folder, so write the tree to a file instead of only
 					printing it to stdout when it is given (issue #131)'''
-				if not os.path.exists(args.outdir):
-					os.makedirs(args.outdir, exist_ok=True)
 				newick_file = os.path.join(args.outdir,"{db}_tree.nwk".format(db=os.path.basename(args.database).rsplit(".",1)[0]))
-				with open(newick_file,"w") as newick_out:
-					print(NT.newickTree,file=newick_out)
+				try:
+					write_outputs({newick_file: "{tree}\n".format(tree=NT.newickTree)}) ## never overwrites, no partial file
+				except ExportError as e:
+					logger.error("The database cannot be exported: {error}".format(error=e))
+					exit(1)
 				logger.info("Newick tree written to {file}".format(file=newick_file))
 			else:
 				NT.print()
@@ -359,6 +406,10 @@ def command():
 			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
+		if not (args.mod_file or args.annotation or args.references):
+			logger.error("Nothing to do with {db}: give a mode, --export, --info or --remove --parent, or the changes to "
+				"make, --mod_file, --annotation or --references!".format(db=args.database))
+			exit(1)
 		'''--annotation and --references need no --mod_file. A modification without any source is a usage error, not a crash (issue #150); a source
 			file without the expected columns is refused, not a crash in the loader (issue #154)'''
 		exit(modify(args, logger))
@@ -379,6 +430,8 @@ def command():
 				exit(1)
 			logger.error("The database {db} already exists, --create builds a new database, "
 				"choose a new name or remove it first".format(db=args.database))
+			exit(1)
+		if not check_folder(args.database, logger):
 			exit(1)
 		try:
 			CanSNPDB = CanSNPDatabase(scheme_info=scheme_info, **vars(args))

@@ -141,6 +141,8 @@ def _convert_position(references, genome, position, derived, ancestral):
 		joined = int(position)
 	except (TypeError, ValueError):
 		return None, "the position {position} is not a whole number".format(position=position)
+	if joined < 1:
+		return None, "the joined position {pos} is not a positive position, positions count from 1".format(pos=joined)
 	located = reference.locate(joined)
 	if located is None:
 		return None, ("joined position {pos} is beyond the end of the joined sequences of {path} "
@@ -214,6 +216,8 @@ def convert_table(source, target, genome_files, sequences=None):
 				continue
 			placed.add(converted[0])
 			count += 1
+			for key in ("derived_base", "ancestral_base"):
+				fields[column[key]] = fields[column[key]].upper() ## --create and --import refuse lower case bases
 			output.append("\t".join(fields[:pos_i] + [converted[0], str(converted[1])] + fields[pos_i + 1:]) + ending)
 	if header is None:
 		raise ConversionError("{source} has no header row".format(source=source))
@@ -261,7 +265,7 @@ def convert_database(source_db, target_db, genome_files, sequences=None, scheme_
 			refused.append("{db}: {snp} (node {node}): {reason}".format(db=source_db, snp=snp_id, node=node_id, reason=reason))
 			continue
 		placed.add(converted[0])
-		converted_rows.append((node_id, snp_id, converted[0], converted[1], ancestral, derived, reference, date, genome_i))
+		converted_rows.append((node_id, snp_id, converted[0], converted[1], str(ancestral).upper(), str(derived).upper(), reference, date, genome_i))
 	if refused:
 		raise ConversionError(_refusal(source_db, refused))
 	partial = _temporary(target_db)
@@ -319,6 +323,32 @@ def database_genomes(path):
 			JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)''').fetchall()]
 	finally:
 		conn.close()
+
+
+def check_table_format(path):
+	'''Raise ConversionError when a SNP source file is already in the current format, before any
+		reference is fetched'''
+	with read_text(path) as fin:
+		for line in fin:
+			line = line.rstrip("\r\n")
+			if line.strip() == "" or line.startswith("#"):
+				continue
+			if "sequence_position" in line.split("\t"):
+				raise ConversionError("{source} already has a sequence_position column, it is in the current format, "
+					"nothing to convert".format(source=path))
+			return
+
+
+def check_database_format(path):
+	'''Raise ConversionError when a database already stores positions per reference sequence'''
+	conn = sqlite3.connect(path)
+	try:
+		columns = set(row[1] for row in conn.execute("PRAGMA table_info(snp_annotation)").fetchall())
+	finally:
+		conn.close()
+	if "sequence_position" in columns:
+		raise ConversionError("The database {path} already stores positions per reference sequence, it is in the "
+			"current format, nothing to convert".format(path=path))
 
 
 def table_genomes(path):

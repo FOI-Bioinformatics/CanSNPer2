@@ -114,7 +114,12 @@ def check_database(path, current_format=True):
 	'''
 	if not os.path.exists(path):
 		raise ConnectionError("The database {path} does not exist, download it or create it with CanSNPer2-database --create".format(path=path))
-	conn = sqlite3.connect(path)
+	if os.path.isdir(path):
+		raise ConnectionError("{path} is a directory, give the path of a CanSNP database file".format(path=path))
+	try:
+		conn = sqlite3.connect(path)
+	except sqlite3.Error as e:
+		raise ConnectionError("The database {path} cannot be opened: {error}".format(path=path,error=e))
 	try:
 		tables = set([row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()])
 		columns = set([row[1] for row in conn.execute("PRAGMA table_info(snp_annotation)").fetchall()])
@@ -568,7 +573,7 @@ class CreateDatabase(object):
 			self.create_table(self.sql_create_rank_table)
 			self.conn.commit()
 		else:
-			raise ConnectionError("Error! cannot connet to the database {db}".format(db=database))
+			raise ConnectionError("Error! cannot connect to the database {db}".format(db=database))
 		return
 
 class TaxonomyDBConnection(CreateDatabase):
