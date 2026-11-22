@@ -112,7 +112,7 @@ CanSNPer2-download --database my_database.db
 CanSNPer2 --database francisella_tularensis.db fastadir/*.fasta --summary
 ```
 
-The summary parameter will give a final result file with all SNPs that could be confirmed as well as a final CanSNP tree (self-contained html, opens in any browser) with all SNPs from set colored.
+The summary parameter gives `snps_summary.txt`, a table of the final SNP, its support and the SNP path of every sample, and a tree (self-contained html, opens in any browser) with the final SNPs of the run colored. Every run also writes `summary.html`, the results overview; see [Output files](#output-files).
 
 For more options CanSNPer2 --help
 
@@ -482,7 +482,7 @@ its results are written as `<outdir>/x_snps.txt` and `<outdir>/x_not_called.txt`
 different files with the same name in one run stop the run before anything is aligned;
 rename one or type them into separate `--outdir`. The same file given twice is typed once.
 
-`x_snps.txt` ends with a `Query file:` line that gives the input it was made from and the
+`x_snps.txt` ends with a `# Query file:` line that gives the input it was made from and the
 SHA-256 of that file. A later run uses an existing result again (without `--rerun`) only
 when the input has the same SHA-256; a different input with the same name is not typed and
 the reason is reported. Result files from versions before this line was added are used
@@ -521,12 +521,74 @@ The tables `x_snps.txt` and `x_not_called.txt` have the columns `Name`, `Referen
 position on it. The columns `ReferenceSeq` and `ReferenceSeqPosition` of version 2.2 are
 removed, as `Sequence` and `Pos` now carry that information.
 
-`x_snps.txt` has one table row for every called SNP, followed by the line `SNP path:`
-and the line `Final SNP:`. For a called sample the SNP path is the chain of the final SNP,
+`x_snps.txt` has one table row for every called SNP. For a called sample the SNP path is
 the called SNPs from the root of the tree down to the final SNP. Derived SNPs that were
-called outside that chain, on a competing branch, are not in the path; the sample is marked
+called outside the SNP path, on a competing branch, are not in the path; the sample is marked
 `review` in `summary.html` with a reason that names them. For a sample that is not called
 the path lists all called SNPs.
+
+### Output files
+
+Each sample gives these files in `--outdir`:
+
+- `x_snps.txt`: the table of called SNPs (a header row and one row per SNP), followed by
+  `#` comment lines:
+
+  ```
+  # SNP path: Root;abc_205;1522E;5754E;1344D;3740D
+  # Final SNP: 3740D found/depth: 6/6
+  # Query file: /data/x.fasta sha256:0930d284...
+  # Typing settings: database sha256:9f5a591a... min_required_hits=3 strictness=0.7 mask=0
+  ```
+
+  The table can be read with any reader that skips comment lines, for example
+  `pandas.read_csv("x_snps.txt", sep="\t", comment="#")`. The header row is written also
+  when no SNP was called. Result files of earlier versions, whose trailing lines have no
+  `#`, are read as before when a run uses them again.
+- `x_not_called.txt`: the same columns for the SNP positions that were not called, and for
+  the positions without alignment data (`Target base` `N/A`), followed by the
+  `# Query file:` and `# Typing settings:` lines.
+- `x_tree.html` (with `--save_tree`): the tree of the database painted with the states of the
+  sample. The header names the sample, the scheme, the final SNP and its support, and the
+  run (CanSNPer2 version, aligner, settings, database and its SHA-256, reference genomes,
+  date). The SNP path is listed next to the tree, from the root to the final SNP, with the
+  ancestral and derived base and the base found in the sample at each SNP; clicking an entry
+  moves the tree to that SNP.
+
+Every run with queries writes `summary.html`, the results overview, and `--summary` adds
+`snps_summary.txt` and `summary_tree.html`:
+
+- `summary.html` opens in a browser without a server or a network connection. The header
+  records the scheme (name, status and source from the scheme information of the
+  database), the reference genomes, the database file and its SHA-256, the CanSNPer2
+  version, the aligner, `min_required_hits`, `strictness`, `mask` and the date of the run. A
+  scheme whose status is draft or unknown, a database without scheme information and a
+  scheme with known issues get the notice that the run logs as an amber banner.
+  The table lists each sample with its final SNP, the support of the call (derived SNPs
+  found on the SNP path / SNPs on the SNP path, for example `6/6`), the number of SNP
+  positions on the SNP path without alignment data, and a status:
+  - `clean`: the SNP path is confirmed; every SNP on it has alignment data, none is near an
+    alignment edge, and no derived SNP lies outside it;
+  - `review`: the SNP path is confirmed, but SNPs on it have no alignment data or are
+    flagged at an alignment edge, or derived SNPs were called outside it;
+  - `not called`: no SNP path met `--min_required_hits` and `--strictness`, no derived SNP
+    was found, or two SNP paths competed at the same depth;
+  - `failed`: the alignment or the processing of the sample failed;
+  - `reused`: the result was read from an earlier run (`--rerun` computes it again).
+
+  Samples that need a look are listed first. Selecting a sample paints the tree with its
+  states and shows its SNP path, the reasons for its status, links to its result files and
+  the labels that `--annotations` gives the final SNP. In the tree, derived SNPs are green,
+  ancestral SNPs grey, another base blue, a position without alignment data an open circle,
+  and a SNP that was not tested (a reused result) a small open circle; the SNP path is drawn
+  as a thick green line and an amber ring marks a SNP near an alignment edge. "Download
+  table (TSV)" saves the table with the run as `#` lines, "Save SVG" saves the tree as it is
+  drawn, and the page prints with the header, the table and the tree.
+- `snps_summary.txt` starts with `#` lines on the run (version, date, database and its
+  SHA-256, scheme, reference genomes, aligner, settings), followed by the header row
+  `sample`, `final_snp`, `support`, `snp_path` and one tab separated row per sample. `support`
+  is `NA` for a sample that was not called.
+- `summary_tree.html`: the tree with the final SNPs of the run in green.
 
 ### Upgrading from 2.2
 
