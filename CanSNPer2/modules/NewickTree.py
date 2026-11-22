@@ -832,6 +832,14 @@ class NewickTree(object):
 	def __repr__(self):
 		return "NewickTree()"
 
+	def close(self):
+		'''close the database connection; one tree is made per sample, and the connections stayed
+			open until the garbage collector freed them'''
+		try:
+			self.database.disconnect()
+		except Exception:
+			pass
+
 	def print(self):
 		print(self.newickTree)
 

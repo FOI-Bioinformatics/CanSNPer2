@@ -227,9 +227,10 @@ class CanSNPDatabase(DatabaseFunctions):
 				try:
 					genome_i = self.genomes[ddict["genome"]]
 				except KeyError:
-					logger.warning("No genome annotation could be found add a genome annotation file to command!")
-					logger.debug(ddict)
-					_id = False
+					'''a SNP on a genome that is not in the references file was left out with a warning;
+						check_sources refuses it first, the loader does as well'''
+					raise SourceFileError("{file}: SNP {id} is on genome '{genome}', which is not in the references file".format(
+						file=annotation_file, id=ddict["snp_id"], genome=ddict["genome"]))
 				if _id is not False: ## a looked up node id is checked against False, not for truth: an id of 0 is a real id (issue #202)
 					logger.debug("Add annotation: {dic}, {_id}, {gid}".format(dic=ddict,_id=_id,gid=genome_i))
 					self.add_annotation(ddict, id=_id, genome_i=genome_i)

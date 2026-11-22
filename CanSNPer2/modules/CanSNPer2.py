@@ -4,6 +4,7 @@ Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 '''
 
 import os
+import re
 import shutil
 import hashlib
 import tempfile
@@ -63,6 +64,9 @@ MauveError = AlignmentError
 class CanSNPer2Error(Error):
 	"""docstring for CanSNPer2Error"""
 	pass
+
+SEQUENCE_LINE = re.compile(r"^[ACGTUNRYSWKMBDHVacgtunryswkmbdhv*-]+$") ## a line of nucleotide sequence
+
 
 def ensure_directory(path, option):
 	'''Create the folder when it is missing and check that it can be written to. A path that is a file,
@@ -653,7 +657,10 @@ class CanSNPer2(object):
 			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
 		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
-		final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations)
+		try:
+			final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations)
+		finally:
+			newickTree.close()
 		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
 		return final_snp
 
@@ -684,7 +691,13 @@ class CanSNPer2(object):
 				"not combined with {n} other query argument(s); put all files in the list, or give the FASTA files without a list".format(
 				lst=lists[0], n=len(queries)-1))
 		logger.info("A query list was found, reading file paths from {q}".format(q=lists[0]))
-		return self.read_query_textfile_input(lists[0])
+		paths = self.read_query_textfile_input(lists[0])
+		'''a FASTA file without its header line is read as a list too; its lines are sequence, not
+			file paths, and each was reported as a missing query file'''
+		if all(SEQUENCE_LINE.match(line) for line in paths[:20]) and not any(os.path.exists(line) for line in paths[:20]):
+			raise CanSNPer2Error("{lst} has no FASTA header: its lines are sequence, not file paths of a query list; "
+				"add a header line (>name) before the sequence".format(lst=lists[0]))
+		return paths
 
 	def read_query_textfile_input(self,query_file):
 		'''Read a query list: one file path per line.
@@ -1052,8 +1065,11 @@ class CanSNPer2(object):
 		except ValueError as e:
 			logger.warning("No results overview written: {error}".format(error=e))
 			return
-		dashboard = newickTree.write_dashboard([self.sample_reports[name] for name in self.sample_reports],
-				"{outdir}/summary.html".format(outdir=self.outdir), self.annotations)
+		try:
+			dashboard = newickTree.write_dashboard([self.sample_reports[name] for name in self.sample_reports],
+					"{outdir}/summary.html".format(outdir=self.outdir), self.annotations)
+		finally:
+			newickTree.close()
 		logger.info("Results overview: open {dashboard} in a browser".format(dashboard=dashboard))
 
 	def run(self,database):
@@ -1075,10 +1091,14 @@ class CanSNPer2(object):
 			'''a missing query used to be found only after the queries before it were aligned'''
 			unusable = [q for q in self.query if not os.path.isfile(q)]
 			if unusable and not self.keep_going:
-				raise CanSNPer2Error("These query files were not found or are not files: {files}".format(files=", ".join(unusable)))
+				shown = ", ".join(unusable[:5]) + (" and {n} more".format(n=len(unusable)-5) if len(unusable) > 5 else "")
+				raise CanSNPer2Error("{n} query file(s) were not found or are not files: {files}".format(n=len(unusable), files=shown))
 			'''the database and the reference folder are checked once, before the first sample'''
 			self.check_start()
-			self.check_aligner()
+			'''the aligner is checked only when a sample will be aligned: a run whose samples all have a
+				result from an earlier run (made again for a summary, for example) needs no aligner'''
+			if self.rerun or any(not os.path.exists(os.path.join(self.outdir, "{name}_snps.txt".format(name=self.sample_name(q)))) for q in self.query):
+				self.check_aligner()
 
 			'''Main function of CanSNPer2
 					1. Align sequences with the selected aligner (progressiveMauve by default)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys, os
 import textwrap
+import time
 import gzip
 import zlib
 import queue
@@ -27,6 +28,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 120 ## seconds per connection, urlretrieve had no timeout at all (issue #218)
+DOWNLOAD_DEADLINE = 60*60 ## seconds for the whole download of one genome; the timeout above is per read
+
+
+def join_workers(processes, deadline):
+	'''Wait for the download processes, together at most deadline seconds (plus a short margin);
+		processes still running then are stopped. Returns the stopped processes.'''
+	end = time.monotonic() + deadline
+	late = []
+	for p in processes:
+		p.join(max(0, end - time.monotonic()))
+		if p.is_alive():
+			p.terminate()
+			p.join(5)
+			late.append(p)
+	return late
 
 def assembly_report_url(genome_url):
 	'''the assembly report in the same NCBI folder as the genomic fasta file'''
@@ -125,10 +141,19 @@ class DownloadGenomes(object):
 		logging.info(records)
 		return records
 
-	def retrieve(self, link, target, timeout=DOWNLOAD_TIMEOUT):
-		'''Fetch link into target; urlopen takes a timeout, urlretrieve never did (issue #218)'''
+	def retrieve(self, link, target, timeout=DOWNLOAD_TIMEOUT, deadline=DOWNLOAD_DEADLINE):
+		'''Fetch link into target; urlopen takes a timeout, urlretrieve never did (issue #218). The
+			timeout applies to each read, so a server that keeps sending a little at a time was never
+			stopped; deadline limits the whole download.'''
+		end = time.monotonic() + deadline
 		with urlopen(link, timeout=timeout) as response, open(target,"wb") as out:
-			shutil.copyfileobj(response, out)
+			while True:
+				block = response.read(1 << 20)
+				if not block:
+					break
+				out.write(block)
+				if time.monotonic() > end:
+					raise TimeoutError("the download of {link} did not finish within {minutes:g} minutes".format(link=link, minutes=deadline/60))
 
 	def download(self,genome_id, assembly, refid ,source="genbank", directory="references", results=None, snps=None):
 		'''Download genomes from refseq or genbank on request
@@ -298,8 +323,9 @@ class DownloadGenomes(object):
 			p = _MP_CTX.Process(target=self.download, args=(genome_id, assembly, refid), kwargs=kwargs)
 			p.start()
 			threads.append(p)
-		for p in threads:
-			p.join() # this blocks until the process terminates
+		'''each worker stops its own download at the deadline; the margin covers unpacking and checking'''
+		for p in join_workers(threads, DOWNLOAD_DEADLINE + 15*60):
+			logger.error("A download process was still running after {minutes:g} minutes and was stopped".format(minutes=(DOWNLOAD_DEADLINE + 15*60)/60))
 		'''the workers are separate processes: this is the only way their outcome
 			reaches the log and the exit code (issue #218)'''
 		reports = {}
