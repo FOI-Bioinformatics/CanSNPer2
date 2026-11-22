@@ -45,18 +45,18 @@ MODULES = {
 
 ## the scheme that the modification and creation cases start from
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tB.1\n"
-SNP_HEADER = "\t".join(helpers.SNP_HEADER)
+SNP_HEADER = "\t".join(helpers.CANSNP_HEADER)
 OLD_SNP_HEADER = "snp_id\tstrain\treference\tgenome\tposition\tderived_base\tancestral_base"
-SNP_ROWS = ["R\ts1\tPaper2020\tREF1\tCP000001.1\t10\tA\tG",
-	"A.1\ts1\tPaper2020\tREF1\tCP000001.1\t100\tT\tC",
-	"A.2\ts1\tPaper2021\tREF1\tCP000001.1\t200\tG\tA",
-	"B.1\ts2\tPaper2020\tREF2\tCP000002.1\t400\tA\tC"]
+SNP_ROWS = ["R\t1\tPaper2020\tREF1\tCP000001.1\t10\tA\tG\t\tyes",
+	"A.1\t1\tPaper2020\tREF1\tCP000001.1\t100\tT\tC\t\tyes",
+	"A.2\t1\tPaper2021\tREF1\tCP000001.1\t200\tG\tA\t\tyes",
+	"B.1\t1\tPaper2020\tREF2\tCP000002.1\t400\tA\tC\t\tyes"]
 REFERENCES_HEADER = "genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
 REFERENCES = (REFERENCES_HEADER +
 	"REF1\ts1\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n"
 	"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\tASM2v1\n")
 ## a SNP on the node C.1 that the modification file adds below R
-NEW_SNP = "C.1\ts1\tPaper2022\tREF1\tCP000001.1\t500\tA\tC"
+NEW_SNP = "C.1\t1\tPaper2022\tREF1\tCP000001.1\t500\tA\tC\t\tyes"
 MOD_FILE = "child\tparent\nC.1\tR\n"
 
 ## a reference genome of 10,000 bases on one sequence, chr1
@@ -143,8 +143,9 @@ def creation(option="--create", references=REFERENCES):
 def repo_files(name="test_scheme", status="verified", manifest=True, snp_header=SNP_HEADER, hashed=("snp", "tree", "references")):
 	'''the files of a repository laid out as CanSNPer2-data with one scheme'''
 	folder = "schemes/{n}/{n}".format(n=name)
+	## the SNP file before 2.3.0: snp_id, strain, reference, genome, position, derived, ancestral
 	rows = SNP_ROWS if snp_header == SNP_HEADER else [
-		"\t".join(row.split("\t")[:4] + row.split("\t")[5:]) for row in SNP_ROWS]
+		"\t".join([f[0], "s1", f[2], f[3], f[5], f[6], f[7]]) for f in (row.split("\t") for row in SNP_ROWS)]
 	files = {
 		folder + "_snp.txt": snp_header + "\n" + "".join(row + "\n" for row in rows),
 		folder + "_tree.txt": TREE,
@@ -310,18 +311,21 @@ def case(id, command, build, exit, fragments, inject="", forbidden=(), traceback
 CASES = [
 	# 1. modification of an existing database ------------------------------------------
 	case("modify: SNP on an unknown node", "CanSNPer2-database",
-		modification(snp_rows=[NEW_SNP.replace("C.1", "X.9", 1)]), 1, "snp_id 'X.9' does not appear in the tree"),
+		modification(snp_rows=[NEW_SNP.replace("C.1", "X.9", 1)]), 1, "node 'X.9' does not appear in the tree"),
 	case("modify: SNP on an unknown genome", "CanSNPer2-database",
 		modification(snp_rows=[NEW_SNP.replace("REF1", "REF9")]), 1, "genome 'REF9' is not listed"),
 	case("modify: short SNP row", "CanSNPer2-database",
-		modification(snp_rows=["C.1\ts1\tPaper2022\tREF1\tCP000001.1"]), 1, "expected 8 columns, found 5"),
+		modification(snp_rows=["C.1\t1\tPaper2022\tREF1\tCP000001.1"]), 1, "expected 10 columns, found 5"),
 	case("modify: SNP file with the old header", "CanSNPer2-database",
 		modification(header=OLD_SNP_HEADER, snp_rows=["C.1\ts1\tPaper2022\tREF1\t500\tA\tC"]), 1, "--convert"),
-	case("modify: SNP on a node that already has one", "CanSNPer2-database",
-		modification(snp_rows=[NEW_SNP, "A.1\ts1\tPaper2022\tREF1\tCP000001.1\t900\tA\tC"]), 1,
-		"snp_id 'A.1' already has a SNP in"),
+	case("modify: canSNP of a rank that the node already has", "CanSNPer2-database",
+		modification(snp_rows=[NEW_SNP, "A.1\t1\tPaper2022\tREF1\tCP000001.1\t900\tA\tC\t\tno"]), 1,
+		"node 'A.1' already has a canSNP of rank 1 in"),
+	case("modify: typed canSNP on a node that already has one", "CanSNPer2-database",
+		modification(snp_rows=[NEW_SNP, "A.1\t2\tPaper2022\tREF1\tCP000001.1\t900\tA\tC\t\tyes"]), 1,
+		"node 'A.1' already has a typed canSNP in"),
 	case("modify: SNP insert fails", "CanSNPer2-database",
-		modification(), 1, ["The SNP C.1 could not be written", "database or disk is full"], inject=FAIL_SNP_INSERT),
+		modification(), 1, ["The canSNP C.1 (rank 1) could not be written", "database or disk is full"], inject=FAIL_SNP_INSERT),
 	case("modify: reference genome already in the database", "CanSNPer2-database",
 		modification(snp_rows=None, references=REFERENCES_HEADER + "REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\tASM2v1\n"), 1,
 		"genome 'REF2' is already in"),
@@ -407,7 +411,7 @@ CASES = [
 		typing(sql=["UPDATE snp_annotation SET sequence_position='abc' WHERE node_id=2"]), 1,
 		"The SNP positions of"),
 	case("typing: database without SNPs", "CanSNPer2",
-		typing(sql=["DELETE FROM snp_annotation"]), 1, "has no SNPs"),
+		typing(sql=["DELETE FROM snp_annotation"]), 1, "has no canSNPs"),
 	case("typing: database without reference genomes", "CanSNPer2",
 		typing(sql=["DELETE FROM snp_references"]), 1, "lists no reference genomes"),
 	case("typing: SNP on a node missing from nodes", "CanSNPer2",

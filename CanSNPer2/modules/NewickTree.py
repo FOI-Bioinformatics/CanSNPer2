@@ -1043,7 +1043,10 @@ class NewickTree(object):
 	def get_nodes(self,table="nodes"):
 		'''Function that returns all nodes in the database'''
 		nt = {}
-		SELECT = "SELECT id,name,snp_id FROM {table} LEFT JOIN snp_annotation on (snp_annotation.node_id = {table}.id)".format(table=table)
+		## the typed filter belongs in the ON clause: in a WHERE it would turn the LEFT JOIN into
+		## an inner join and drop the nodes that carry no canSNP, which are the label nodes
+		SELECT = ("SELECT id,name,snp_id FROM {table} LEFT JOIN snp_annotation on "
+			"(snp_annotation.node_id = {table}.id AND snp_annotation.typed = 1)").format(table=table)
 		for id,name,snp_id in self.database.query(SELECT).fetchall():
 			if snp_id != None:
 				nt[id] = snp_id
@@ -1502,7 +1505,7 @@ class NewickTree(object):
 							snp_annotation.derived_base
 						FROM snp_annotation
 						LEFT JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)
-						WHERE snp_annotation.snp_id IN ({marks})'''.format(marks=",".join(["?"]*len(chunk)))
+						WHERE snp_annotation.snp_id IN ({marks}) AND snp_annotation.typed = 1'''.format(marks=",".join(["?"]*len(chunk)))
 			for snp_id,genome,sequence,position,ancestral,derived in self.database.query(QUERY,insert_val=tuple(chunk),getres=True).fetchall():
 				'''the empty last column keeps the rows in the shape of SNP_FILE_COLUMNS, whose
 					edge flag cannot be computed for a position that no alignment carried; the

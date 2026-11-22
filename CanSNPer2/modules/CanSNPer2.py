@@ -240,6 +240,7 @@ class CanSNPer2(object):
 			try:
 				n_references = db.query("SELECT count(*) FROM snp_references").fetchone()[0]
 				n_snps = db.query("SELECT count(*) FROM snp_annotation").fetchone()[0]
+				n_typed = db.query("SELECT count(*) FROM snp_annotation WHERE typed = 1").fetchone()[0]
 				orphans = db.query('''SELECT snp_id, node_id FROM snp_annotation
 						WHERE node_id NOT IN (SELECT id FROM nodes) OR node_id NOT IN (SELECT child FROM tree)
 						ORDER BY node_id''').fetchall()
@@ -251,8 +252,12 @@ class CanSNPer2(object):
 			raise CanSNPer2Error("The database {db} lists no reference genomes, nothing can be typed against it; build it "
 				"again with its references file".format(db=database))
 		if n_snps == 0:
-			raise CanSNPer2Error("The database {db} has no SNPs, nothing can be typed against it; build it again with "
-				"its SNP file".format(db=database))
+			raise CanSNPer2Error("The database {db} has no canSNPs, nothing can be typed against it; build it again with "
+				"its canSNP file".format(db=database))
+		if n_typed == 0:
+			raise CanSNPer2Error("The database {db} has {n} canSNP(s) but none of them is marked typed, nothing can be "
+				"called against it; build it again from a canSNP file that marks one canSNP of each node typed".format(
+				db=database, n=n_snps))
 		if orphans:
 			raise CanSNPer2Error("The database {db} has {n} SNP(s) on node ids that are not in the nodes or tree table: "
 				"{snps}; export it with CanSNPer2-database --export, correct the files and build it again".format(

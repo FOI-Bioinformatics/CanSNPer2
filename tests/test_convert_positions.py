@@ -169,8 +169,14 @@ def test_cli_converts_a_snp_file_and_a_database(tmp_path):
 	result = run_cli(tmp_path, "--convert", "--annotation", source, "--refdir", str(tmp_path / "refs"),
 		"-o", str(tmp_path / "out"))
 	assert result.returncode == 0, result.stderr
-	assert "converted 2 SNPs of old_snp.txt to positions on 2 reference sequences" in result.stdout
-	assert os.path.exists(str(tmp_path / "out" / "old_snp.txt"))
+	assert "converted 2 canSNPs of old_snp.txt to positions on 2 reference sequences" in result.stdout
+	## a converted SNP file is written as the canSNP file of the scheme
+	assert os.path.exists(str(tmp_path / "out" / "old_canSNPs.txt"))
+	lines = [line for line in open(str(tmp_path / "out" / "old_canSNPs.txt")).read().splitlines()
+		if line.strip() and not line.startswith("#")]
+	header = lines[0].split("\t")
+	assert header[:2] == ["node", "rank"] and header[-2:] == ["score", "typed"]
+	assert [row.split("\t")[-1] for row in lines[1:]] == ["yes", "yes"]
 	db = old_database(tmp_path / "old.db")
 	result = run_cli(tmp_path, "--convert", "--database", db, "--refdir", str(tmp_path / "refs"),
 		"-o", str(tmp_path / "out"))
@@ -188,7 +194,7 @@ def test_cli_names_one_reference_sequence_in_the_singular(tmp_path):
 	result = run_cli(tmp_path, "--convert", "--annotation", source, "--refdir", str(tmp_path / "refs"),
 		"-o", str(tmp_path / "out"))
 	assert result.returncode == 0, result.stderr
-	assert "converted 1 SNP of old_snp.txt to positions on 1 reference sequence, written to" in result.stdout
+	assert "converted 1 canSNP of old_snp.txt to positions on 1 reference sequence, written to" in result.stdout
 
 
 def test_downloads_missing_reference_once(tmp_path, monkeypatch):
@@ -318,6 +324,86 @@ def test_cli_records_scheme_info_in_a_converted_database(tmp_path):
 		"-o", str(tmp_path / "out"))
 	assert result.returncode == 0, result.stderr
 	info = read_scheme_info(str(tmp_path / "out" / "old.db"))
-	assert info == {"format": "2.3", "built_with": __version__, "built": datetime.date.today().isoformat(),
+	assert info == {"format": "2.4", "built_with": __version__, "built": datetime.date.today().isoformat(),
 		"status": "unknown", "source": "converted from old.db"}, info
 	assert read_scheme_info(db) == {}
+
+
+# the step from 2.3.0 to the canSNP format: the rank, score and typed columns ------------
+
+def database_2_3(path):
+	'''a database of 2.3.0: positions per reference sequence, one canSNP per node, and no
+		rank, score or typed column'''
+	return helpers.make_db(path, [("A.1", "chrI", 10, "C", "T"), ("A.2", "chrI", 20, "G", "A")],
+		old_2_3=True)
+
+
+def test_a_2_3_database_is_upgraded_without_reference_files(tmp_path):
+	'''no position moves, so the upgrade needs no --refdir'''
+	from CanSNPer2.modules.ConvertPositions import upgrade_database
+	source = database_2_3(tmp_path / "old.db")
+	target = str(tmp_path / "new.db")
+	assert upgrade_database(source, target) == 2
+	assert check_database(target)
+	conn = sqlite3.connect(target)
+	rows = conn.execute("SELECT snp_id, snp_annotation.rank, score, typed FROM snp_annotation"
+		" ORDER BY snp_id").fetchall()
+	conn.close()
+	assert rows == [("A.1", 1, None, 1), ("A.2", 1, None, 1)]
+
+
+def test_an_upgrade_leaves_the_source_database_unchanged(tmp_path):
+	from CanSNPer2.modules.ConvertPositions import upgrade_database
+	source = database_2_3(tmp_path / "old.db")
+	before = open(source, "rb").read()
+	upgrade_database(source, str(tmp_path / "new.db"))
+	assert open(source, "rb").read() == before
+
+
+def test_a_2_3_database_is_refused_by_the_database_check(tmp_path):
+	'''typing, downloading and exporting all go through check_database, which names --convert'''
+	from CanSNPer2.modules.DatabaseConnection import ConnectionError as DBConnectionError
+	source = database_2_3(tmp_path / "old.db")
+	with pytest.raises(DBConnectionError) as error:
+		check_database(source)
+	assert "--convert" in str(error.value) and "typed" in str(error.value)
+	assert check_database(source, current_format=False)
+
+
+def test_the_cli_upgrades_a_2_3_database_without_refdir(tmp_path):
+	source = database_2_3(tmp_path / "old.db")
+	result = run_cli(tmp_path, "--convert", "--database", source, "-o", str(tmp_path / "out"))
+	assert result.returncode == 0, result.stderr
+	assert "upgraded 2 canSNPs of old.db to the canSNP format" in result.stdout
+	assert check_database(str(tmp_path / "out" / "old.db"))
+
+
+def test_the_cli_upgrades_a_2_3_snp_file(tmp_path):
+	source = write(tmp_path / "scheme_snp.txt",
+		"snp_id\tstrain\treference\tgenome\tsequence\tsequence_position\tderived_base\tancestral_base\n"
+		"A.1\tfrancisella\tPaper2020\tREF\tchrI\t10\tT\tC\n"
+		"A.2\tfrancisella\tNA\tREF\tchrI\t20\tA\tG\n")
+	result = run_cli(tmp_path, "--convert", "--annotation", source, "-o", str(tmp_path / "out"))
+	assert result.returncode == 0, result.stderr
+	assert "upgraded 2 canSNPs of scheme_snp.txt to the canSNP format" in result.stdout
+	rows = open(str(tmp_path / "out" / "scheme_canSNPs.txt")).read().splitlines()
+	assert rows[0] == "node\trank\treference\tgenome\tsequence\tsequence_position\tderived_base\tancestral_base\tscore\ttyped"
+	## the strain column is gone, the reference column is kept, and rank 1 is the typed canSNP
+	assert rows[1] == "A.1\t1\tPaper2020\tREF\tchrI\t10\tT\tC\t\tyes"
+	assert rows[2] == "A.2\t1\tNA\tREF\tchrI\t20\tA\tG\t\tyes"
+
+
+def test_a_canSNP_file_in_the_current_format_is_refused(tmp_path):
+	source = write(tmp_path / "scheme_canSNPs.txt",
+		"node\trank\treference\tgenome\tsequence\tsequence_position\tderived_base\tancestral_base\tscore\ttyped\n"
+		"A.1\t1\tPaper2020\tREF\tchrI\t10\tT\tC\t\tyes\n")
+	result = run_cli(tmp_path, "--convert", "--annotation", source, "-o", str(tmp_path / "out"))
+	assert result.returncode == 1
+	assert "current format" in result.stderr + result.stdout
+
+
+def test_a_current_database_is_refused(tmp_path):
+	source = helpers.make_db(tmp_path / "new.db", [("A.1", "chrI", 10, "C", "T")])
+	result = run_cli(tmp_path, "--convert", "--database", source, "-o", str(tmp_path / "out"))
+	assert result.returncode == 1
+	assert "current format" in result.stderr + result.stdout
