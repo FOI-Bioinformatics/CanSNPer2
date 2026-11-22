@@ -235,21 +235,28 @@ class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
 
 	def add_SNP(self,nodes,i):
 		'''Add name of node to database'''
-		name = nodes[i].strip()
-		logger.debug("Parent did not exit Add parent: {name}".format(name=name))
-
-		#i-=1 ## Check next parent
-		if i - 1 < -len(nodes): ## the parent chain is exhausted, the topmost listed node links to the root (issue #108)
-			parent_i = self.root
-		else:
-			try:
-				parent_i = self.taxonomy[nodes[i-1]]  ## check if current nodes parent exists
-			except KeyError:                          ## Parent did not exist, keep walking up the tree and add all parents until root!
-				parent_i = self.add_SNP(nodes,i-1)    ## Add node of parent
-		node_i = self.add_node(name)  ## Add node
-		if node_i:
-			self.taxid_num += 1
-		self.add_link(node_i, parent_i)            ## Add link to next parent
+		'''Walk up the path from nodes[i] to the first parent that exists (or to the root), then
+			add the missing nodes from the top down. This was a recursion, which failed with a
+			RecursionError for a path of about 1500 levels.'''
+		missing = []
+		j = i
+		while True:
+			missing.append(j)
+			logger.debug("Parent did not exit Add parent: {name}".format(name=nodes[j].strip()))
+			if j - 1 < -len(nodes): ## the parent chain is exhausted, the topmost listed node links to the root (issue #108)
+				parent_i = self.root
+				break
+			if nodes[j-1] in self.taxonomy:  ## check if current nodes parent exists
+				parent_i = self.taxonomy[nodes[j-1]]
+				break
+			j -= 1                           ## Parent did not exist, keep walking up the tree and add all parents until root!
+		node_i = None
+		for j in reversed(missing):
+			node_i = self.add_node(nodes[j].strip())  ## Add node
+			if node_i:
+				self.taxid_num += 1
+			self.add_link(node_i, parent_i)            ## Add link to next parent
+			parent_i = node_i
 		return node_i     ##  index of child
 
 	def parse_taxonomy(self):

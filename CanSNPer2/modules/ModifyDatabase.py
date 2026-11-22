@@ -4,7 +4,7 @@
 
 from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
 from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
-from CanSNPer2.modules.SourceCheck import register_genome_names
+from CanSNPer2.modules.SourceCheck import register_genome_names, split_row
 from datetime import date
 import logging
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 			for row in af:
 				if row.strip() == "" or row.strip().startswith("#"):
 					continue
-				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
+				data = split_row(row, len(headers))
 				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
 					'''a skipped row used to be a warning only; SourceCheck.check_modification
 						refuses the file before this point, this is the last guard'''
@@ -150,7 +150,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 					continue
 				## only the line end is removed: strip() also removed empty trailing fields, so a
 				## reference without an assembly name was skipped as a short row
-				data = [value.strip() for value in row.rstrip("\r\n").split("\t")]
+				data = split_row(row, len(headers))
 				if len(data) < len(headers): ## short row would run out of values in the header zip below (issue #89)
 					raise SourceFileError("{file}: short row '{row}'".format(file=reference_file,row=row.strip()))
 				ddict = {}
