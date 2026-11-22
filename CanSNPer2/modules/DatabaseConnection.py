@@ -28,14 +28,52 @@ class ConnectionError(Exception):
 
 CANSNP_TABLES = ("nodes","tree","snp_annotation","snp_references")
 
+## the canSNPs that form the typing scheme. Every query that drives typing, the tree, the
+## reference check or the result files carries it; grep "typed = 1" to find them all
+TYPED_CANSNP = "snp_annotation.typed = 1"
+
 GENOME_SOURCE_COLUMNS = ("genome","strain","genbank_id","refseq_id","assembly_name")
-ANNOTATION_SOURCE_COLUMNS = ("snp_id","reference","genome","sequence","sequence_position","derived_base","ancestral_base")
+
+## the canSNP file of a scheme: every canSNP of every node, ranked within the node, with the
+## ones the scheme types marked. It replaces the SNP file, which held one canSNP per node
+CANSNP_SOURCE_COLUMNS = ("node","rank","reference","genome","sequence","sequence_position",
+	"derived_base","ancestral_base","score","typed")
+## the SNP file of 2.3.0 and earlier, one canSNP per node. --annotation still reads it, as
+## rank 1 of its node, typed and without a score, so that schemes in that format still build
+SNP_SOURCE_COLUMNS = ("snp_id","reference","genome","sequence","sequence_position","derived_base","ancestral_base")
+## the name of the first column tells the two apart
+ANNOTATION_SOURCE_COLUMNS = CANSNP_SOURCE_COLUMNS
+## the typed column of a canSNP file, as it is stored
+TYPED_VALUES = {"yes": 1, "no": 0}
 
 ## a database or SNP source file from before 2.3.0 has one position along the joined sequences
 ## of the reference fasta file, which depends on the order of those sequences; it is refused
 ## with this sentence instead of being read
 JOINED_FORMAT_HINT = ("It stores SNP positions along the joined reference sequences (the format before 2.3.0). "
 	"Convert it with CanSNPer2-database --convert, or download the current database with CanSNPer2-download --scheme.")
+## a database built before the canSNP file was the source holds one canSNP per node and no
+## rank, score or typed column
+SNP_TABLE_HINT = ("Its snp_annotation table holds one canSNP per node, without the rank, score and typed "
+	"columns of the current format. Convert it with CanSNPer2-database --convert, or download the current "
+	"database with CanSNPer2-download --scheme.")
+
+def annotation_columns(headers):
+	'''the columns required of an annotation source file, by the format its header gives:
+		the canSNP file (a node column) or the SNP file of 2.3.0 and earlier (an snp_id column).
+		A header that names neither raises SourceFileError'''
+	if "node" in headers:
+		return CANSNP_SOURCE_COLUMNS
+	if "snp_id" in headers:
+		return SNP_SOURCE_COLUMNS
+	raise SourceFileError("The annotation file has no node column, a header row with {required} is "
+		"required".format(required=", ".join(CANSNP_SOURCE_COLUMNS)))
+
+def cansnp_row(row):
+	'''one row of either annotation format as the canSNP columns. A row of a SNP file becomes
+		rank 1 of its node, typed, without a score'''
+	if "node" in row:
+		return row
+	return dict(row, node=row["snp_id"], rank="1", score="", typed="yes")
 
 class SourceFileError(ValueError):
 	'''a source file could not be used at all, reported instead of crashing inside a loader'''
@@ -109,8 +147,9 @@ def check_database(path, current_format=True):
 		sqlite3.connect() would otherwise happily create an empty file and the run would only
 		fail later with "no such table" errors (issue #125).
 		With current_format (the default) a database whose snp_annotation table has no
-		sequence_position column is refused with JOINED_FORMAT_HINT; only the conversion
-		of such a database passes current_format=False.
+		sequence_position column is refused with JOINED_FORMAT_HINT, and one without the
+		typed column with SNP_TABLE_HINT; only the conversion of such a database passes
+		current_format=False.
 	'''
 	if not os.path.exists(path):
 		raise ConnectionError("The database {path} does not exist, download it or create it with CanSNPer2-database --create".format(path=path))
@@ -134,6 +173,8 @@ def check_database(path, current_format=True):
 		raise ConnectionError("{path} is not a CanSNP database, the table(s) {missing} are missing".format(path=path,missing=", ".join(missing)))
 	if current_format and "sequence_position" not in columns:
 		raise ConnectionError("The database {path} cannot be used. {hint}".format(path=path,hint=JOINED_FORMAT_HINT))
+	if current_format and "typed" not in columns:
+		raise ConnectionError("The database {path} cannot be used. {hint}".format(path=path,hint=SNP_TABLE_HINT))
 	return True
 
 class DatabaseConnection(object):
@@ -1277,10 +1318,13 @@ class XMFAFunctions(DatabaseConnection):
 		returns: the SNPs as a dictionary {(sequence, position): (ancestral_base, derived_base, snp_id)}
 				 and the positions per sequence {sequence: [position, ...]} sorted ASC
 		'''
+		## only the canSNPs the scheme types are called; the alternatives of a node are stored
+		## in the same table and must not reach the aligner (they would overwrite the state of
+		## their node in AlignmentReader.finish)
 		snp_string = """SELECT genome, sequence, sequence_position, derived_base, ancestral_base, snp_id
 										FROM snp_annotation
 										LEFT JOIN snp_references on (snp_references.id = snp_annotation.genome_i)
-										WHERE genome = ?
+										WHERE genome = ? AND snp_annotation.typed = 1
 									"""
 		SNPs = self.get_results(snp_string,reference)
 		if len(SNPs) == 0:

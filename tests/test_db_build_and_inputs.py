@@ -28,12 +28,12 @@ def tree_file(separator):
 	return "R\nR{0}A.1\nR{0}A.1{0}B.1\n".format(separator)
 
 def annotation_file(extra_comment_column=True):
-	head = "\t".join(helpers.SNP_HEADER)
+	head = "\t".join(helpers.CANSNP_HEADER)
 	lines = [head + ("\tcomment" if extra_comment_column else "")]
 	if extra_comment_column:
-		lines.append("A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\ta named branch")
+		lines.append("A.1\t1\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\t\tyes\ta named branch")
 	else:
-		lines.append("A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC")
+		lines.append("A.1\t1\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\t\tyes")
 	return "\n".join(lines) + "\n"
 
 
@@ -87,11 +87,11 @@ def test_annotation_file_comments_and_trailing_comment_column(tmp_path, caplog):
 	# #22: # lines are comments, blank lines are ignored, and a row may leave out the
 	# trailing free-text comment column; a row short in a real column is refused
 	# (tests/test_create_input_checks.py)
-	ann = ("\t".join(helpers.SNP_HEADER) + "\tcomment\n"
+	ann = ("\t".join(helpers.CANSNP_HEADER) + "\tcomment\n"
 	       "#A.1 is one of the major branches\n"
 	       "\n"
-	       "A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\ta named branch\n"
-	       "B.1\tfrancisella\tVogler2009\tREF1\tCP000001.1\t200\tT\tG\n")
+	       "A.1\t1\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\t\tyes\ta named branch\n"
+	       "B.1\t1\tVogler2009\tREF1\tCP000001.1\t200\tT\tG\t\tyes\n")
 	db = build_db(tmp_path, "comment.db", tree_file("\t"), ann)
 	nodes, links, rows = tables(db)
 	assert [r[0] for r in rows] == ["A.1", "B.1"], rows
@@ -178,12 +178,9 @@ def test_get_snps_keys_by_sequence(tmp_path):
 
 
 def test_get_snps_refuses_the_same_site_twice(tmp_path):
-	from CanSNPer2.modules.DatabaseConnection import XMFAFunctions
-	db = helpers.make_db(tmp_path / "dup.db", [("A.1", "chrII", 50, "C", "T"), ("A.2", "chrII", 50, "G", "A")])
-	conn = XMFAFunctions(db)
-	with pytest.raises(Exception, match="Multiple SNPs"):
-		conn.get_snps("REF")
-	conn.disconnect()
+	# the read-time guard in XMFAFunctions.get_results is now unreachable through a database the loaders built
+	with pytest.raises(sqlite3.IntegrityError):
+		helpers.make_db(tmp_path / "dup.db", [("A.1", "chrII", 50, "C", "T"), ("A.2", "chrII", 50, "G", "A")])
 
 
 def test_joined_database_is_refused(tmp_path):
@@ -230,8 +227,8 @@ def run_database_cli(tmp_path, arguments, code=None):
 
 
 def create_arguments(tmp_path, db):
-	paths = helpers.write_sources(tmp_path, ["A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC",
-		"B.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t200\tG\tA"])
+	paths = helpers.write_sources(tmp_path, ["A.1\t1\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\t\tyes",
+		"B.1\t1\tBirdsell2014\tREF1\tCP000001.1\t200\tG\tA\t\tyes"])
 	return ["--create", "--database", db, "--tree", paths["tree"], "--annotation", paths["snp"],
 		"--references", paths["references"]]
 
@@ -278,7 +275,7 @@ def test_create_fails_when_a_snp_cannot_be_written(tmp_path):
 	db = str(tmp_path / "scheme.db")
 	result = run_database_cli(tmp_path, create_arguments(tmp_path, db), code=code)
 	assert result.returncode == 1, result.stdout + result.stderr
-	assert "The SNP A.1 could not be written" in result.stderr, (result.stdout, result.stderr)
+	assert "The canSNP A.1 (rank 1) could not be written" in result.stderr, (result.stdout, result.stderr)
 	assert not os.path.exists(db), "an incomplete database must not stay behind"
 
 

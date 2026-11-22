@@ -27,6 +27,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: FOI-Bioinformatics/CanSNPer2-data
+          # the schemes keep their canSNPs in <name>_canSNPs.txt on this branch;
+          # set back to the default branch once it is merged there
+          ref: cansnps_source
           path: cansnper2-data
 
       - uses: actions/setup-python@v5
@@ -86,16 +89,16 @@ jobs:
           SRC=$GITHUB_WORKSPACE/cansnper2-data/schemes/bacillus_anthracis
           CanSNPer2-database --create --database ba.db \
             --tree $SRC/bacillus_anthracis_tree.txt \
-            --annotation $SRC/bacillus_anthracis_snp.txt \
+            --annotation $SRC/bacillus_anthracis_canSNPs.txt \
             --references $SRC/bacillus_anthracis_references.txt
           CanSNPer2-database --database ba.db --export -o export
           CanSNPer2-database --database ba.db --export --export_format newick -o export
           test -s export/ba_tree.nwk
           # a database rebuilt from the export must export to the same files
           CanSNPer2-database --create --database rebuilt.db \
-            --tree export/ba_tree.txt --annotation export/ba_snp.txt --references export/ba_references.txt
+            --tree export/ba_tree.txt --annotation export/ba_canSNPs.txt --references export/ba_references.txt
           CanSNPer2-database --database rebuilt.db --export -o export_rebuilt
-          for f in tree snp references; do
+          for f in tree canSNPs references; do
             cmp export/ba_$f.txt export_rebuilt/rebuilt_$f.txt
           done
 
@@ -105,10 +108,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the anonymous API limit is shared by all jobs on a runner address
         run: |
           CanSNPer2-download --list_schemes
-          CanSNPer2-download --scheme bacillus_anthracis --branch master --no_references
+          # --branch back to master once the canSNP files are merged there
+          CanSNPer2-download --scheme bacillus_anthracis --branch cansnps_source --no_references
           test -s bacillus_anthracis.source.json
           CanSNPer2-database --database bacillus_anthracis.db --export -o export_scheme
-          for f in tree snp references; do
+          for f in tree canSNPs references; do
             cmp export/ba_$f.txt export_scheme/bacillus_anthracis_$f.txt
           done
 

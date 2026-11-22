@@ -3,7 +3,7 @@
 '''
 
 from CanSNPer2.modules.ModifyTree import ModifyTree, InputError
-from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
+from CanSNPer2.modules.DatabaseConnection import NameNotFoundError, check_source_headers, GENOME_SOURCE_COLUMNS, TYPED_VALUES, annotation_columns, cansnp_row, SourceFileError, DatabaseWriteError, open_source
 from CanSNPer2.modules.SourceCheck import register_genome_names, split_row
 from datetime import date
 import logging
@@ -33,14 +33,17 @@ class ModifyCanSNPer2Database(ModifyTree):
 		except KeyError:
 			data["date"] = self.today.strftime("%d/%m/%y")
 		info = {
-				"snp_id":            data["snp_id"],
+				"snp_id":            data["node"],
 				"sequence":          data["sequence"],
 				"sequence_position": data["sequence_position"],
 				"ancestral_base":     data["ancestral_base"],
 				"derived_base":        data["derived_base"],
 				"reference":         data["reference"],
 				"date":             data["date"],
-				"genome_i":         genome_i
+				"genome_i":         genome_i,
+				"rank":             int(data["rank"]),
+				"score":            data["score"].strip() or None,
+				"typed":            TYPED_VALUES[data["typed"].strip().lower()]
 		}
 		### If ID is supplied skip autoincrement and add specific ID
 		if id is not False: ## an id of 0 is a real id, only the "not supplied" marker False means skip (issue #203)
@@ -50,8 +53,8 @@ class ModifyCanSNPer2Database(ModifyTree):
 		if isinstance(taxid_base, Exception):
 			'''the insert result was never checked, a SNP that could not be written was lost and
 				the command still ended with exit status 0'''
-			raise DatabaseWriteError("The SNP {snp} could not be written to {db}: {error}".format(
-				snp=data["snp_id"], db=self.taxonomydb.database, error=taxid_base))
+			raise DatabaseWriteError("The canSNP {snp} (rank {rank}) could not be written to {db}: {error}".format(
+				snp=data["node"], rank=data["rank"], db=self.taxonomydb.database, error=taxid_base))
 		self.taxonomydb.commit()
 		return taxid_base
 
@@ -94,7 +97,7 @@ class ModifyCanSNPer2Database(ModifyTree):
 		with open_source(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
-			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
+			check_source_headers(headers,annotation_columns(headers),annotation_file)
 			'''a trailing free-text comment column is allowed, and rows may leave it out;
 				# lines are comments (issue #22, same rule as InitiateDatabase.load_annotation_file)'''
 			trailing_optional = 0
@@ -117,12 +120,13 @@ class ModifyCanSNPer2Database(ModifyTree):
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
 					ddict[head] = val
+				ddict = cansnp_row(ddict)
 				dataArr.append(ddict)
 				try:
-					_id = nodes[ddict["snp_id"]]
+					_id = nodes[ddict["node"]]
 				except KeyError:
-					raise SourceFileError("{file}: snp_id '{id}' does not appear in the tree of {db}".format(
-						file=annotation_file,id=ddict["snp_id"],db=self.taxonomydb.database))
+					raise SourceFileError("{file}: node '{id}' does not appear in the tree of {db}".format(
+						file=annotation_file,id=ddict["node"],db=self.taxonomydb.database))
 				try:
 					genome_i = self.genomes[ddict["genome"]]
 				except KeyError:

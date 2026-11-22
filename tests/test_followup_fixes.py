@@ -110,7 +110,7 @@ def test_the_loader_refuses_a_snp_on_an_unknown_genome(tmp_path):
 	import helpers
 	from CanSNPer2.modules.DatabaseConnection import SourceFileError
 	from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
-	paths = helpers.write_sources(tmp_path / "src", ["A.1\tx\tPaper\tREF1\tCP000001.1\t100\tT\tC"])
+	paths = helpers.write_sources(tmp_path / "src", ["A.1\t1\tPaper\tREF1\tCP000001.1\t100\tT\tC\t\tyes"])
 	snp = open(paths["snp"]).read().replace("\tREF1\t", "\tOTHER\t")
 	open(paths["snp"], "w").write(snp)
 	database = CanSNPDatabase.__new__(CanSNPDatabase)

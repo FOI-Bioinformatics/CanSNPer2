@@ -22,8 +22,8 @@ from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
 from CanSNPer2.modules.ExportDatabase import export_source, tree_paths, ExportError, write_outputs
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
-from CanSNPer2.modules.SchemeInfo import (STATUSES, MISSING_TEXT, read_scheme_info, ordered_keys, log_scheme_notice,
-	build_info, modified_info, write_scheme_info)
+from CanSNPer2.modules.SchemeInfo import (STATUSES, MISSING_TEXT, database_counts, read_scheme_info, ordered_keys,
+	log_scheme_notice, build_info, modified_info, write_scheme_info)
 from CanSNPer2.modules.LogSetup import setup_logging
 from CanSNPer2 import __version__, COMMANDS_HELP  ## __version__ used by the --version flag (issue #119)
 import CanSNPer2.modules
@@ -63,7 +63,7 @@ def get_arguments():
 
 	create_database = parser.add_argument_group("Load database")
 	create_database.add_argument('--tree',         metavar='', default=False,                	help="CanSNPer tree source file")
-	create_database.add_argument('--annotation',   metavar='', default=False,                	help="CanSNPer snp source file")
+	create_database.add_argument('--annotation',   metavar='', default=False,                	help="CanSNPer canSNP source file (<name>_canSNPs.txt; a 2.3.0 <name>_snp.txt is read as well)")
 	create_database.add_argument('--references',   metavar='', default=False,                 	help="File containing all reference genomes listed")
 	create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
 														choices=supported_input, 				help="Select source file type")
@@ -78,7 +78,7 @@ def get_arguments():
 
 
 	convert_database = parser.add_argument_group("Convert from the format before 2.3.0")
-	convert_database.add_argument('--convert',   action='store_true',                           help="convert a SNP source file (--annotation) or a database (--database) from positions along the joined reference sequences to positions on each reference sequence, written to -o")
+	convert_database.add_argument('--convert',   action='store_true',                           help="bring a SNP source file (--annotation) or a database (--database) of an older format to the current one, written to -o: positions along the joined reference sequences become positions on each reference sequence, and a SNP file becomes a canSNP file")
 	convert_database.add_argument('--refdir',    metavar='',                                    help="folder with the reference files <genome>.fna used by --convert; missing files are downloaded")
 
 	modify_database = parser.add_argument_group("Database modifications")
@@ -134,47 +134,77 @@ def convert(args, logger):
 		It is handled before the database checks, which refuse the old format. Returns the exit code.'''
 	from CanSNPer2.modules.ConvertPositions import (ConversionError, convert_table, convert_database,
 		genome_files, table_genomes, database_genomes, references_from_file, references_from_database, check_target,
-		check_table_format, check_database_format)
+		check_table_format, check_database_format, canSNPs_target, database_stage, table_stage,
+		upgrade_database, upgrade_table)
 	if bool(args.annotation) == bool(args.database):
 		logger.error("--convert converts either a SNP source file (--annotation) or a database (--database), give one of them!")
 		return 1
 	if not args.outdir:
 		logger.error("--convert writes the converted file to a folder, give it with -o/--outdir!")
 		return 1
-	if not args.refdir:
-		logger.error("--convert checks each SNP against its reference, give the folder with the reference files <genome>.fna with --refdir!")
-		return 1
 	source = args.annotation or args.database
-	target = os.path.join(args.outdir, os.path.basename(source))
 	sequences = set()
+	'''what the input needs: its positions moved onto each reference sequence (the format before
+		2.3.0, which needs the reference files), or only the rank, score and typed columns of the
+		canSNP file (2.4.0)'''
 	try:
-		check_target(source, target)
 		if args.annotation:
-			check_table_format(source) ## before any reference is fetched
-			references = references_from_file(args.references) if args.references else None
-			files = genome_files(args.refdir, table_genomes(source), references)
-			count = convert_table(source, target, files, sequences=sequences)
+			stage = table_stage(source)
 		else:
 			try:
 				check_database(source, current_format=False)
 			except ConnectionError as e:
 				raise ConversionError(str(e))
+			stage = database_stage(source)
+	except (ConversionError, ConnectionError, sqlite3.Error, OSError) as e:
+		logger.error(str(e))
+		return 1
+	if stage == "joined" and not args.refdir:
+		logger.error("--convert checks each SNP against its reference, give the folder with the reference files <genome>.fna with --refdir!")
+		return 1
+	target = canSNPs_target(args.outdir, source) if args.annotation else os.path.join(
+		args.outdir, os.path.basename(source))
+	'''a converted or upgraded database records that this version wrote it; the scheme and its
+		status are not known from the old database'''
+	scheme_info = build_info(status="unknown", source="converted from {name}".format(name=os.path.basename(source)))
+	try:
+		check_target(source, target)
+		if args.annotation:
+			check_table_format(source) ## before any reference is fetched
+			if stage == "joined":
+				references = references_from_file(args.references) if args.references else None
+				files = genome_files(args.refdir, table_genomes(source), references)
+				joined = os.path.join(args.outdir, "." + os.path.basename(source) + ".positions")
+				count = convert_table(source, joined, files, sequences=sequences)
+				try:
+					upgrade_table(joined, target)
+				finally:
+					if os.path.exists(joined):
+						os.remove(joined)
+			else:
+				count = upgrade_table(source, target)
+		else:
 			check_database_format(source) ## before any reference is fetched
-			references = references_from_database(source)
-			if args.references:
-				references.update(references_from_file(args.references))
-			files = genome_files(args.refdir, database_genomes(source), references)
-			'''the converted database records that it was converted by this version; the
-				scheme and its status are not known from the old database'''
-			scheme_info = build_info(status="unknown", source="converted from {name}".format(name=os.path.basename(source)))
-			count = convert_database(source, target, files, sequences=sequences, scheme_info=scheme_info)
+			if stage == "joined":
+				references = references_from_database(source)
+				if args.references:
+					references.update(references_from_file(args.references))
+				files = genome_files(args.refdir, database_genomes(source), references)
+				count = convert_database(source, target, files, sequences=sequences, scheme_info=scheme_info)
+			else:
+				count = upgrade_database(source, target, scheme_info=scheme_info)
 	except (ConversionError, ConnectionError, sqlite3.Error, OSError) as e:
 		'''every failure of the conversion is one error message and exit code 1, not a traceback'''
 		logger.error(str(e))
 		return 1
-	print("converted {n} {snps} of {name} to positions on {m} reference {noun}, written to {target}".format(
-		n=count, snps="SNP" if count == 1 else "SNPs", name=os.path.basename(source), m=len(sequences),
-		noun="sequence" if len(sequences) == 1 else "sequences", target=target))
+	snps = "canSNP" if count == 1 else "canSNPs"
+	if stage == "joined":
+		print("converted {n} {snps} of {name} to positions on {m} reference {noun}, written to {target}".format(
+			n=count, snps=snps, name=os.path.basename(source), m=len(sequences),
+			noun="sequence" if len(sequences) == 1 else "sequences", target=target))
+	else:
+		print("upgraded {n} {snps} of {name} to the canSNP format, written to {target}".format(
+			n=count, snps=snps, name=os.path.basename(source), target=target))
 	return 0
 
 
@@ -346,7 +376,7 @@ def command():
 			exit(1)
 		print("Imported {tree}, {snp}, {references} into {dst} (current format)".format(
 			tree=args.tree, snp=args.annotation, references=args.references, dst=args.database))
-		print("{nodes} nodes, {tree} links, {snp_annotation} SNPs, "
+		print("{nodes} nodes, {tree} links, {snp_annotation} canSNPs ({typed} typed), "
 			"{snp_references} reference genomes".format(**counts))
 		exit()
 	if not args.create:
@@ -367,6 +397,11 @@ def command():
 			for key in ordered_keys(info):
 				## an empty value, such as known_issues of a scheme without any, is printed as none
 				print("{key}\t{value}".format(key=key, value=info[key] if info[key] not in (None, "") else "none"))
+			counts = database_counts(args.database)
+			if counts:
+				print("")
+				for key, value in counts:
+					print("{key}\t{value}".format(key=key, value=value))
 			exit()
 	elif args.info:
 		logger.error("--info prints what an existing database records, it cannot be combined with --create!")
@@ -408,7 +443,8 @@ def command():
 				logger.error("The database cannot be exported: {error}".format(error=e))
 				exit(1)
 			print("Exported to {files}".format(files=", ".join(files.values())))
-			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} --annotation {snp} --references {references}".format(**files))
+			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} "
+				"--annotation {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
 		if not (args.mod_file or args.annotation or args.references):

@@ -32,7 +32,10 @@ from urllib.request import pathname2url
 
 from CanSNPer2 import __version__
 
-FORMAT = "2.3"
+## the layout of the database: 2.4 stores every canSNP of a node with its rank, score and
+## whether the scheme types it, where 2.3 held one canSNP per node. check_database gates on
+## the typed column, not on this key, because a database built by hand records no scheme_info
+FORMAT = "2.4"
 STATUSES = ("verified", "draft", "unknown")
 ## the order in which --info lists the keys; keys not listed here follow in name order
 KEY_ORDER = ("scheme", "status", "source", "ref", "commit", "known_issues", "format", "built_with", "built",
@@ -41,6 +44,33 @@ MISSING_TEXT = ("the database records no scheme information (built with CanSNPer
 	"check where it came from")
 
 TABLE_SQL = "CREATE TABLE IF NOT EXISTS scheme_info (key TEXT PRIMARY KEY, value TEXT)"
+
+
+def database_counts(path):
+	'''What a database holds, for --info: the nodes, the canSNPs with how many of them the
+		scheme types and how many a node carries at most, and the reference genomes. An
+		unreadable or incomplete database gives an empty dict, --info still prints the keys'''
+	counts = []
+	try:
+		conn = sqlite3.connect("file:{0}?mode=ro".format(pathname2url(os.path.abspath(path))), uri=True)
+	except sqlite3.Error:
+		return counts
+	try:
+		nodes = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+		cansnps = conn.execute("SELECT COUNT(*) FROM snp_annotation").fetchone()[0]
+		typed = conn.execute("SELECT COUNT(*) FROM snp_annotation WHERE typed = 1").fetchone()[0]
+		most = conn.execute("SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM snp_annotation GROUP BY node_id)").fetchone()[0]
+		references = conn.execute("SELECT COUNT(*) FROM snp_references").fetchone()[0]
+	except sqlite3.Error:
+		return counts
+	finally:
+		conn.close()
+	counts.append(("nodes", str(nodes)))
+	counts.append(("canSNPs", str(cansnps)))
+	counts.append(("typed canSNPs", str(typed)))
+	counts.append(("canSNPs per node", "1" if (most or 0) <= 1 else "up to {0}".format(most)))
+	counts.append(("reference genomes", str(references)))
+	return counts
 
 
 def build_info(**known):

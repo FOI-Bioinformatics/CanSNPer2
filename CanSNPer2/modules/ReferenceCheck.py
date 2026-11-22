@@ -40,11 +40,14 @@ def listing(names):
 
 def reference_snps(database):
 	'''{reference genome name: [(snp_id, sequence, position, ancestral base, derived base), ...]}
-		from an open database connection'''
+		from an open database connection, for the canSNPs the scheme types. The alternative
+		canSNPs of a node are left out, so that the bases a reference file must carry, and
+		the mismatch fraction counted over them, are the same as they were in 2.3.0'''
 	query = '''SELECT snp_references.genome, snp_annotation.snp_id, snp_annotation.sequence,
 					snp_annotation.sequence_position, snp_annotation.ancestral_base, snp_annotation.derived_base
 					FROM snp_annotation
-					JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)'''
+					JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)
+					WHERE snp_annotation.typed = 1'''
 	snps = {}
 	for genome, snp_id, sequence, position, ancestral, derived in database.query(query).fetchall():
 		if position is None or sequence is None:

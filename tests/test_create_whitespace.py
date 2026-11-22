@@ -17,8 +17,8 @@ def test_whitespace_in_tree_names_is_ignored_consistently(tmp_path):
 	# "A " and "A" were two names to the source check and one to the loader, which then
 	# dropped a node and its SNP with a warning
 	tree = "R\nR;A ;B\n"
-	files = write_sources(tmp_path, tree=tree, snp=SNP_HEADER + "R\ts1\tP\tREF1\tCP000001.1\t10\tA\tG\n"
-		"A\ts1\tP\tREF1\tCP000001.1\t100\tT\tC\nB\ts1\tP\tREF1\tCP000001.1\t200\tG\tA\n")
+	files = write_sources(tmp_path, tree=tree, snp=SNP_HEADER + "R\t1\tP\tREF1\tCP000001.1\t10\tA\tG\t\tyes\n"
+		"A\t1\tP\tREF1\tCP000001.1\t100\tT\tC\t\tyes\nB\t1\tP\tREF1\tCP000001.1\t200\tG\tA\t\tyes\n")
 	assert check_sources(tree=files["tree"], annotation=files["snp"], references=files["references"]) == []
 	db = create(tmp_path, files)
 	conn = sqlite3.connect(db)
@@ -37,7 +37,7 @@ def test_whitespace_makes_the_same_node_with_two_parents_visible(tmp_path):
 
 
 def test_whitespace_in_snp_and_references_fields_is_ignored(tmp_path):
-	snp = SNP_HEADER + SNP_ROWS.replace("A.1\ts1", " A.1 \ts1").replace("\tREF2\t", "\t REF2 \t")
+	snp = SNP_HEADER + SNP_ROWS.replace("A.1\t1", " A.1 \t1").replace("\tREF2\t", "\t REF2 \t")
 	references = REFERENCES.replace("REF2\ts2", "REF2 \ts2")
 	files = write_sources(tmp_path, snp=snp, references=references)
 	assert check_sources(tree=files["tree"], annotation=files["snp"], references=files["references"]) == []
@@ -56,7 +56,7 @@ def test_loader_raises_for_a_snp_whose_node_is_not_in_the_tree(tmp_path):
 	files = write_sources(tmp_path)
 	db = create(tmp_path, files)
 	other = tmp_path / "other.txt"
-	other.write_text(SNP_HEADER + "Z\ts1\tP\tREF1\tCP000001.1\t10\tA\tG\n")
+	other.write_text(SNP_HEADER + "Z\t1\tP\tREF1\tCP000001.1\t10\tA\tG\t\tyes\n")
 	loader = CanSNPDatabase(database=db, create=False, tree=None, annotation=None, references=None,
 		source_type="CanSNPer", verbose=False)
 	with pytest.raises(SourceFileError) as error:

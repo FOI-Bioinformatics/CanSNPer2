@@ -268,3 +268,88 @@ def test_snp_directly_above_the_final_snp_must_be_called(tmp_path):
 	# final-called even though 1/2 passes a strictness of 0.5
 	snp, confirmed, count, msg = call(tmp_path, {"B.1": 1}, ["B.1"], strictness=0.5)
 	assert confirmed is False
+
+
+# only the canSNPs the scheme types decide a call -----------------------------------------
+
+def make_db_with_alternatives(path):
+	'''the database of make_db, with a second canSNP of A.1 that the scheme does not type.
+		A node holds its canSNPs under one name, so an alternative that reached the typing
+		queries would overwrite the state of its node'''
+	make_db(path)
+	conn = sqlite3.connect(path)
+	conn.execute("INSERT INTO snp_annotation (node_id, snp_id, sequence, sequence_position, ancestral_base,"
+		" derived_base, reference, date, genome_i, rank, score, typed)"
+		" VALUES (2, 'A.1', 'chrI', 15, 'G', 'A', 'REF', '06/11/26', 5, 2, '480', 0)")
+	conn.commit()
+	conn.close()
+
+
+def test_get_nodes_returns_one_row_per_node_with_alternatives(tmp_path):
+	db = str(tmp_path / "alt.db")
+	make_db_with_alternatives(db)
+	newick_tree = NewickTree(db, name="alt", outdir=str(tmp_path))
+	nodes = newick_tree.get_nodes()
+	conn = sqlite3.connect(db)
+	count = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+	conn.close()
+	## get_nodes keys by id in both directions, so it holds one entry per node and one per name
+	assert len({key for key in nodes if isinstance(key, int)}) == count
+	assert nodes[1] == "-root-", "a node without a typed canSNP keeps its label"
+	assert nodes[2] == "A.1"
+
+
+def test_an_untyped_canSNP_is_not_read_for_typing(tmp_path):
+	'''the alternative canSNPs of a node are stored but never called: they are not in the
+		SNPs the aligner is given, nor in the no-data rows of the result files'''
+	from CanSNPer2.modules.DatabaseConnection import XMFAFunctions
+	db = str(tmp_path / "alt.db")
+	make_db_with_alternatives(db)
+	snplist, positions = XMFAFunctions(db).get_snps("REF")
+	assert sorted(snplist) == [("chrI", 10), ("chrI", 20), ("chrI", 30), ("chrII", 50)]
+	assert ("chrI", 15) not in snplist, "an untyped canSNP must not reach the aligner"
+	assert positions["chrI"] == [10, 20, 30]
+	newick_tree = NewickTree(db, name="alt", outdir=str(tmp_path))
+	rows = newick_tree.get_no_data_info(["A.1"])
+	assert len(rows) == 1, rows
+	assert rows[0][3] == "10", rows[0]
+
+
+def test_a_derived_untyped_canSNP_does_not_confirm_its_node(tmp_path):
+	'''the typed canSNP of A.1 is ancestral in the query and its alternative is derived. A
+		node and its canSNPs share one name, so an alternative the reader looked at would
+		decide the state of the node, and the call with it'''
+	from CanSNPer2.modules.AlignmentReader import AlignmentReader
+	from CanSNPer2.modules.DatabaseConnection import XMFAFunctions
+	db = str(tmp_path / "alt.db")
+	make_db_with_alternatives(db)
+	reader = AlignmentReader(database=db)
+	reader.reference = "REF"
+	reader.snplist, reader.snp_positions = XMFAFunctions(db).get_snps("REF")
+	## the query: ancestral at the typed canSNP of A.1 (chrI:10), derived at its alternative
+	## (chrI:15) and at B.1 (chrI:20)
+	query = {10: "C", 15: "A", 20: "T", 30: "C"}
+	assert 15 not in reader.snps_in("chrI", 1, 1000), "the reader must not look at an untyped canSNP"
+	for position in reader.snps_in("chrI", 1, 1000):
+		reader.observe("chrI", position, query[position], 100, 1000)
+	snps = reader.finish()
+	assert snps["A.1"] == 2, snps
+	assert reader.get_called_snps() == ["B.1"]
+	newick_tree = NewickTree(db, name="alt", outdir=str(tmp_path), min_required_hits=1, strictness=0.5)
+	result, msg, _dlist, _no_data = newick_tree.draw_tree(snps, reader.get_called_snps(), save_tree=False)
+	assert not result or result[2][0] is False, (result, msg)
+
+
+def test_a_reference_needs_no_file_for_an_untyped_canSNP_alone(tmp_path):
+	'''the reference check reads the typed canSNPs, so the bases a reference file must carry,
+		and the mismatch fraction counted over them, are those of 2.3.0'''
+	from CanSNPer2.modules.ReferenceCheck import reference_snps
+	from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
+	db = str(tmp_path / "alt.db")
+	make_db_with_alternatives(db)
+	database = CanSNPdbFunctions(db)
+	try:
+		snps = reference_snps(database)
+	finally:
+		database.disconnect()
+	assert sorted(snp[2] for snp in snps["REF"]) == [10, 20, 30, 50]

@@ -1,6 +1,6 @@
 import logging
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, ANNOTATION_SOURCE_COLUMNS, SourceFileError, DatabaseWriteError, open_source
+from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, CANSNP_SOURCE_COLUMNS, SNP_SOURCE_COLUMNS, TYPED_VALUES, annotation_columns, cansnp_row, SourceFileError, DatabaseWriteError, open_source
 from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names, split_row
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from importlib import import_module
@@ -8,9 +8,12 @@ from datetime import date
 
 def snp_annotation_sql(table="snp_annotation"):
 	'''the CREATE statement of the snp_annotation table of the current format; the conversion
-		of a database from the format before 2.3.0 builds it under another name first'''
+		of a database of an older format builds it under another name first.
+		A node has one row per canSNP, ranked within the node, and the canSNPs the scheme
+		types carry typed = 1. Typing reads those; the others are the alternatives of the
+		node, which an assay may use and which --export writes back'''
 	return """CREATE TABLE IF NOT EXISTS {table} (
-									node_id INTEGER PRIMARY KEY,
+									node_id INTEGER,
 									snp_id VARCHAR(6) ,
 									sequence VARCHAR(40),
 									sequence_position INTEGER,
@@ -19,6 +22,11 @@ def snp_annotation_sql(table="snp_annotation"):
 									reference VARCHAR(20),
 									date DATETIME,
 									genome_i INTEGER,
+									rank INTEGER NOT NULL DEFAULT 1,
+									score TEXT,
+									typed INTEGER NOT NULL DEFAULT 1,
+									UNIQUE (node_id, rank),
+									UNIQUE (genome_i, sequence, sequence_position),
 									FOREIGN KEY (genome_i) REFERENCES genomes (genome_i)
 								);
 							""".format(table=table)
@@ -107,20 +115,24 @@ class CanSNPDatabase(DatabaseFunctions):
 			write_scheme_info(self.conn, build_info(**(kwargs.get("scheme_info") or {})))
 
 	def add_annotation(self, data, id=False,genome_i=False):
-		'''Add snp annotation to annotation table'''
+		'''Add one canSNP to the annotation table; data is a row of either annotation format
+			as cansnp_row() gives it'''
 		try:
 			data["date"]
 		except KeyError:
 			data["date"] = self.today.strftime("%d/%m/%y")
 		info = {
-				"snp_id":            data["snp_id"],
+				"snp_id":            data["node"],
 				"sequence":          data["sequence"],
 				"sequence_position": data["sequence_position"],
 				"ancestral_base":     data["ancestral_base"],
 				"derived_base":        data["derived_base"],
 				"reference":         data["reference"],
 				"date":             data["date"],
-				"genome_i":         genome_i
+				"genome_i":         genome_i,
+				"rank":             int(data["rank"]),
+				"score":            data["score"].strip() or None,
+				"typed":            TYPED_VALUES[data["typed"].strip().lower()]
 		}
 		### If ID is supplied skip autoincrement and add specific ID
 		if id is not False: ## the twin of issue #203 in the create path: an id of 0 is a real id
@@ -129,8 +141,8 @@ class CanSNPDatabase(DatabaseFunctions):
 		if isinstance(taxid_base, Exception):
 			'''a failed insert was only logged as a warning, and --create then ended with exit
 				status 0 and a database that lacks the SNP'''
-			raise DatabaseWriteError("The SNP {snp} could not be written to {db}: {error}".format(
-				snp=data["snp_id"], db=self.database, error=taxid_base))
+			raise DatabaseWriteError("The canSNP {snp} (rank {rank}) could not be written to {db}: {error}".format(
+				snp=data["node"], rank=data["rank"], db=self.database, error=taxid_base))
 		return taxid_base
 
 	def add_genome(self,data):
@@ -193,7 +205,7 @@ class CanSNPDatabase(DatabaseFunctions):
 		with open_source(annotation_file) as af:
 			headers = af.readline().lstrip("#").strip().split("\t")
 			logging.debug(headers)
-			check_source_headers(headers,ANNOTATION_SOURCE_COLUMNS,annotation_file)
+			check_source_headers(headers,annotation_columns(headers),annotation_file)
 			'''a trailing free-text comment column is allowed in the snp annotation input, and a row
 				may leave that column out; only trailing columns named like a comment are optional,
 				so a row that is short in a real column is still a bad row (issue #22)'''
@@ -217,20 +229,21 @@ class CanSNPDatabase(DatabaseFunctions):
 				for i in range(len(headers)):
 					head,val = headers[i],data[i]
 					ddict[head] = val
+				ddict = cansnp_row(ddict)
 				dataArr.append(ddict)
 				try:
-					_id = nodes[ddict["snp_id"]]
+					_id = nodes[ddict["node"]]
 				except KeyError:
 					'''a SNP dropped with only a warning left a database without it and exit status 0'''
-					raise SourceFileError("{file}: snp_id '{id}' does not appear in the tree, the SNP would be left out of the database".format(
-						file=annotation_file, id=ddict["snp_id"]))
+					raise SourceFileError("{file}: node '{id}' does not appear in the tree, the canSNP would be left out of the database".format(
+						file=annotation_file, id=ddict["node"]))
 				try:
 					genome_i = self.genomes[ddict["genome"]]
 				except KeyError:
 					'''a SNP on a genome that is not in the references file was left out with a warning;
 						check_sources refuses it first, the loader does as well'''
-					raise SourceFileError("{file}: SNP {id} is on genome '{genome}', which is not in the references file".format(
-						file=annotation_file, id=ddict["snp_id"], genome=ddict["genome"]))
+					raise SourceFileError("{file}: the canSNP of node '{id}' is on genome '{genome}', which is not in the references file".format(
+						file=annotation_file, id=ddict["node"], genome=ddict["genome"]))
 				if _id is not False: ## a looked up node id is checked against False, not for truth: an id of 0 is a real id (issue #202)
 					logger.debug("Add annotation: {dic}, {_id}, {gid}".format(dic=ddict,_id=_id,gid=genome_i))
 					self.add_annotation(ddict, id=_id, genome_i=genome_i)

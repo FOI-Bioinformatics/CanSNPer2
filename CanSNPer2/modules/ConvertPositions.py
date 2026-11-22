@@ -29,7 +29,7 @@ import tempfile
 import logging
 
 from CanSNPer2.modules.ReferenceCheck import read_sequences, listing, FastaFileError
-from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
+from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError, CANSNP_SOURCE_COLUMNS
 from CanSNPer2.modules.InitiateDatabase import snp_annotation_sql
 from CanSNPer2.modules.FileMode import set_default_mode
 from CanSNPer2.modules.SchemeInfo import write_scheme_info
@@ -235,6 +235,135 @@ def convert_table(source, target, genome_files, sequences=None):
 	return count
 
 
+def canSNPs_target(outdir, source):
+	'''the path a converted SNP source file is written to: the name of the source with a
+		trailing _snp or _canSNPs replaced by _canSNPs'''
+	name = os.path.basename(source)
+	stem = name[:-len(".txt")] if name.endswith(".txt") else name
+	for ending in ("_snp", "_canSNPs"):
+		if stem.endswith(ending):
+			stem = stem[:-len(ending)]
+			break
+	return os.path.join(outdir, stem + "_canSNPs.txt")
+
+
+def upgrade_table(source, target):
+	'''Rewrite a SNP file of 2.3.0, or a canSNP file without the rank, score and typed columns,
+		as a canSNP file. snp_id becomes node, the strain column is dropped, and the columns the
+		file lacks are added: rank 1 for a SNP file, an empty score, and typed yes for the canSNP
+		of rank 1 of each node. A canSNP file without a reference column is given NA, which is
+		what the published schemes record for a canSNP whose source is not known.
+		Comment and blank lines are copied, and any trailing columns of the source are kept after
+		the typed column. Returns the number of canSNPs; raises ConversionError, and writes
+		nothing, when a row cannot be read.'''
+	check_target(source, target)
+	header = None
+	output = []
+	refused = []
+	count = 0
+	with read_text(source, newline="") as fin:
+		for number, raw in enumerate(fin, start=1):
+			line, ending = _split_ending(raw)
+			if line.strip() == "" or line.startswith("#"):
+				output.append(raw)
+				continue
+			fields = line.split("\t")
+			if header is None:
+				header = fields
+				if "sequence_position" not in header:
+					raise ConversionError("{source} has no sequence_position column, convert its positions "
+						"first".format(source=source))
+				if "typed" in header:
+					raise ConversionError("{source} already has a typed column, it is in the current format, "
+						"nothing to upgrade".format(source=source))
+				if "node" not in header and "snp_id" not in header:
+					raise ConversionError("{source} has no node column, a header row with {required} is "
+						"required".format(source=source, required=", ".join(CANSNP_SOURCE_COLUMNS)))
+				column = {name: i for i, name in enumerate(header)}
+				missing = [name for name in ("genome", "sequence", "sequence_position", "derived_base",
+					"ancestral_base") if name not in column]
+				if missing:
+					raise ConversionError("{source} has no column(s) {missing}".format(
+						source=source, missing=", ".join(missing)))
+				kept = [name for name in header if name not in CANSNP_SOURCE_COLUMNS
+					and name not in ("snp_id", "strain")]
+				output.append("\t".join(CANSNP_SOURCE_COLUMNS + tuple(kept)) + ending)
+				continue
+			if len(fields) < len(header):
+				refused.append("{source} line {n}: the row has {f} columns, the header {h}".format(
+					source=source, n=number, f=len(fields), h=len(header)))
+				continue
+			value = lambda name, default="": fields[column[name]] if name in column else default
+			node = value("node") or value("snp_id")
+			rank = value("rank", "1") or "1"
+			row = [node, rank, value("reference", "NA") or "NA", value("genome"), value("sequence"),
+				value("sequence_position"), value("derived_base").upper(), value("ancestral_base").upper(),
+				value("score"), "yes" if rank == "1" else "no"]
+			output.append("\t".join(row + [value(name) for name in kept]) + ending)
+			count += 1
+	if header is None:
+		raise ConversionError("{source} has no header row".format(source=source))
+	if refused:
+		raise ConversionError(_refusal(source, refused))
+	partial = _temporary(target)
+	try:
+		with open(partial, "w", newline="") as out:
+			out.write("".join(output))
+		os.replace(partial, target)
+	finally:
+		_remove(partial)
+	return count
+
+
+def upgrade_database(source_db, target_db, scheme_info=None):
+	'''Copy a database of 2.3.0, which holds one canSNP per node, to target_db and rebuild its
+		snp_annotation table in the current format: every canSNP becomes rank 1 of its node,
+		typed, without a score. No reference file is needed, no position moves.
+		Returns the number of canSNPs; raises ConversionError and leaves no target_db.'''
+	try:
+		check_database(source_db, current_format=False)
+	except ConnectionError as e:
+		raise ConversionError(str(e))
+	check_target(source_db, target_db)
+	if database_stage(source_db) == "joined":
+		raise ConversionError("The database {db} stores positions along the joined reference sequences; convert "
+			"those first, which needs the reference files".format(db=source_db))
+	try:
+		rows = sqlite3.connect(source_db).execute('''SELECT node_id, snp_id, sequence, sequence_position,
+			ancestral_base, derived_base, reference, date, genome_i FROM snp_annotation ORDER BY node_id''').fetchall()
+	except sqlite3.Error as e:
+		raise ConversionError("The canSNPs of {db} could not be read: {error}".format(db=source_db, error=e))
+	partial = _temporary(target_db)
+	try:
+		shutil.copyfile(source_db, partial)
+		conn = sqlite3.connect(partial)
+		try:
+			conn.execute(snp_annotation_sql("snp_annotation_upgraded"))
+			conn.executemany('''INSERT INTO snp_annotation_upgraded (node_id, snp_id, sequence, sequence_position,
+				ancestral_base, derived_base, reference, date, genome_i, rank, score, typed)
+				VALUES (?,?,?,?,?,?,?,?,?,1,NULL,1)''', rows)
+			conn.execute("DROP TABLE snp_annotation")
+			conn.execute("ALTER TABLE snp_annotation_upgraded RENAME TO snp_annotation")
+			conn.commit()
+			if scheme_info:
+				write_scheme_info(conn, scheme_info)
+			conn.execute("VACUUM")
+		finally:
+			conn.close()
+		try:
+			check_database(partial)
+		except ConnectionError as e:
+			raise ConversionError("The upgraded copy of {db} failed the database check, nothing was written: "
+				"{error}".format(db=source_db, error=e))
+		os.replace(partial, target_db)
+	except sqlite3.Error as e:
+		raise ConversionError("The database {db} could not be upgraded, nothing was written: {error}".format(
+			db=source_db, error=e))
+	finally:
+		_remove(partial)
+	return len(rows)
+
+
 def convert_database(source_db, target_db, genome_files, sequences=None, scheme_info=None):
 	'''Copy a database from the format before 2.3.0 to target_db and rebuild its snp_annotation
 		table with sequence and sequence_position columns (create, copy, drop and rename; ALTER
@@ -325,30 +454,54 @@ def database_genomes(path):
 		conn.close()
 
 
-def check_table_format(path):
-	'''Raise ConversionError when a SNP source file is already in the current format, before any
-		reference is fetched'''
+def table_header(path):
+	'''the header row of a SNP or canSNP source file, as a list of column names'''
 	with read_text(path) as fin:
 		for line in fin:
 			line = line.rstrip("\r\n")
 			if line.strip() == "" or line.startswith("#"):
 				continue
-			if "sequence_position" in line.split("\t"):
-				raise ConversionError("{source} already has a sequence_position column, it is in the current format, "
-					"nothing to convert".format(source=path))
-			return
+			return line.split("\t")
+	return []
 
 
-def check_database_format(path):
-	'''Raise ConversionError when a database already stores positions per reference sequence'''
+def table_stage(path):
+	'''What a SNP or canSNP source file needs: "joined" for a position along the joined
+		reference sequences (before 2.3.0), "snp" for one canSNP per node without the rank,
+		score and typed columns (2.3.0), or "current"'''
+	header = table_header(path)
+	if "sequence_position" not in header:
+		return "joined"
+	return "current" if "typed" in header else "snp"
+
+
+def check_table_format(path):
+	'''Raise ConversionError when a SNP source file is already in the current format, before any
+		reference is fetched'''
+	if table_stage(path) == "current":
+		raise ConversionError("{source} already has the rank, score and typed columns, it is in the current "
+			"format, nothing to convert".format(source=path))
+
+
+def database_stage(path):
+	'''What a database needs: "joined" for positions along the joined reference sequences
+		(before 2.3.0), "snp" for one canSNP per node without the rank, score and typed
+		columns (2.3.0), or "current"'''
 	conn = sqlite3.connect(path)
 	try:
 		columns = set(row[1] for row in conn.execute("PRAGMA table_info(snp_annotation)").fetchall())
 	finally:
 		conn.close()
-	if "sequence_position" in columns:
-		raise ConversionError("The database {path} already stores positions per reference sequence, it is in the "
-			"current format, nothing to convert".format(path=path))
+	if "sequence_position" not in columns:
+		return "joined"
+	return "current" if "typed" in columns else "snp"
+
+
+def check_database_format(path):
+	'''Raise ConversionError when a database is already in the current format'''
+	if database_stage(path) == "current":
+		raise ConversionError("The database {path} already stores every canSNP with its rank, score and whether "
+			"the scheme types it, it is in the current format, nothing to convert".format(path=path))
 
 
 def table_genomes(path):

@@ -12,16 +12,20 @@ import sys
 import pytest
 
 import helpers
-from CanSNPer2.modules.ExportDatabase import SNP_COLUMNS, export_source
+from CanSNPer2.modules.ExportDatabase import CANSNP_COLUMNS, export_source
 from CanSNPer2.modules.ImportDatabase import DatabaseImportError, import_from_sources
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tB.1\nR\tB.1\tB.2\n"
-SNP_HEADER = ("snp_id", "reference", "genome", "sequence", "sequence_position", "derived_base", "ancestral_base")
-SNP_ROWS = [("R", "Paper2020", "REF1", "chrI", 10, "A", "G"),
-	("A.1", "Paper2020", "REF1", "chrII", 10, "T", "C"),
-	("A.2", "Paper2021", "REF1", "chrI", 200, "G", "A"),
-	("B.1", "Paper2020", "REF2", "CP000002.1", 400, "A", "C")]
+SNP_HEADER = helpers.CANSNP_HEADER
+## the scores cover what the round trip must keep verbatim: none at all, an integer, a trailing
+## zero and a negative value, none of which survives being stored as a number
+SNP_ROWS = [("R", 1, "Paper2020", "REF1", "chrI", 10, "A", "G", "", "yes"),
+	("A.1", 1, "Paper2020", "REF1", "chrII", 10, "T", "C", "520", "yes"),
+	("A.1", 2, "Paper2020", "REF1", "chrII", 60, "A", "G", "0.980", "no"),
+	("A.1", 3, "Paper2020", "REF1", "chrII", 70, "C", "T", "-0.5", "no"),
+	("A.2", 1, "Paper2021", "REF1", "chrI", 200, "G", "A", "1", "yes"),
+	("B.1", 1, "Paper2020", "REF2", "CP000002.1", 400, "A", "C", "", "yes")]
 REFERENCES = ("genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\n"
 	"REF1\ts1\tGCA_000000001.1\tGCF_000000001.1\tASM1v1\n"
 	"REF2\ts2\tGCA_000000002.1\tGCF_000000002.1\t\n")
@@ -65,12 +69,13 @@ def test_export_then_import_round_trips(tmp_path):
 	counts = import_from_sources(files["tree"], files["snp"], files["references"], target)
 	assert content(target) == content(db)
 	assert roots(target) == 1
-	assert counts["snp_annotation"] == 4 and counts["snp_references"] == 2
+	assert counts["snp_annotation"] == 6 and counts["typed"] == 4 and counts["snp_references"] == 2
 
 
 def test_export_import_round_trip_keeps_sequences(tmp_path):
-	'''two SNPs at position 10, one on chrI and one on chrII, survive export, import and a
-		second export unchanged'''
+	'''two canSNPs at position 10, one on chrI and one on chrII, and the ranks, scores and
+		typed flags of a node with three canSNPs, survive export, import and a second export
+		unchanged'''
 	db = clean_db(tmp_path)
 	first = export_source(db, str(tmp_path / "first"), name="scheme")
 	target = str(tmp_path / "imported.db")
@@ -79,9 +84,14 @@ def test_export_import_round_trip_keeps_sequences(tmp_path):
 	for key in ("tree", "snp", "references"):
 		assert open(first[key], "rb").read() == open(second[key], "rb").read(), key
 	lines = open(first["snp"]).read().splitlines()
-	assert tuple(lines[0].split("\t")) == SNP_COLUMNS
+	assert tuple(lines[0].split("\t")) == CANSNP_COLUMNS
 	assert {tuple(line.split("\t")[4:6]) for line in lines[1:]} >= {("chrI", "10"), ("chrII", "10")}
 	assert ("A.1", "chrII", 10) in content(target)["snps"]
+	## the scores are written back as they were given, not as a number would print them
+	scores = [line.split("\t")[8] for line in lines[1:]]
+	assert scores == ["", "520", "0.980", "-0.5", "1", ""], scores
+	assert [line.split("\t")[9] for line in lines[1:]] == ["yes", "yes", "no", "no", "yes", "yes"]
+	assert [line.split("\t")[1] for line in lines[1:]] == ["1", "1", "2", "3", "1", "1"]
 
 
 def test_import_of_the_source_files_equals_create(tmp_path):
@@ -128,7 +138,7 @@ def test_the_command_line_import(tmp_path):
 		"--database", str(target), "--logs", str(tmp_path / "logs")],
 		capture_output=True, text=True, cwd=str(tmp_path))
 	assert result.returncode == 0, result.stderr
-	assert "Imported" in result.stdout and "4 SNPs" in result.stdout
+	assert "Imported" in result.stdout and "6 canSNPs (4 typed)" in result.stdout
 	assert roots(str(target)) == 1
 
 

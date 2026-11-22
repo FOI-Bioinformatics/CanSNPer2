@@ -23,8 +23,14 @@ from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase
 from CanSNPer2.modules.SourceCheck import check_sources
 
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tB.1\n"
-SNP_HEADER = "\t".join(helpers.SNP_HEADER) + "\n"
-SNP_ROWS = ("R\ts1\tPaper2020\tREF1\tCP000001.1\t10\tA\tG\n"
+SNP_HEADER = "\t".join(helpers.CANSNP_HEADER) + "\n"
+SNP_ROWS = ("R\t1\tPaper2020\tREF1\tCP000001.1\t10\tA\tG\t\tyes\n"
+	"A.1\t1\tPaper2020\tREF1\tCP000001.1\t100\tT\tC\t520\tyes\n"
+	"A.2\t1\tPaper2021\tREF1\tCP000001.1\t200\tG\tA\t\tyes\n"
+	"B.1\t1\tPaper2020\tREF2\tCP000002.1\t400\tA\tC\t\tyes\n")
+## the SNP file of 2.3.0, which --annotation still reads as rank 1 of each node
+SNP_FILE_2_3_HEADER = "\t".join(helpers.SNP_HEADER) + "\n"
+SNP_FILE_2_3_ROWS = ("R\ts1\tPaper2020\tREF1\tCP000001.1\t10\tA\tG\n"
 	"A.1\ts1\tPaper2020\tREF1\tCP000001.1\t100\tT\tC\n"
 	"A.2\ts1\tPaper2021\tREF1\tCP000001.1\t200\tG\tA\n"
 	"B.1\ts2\tPaper2020\tREF2\tCP000002.1\t400\tA\tC\n")
@@ -82,10 +88,10 @@ def test_a_position_must_be_a_positive_integer(tmp_path, position):
 ])
 def test_a_base_must_be_one_of_ACGT(tmp_path, column, base):
 	if column == "derived_base":
-		row = "A.1\ts1\tPaper2020\tREF1\tCP000001.1\t100\t{0}\tC".format(base)
+		row = "A.1\t1\tPaper2020\tREF1\tCP000001.1\t100\t{0}\tC\t520\tyes".format(base)
 	else:
-		row = "A.1\ts1\tPaper2020\tREF1\tCP000001.1\t100\tT\t{0}".format(base)
-	snp = SNP_HEADER + SNP_ROWS.replace("A.1\ts1\tPaper2020\tREF1\tCP000001.1\t100\tT\tC", row)
+		row = "A.1\t1\tPaper2020\tREF1\tCP000001.1\t100\tT\t{0}\t520\tyes".format(base)
+	snp = SNP_HEADER + SNP_ROWS.replace("A.1\t1\tPaper2020\tREF1\tCP000001.1\t100\tT\tC\t520\tyes", row)
 	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
 	assert "{0} '{1}' is not one of A, C, G, T".format(column, base) in message
 
@@ -97,21 +103,47 @@ def test_derived_and_ancestral_base_must_differ(tmp_path):
 
 
 def test_a_snp_on_a_genome_missing_from_the_references_is_refused(tmp_path):
-	snp = SNP_HEADER + SNP_ROWS.replace("B.1\ts2\tPaper2020\tREF2", "B.1\ts2\tPaper2020\tREF9")
+	snp = SNP_HEADER + SNP_ROWS.replace("B.1\t1\tPaper2020\tREF2", "B.1\t1\tPaper2020\tREF9")
 	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
 	assert "genome 'REF9' is not listed in" in message
 
 
-def test_a_snp_id_listed_twice_is_refused(tmp_path):
+def test_a_second_canSNP_of_a_node_must_have_the_next_rank(tmp_path):
+	'''a node holds its canSNPs at the ranks 1, 2, 3 ... in the order of the file'''
 	message = refused(tmp_path, write_sources(tmp_path,
-		snp=with_snp_row("A.1\ts1\tPaper2020\tREF1\tCP000001.1\t150\tT\tC")))
-	assert "snp_id 'A.1' is listed 2 times" in message
+		snp=with_snp_row("A.1\t1\tPaper2020\tREF1\tCP000001.1\t150\tT\tC\t490\tno")))
+	assert "the ranks of node 'A.1' are 1, 1, not 1, 2, 3 ... in order" in message
+
+
+def test_a_node_with_two_typed_canSNPs_is_refused(tmp_path):
+	'''CanSNPer2 calls one canSNP per node'''
+	message = refused(tmp_path, write_sources(tmp_path,
+		snp=with_snp_row("A.1\t2\tPaper2020\tREF1\tCP000001.1\t150\tT\tC\t490\tyes")))
+	assert "node 'A.1' has 2 canSNPs marked typed yes, CanSNPer2 calls one canSNP per node" in message
+
+
+def test_a_node_without_a_typed_canSNP_is_refused(tmp_path):
+	snp = SNP_HEADER + SNP_ROWS.replace("\t100\tT\tC\t520\tyes", "\t100\tT\tC\t520\tno")
+	message = refused(tmp_path, write_sources(tmp_path, snp=snp))
+	assert "node 'A.1' has no canSNP marked typed yes, CanSNPer2 would not call it" in message
+
+
+def test_an_untyped_canSNP_of_a_node_is_stored(tmp_path):
+	'''the alternative canSNPs of a node are kept in the database, for an assay and for
+		--export, and are not called'''
+	db = create(tmp_path, write_sources(tmp_path,
+		snp=with_snp_row("A.1\t2\tPaper2020\tREF1\tCP000001.1\t150\tT\tC\t490\tno")))
+	conn = sqlite3.connect(db)
+	stored = conn.execute("SELECT snp_id, snp_annotation.rank, score, typed FROM snp_annotation"
+		" WHERE snp_id = 'A.1' ORDER BY snp_annotation.rank").fetchall()
+	conn.close()
+	assert stored == [("A.1", 1, "520", 1), ("A.1", 2, "490", 0)]
 
 
 def test_a_position_annotated_twice_on_one_genome_is_refused(tmp_path):
 	tree = TREE + "R\tB.1\tB.2\n"
 	message = refused(tmp_path, write_sources(tmp_path, tree=tree,
-		snp=with_snp_row("B.2\ts1\tPaper2020\tREF1\tCP000001.1\t100\tA\tC")))
+		snp=with_snp_row("B.2\t1\tPaper2020\tREF1\tCP000001.1\t100\tA\tC\t\tyes")))
 	assert "position 100 on sequence 'CP000001.1' of 'REF1' is annotated 2 times" in message
 
 
@@ -119,7 +151,7 @@ def test_the_same_position_on_two_genomes_is_allowed(tmp_path):
 	'''positions are per reference genome, 100 on REF1 and 100 on REF2 are different sites'''
 	tree = TREE + "R\tB.1\tB.2\n"
 	create(tmp_path, write_sources(tmp_path, tree=tree,
-		snp=with_snp_row("B.2\ts2\tPaper2020\tREF2\tCP000002.1\t100\tA\tC")))
+		snp=with_snp_row("B.2\t1\tPaper2020\tREF2\tCP000002.1\t100\tA\tC\t\tyes")))
 
 
 # sequence and position on that sequence ------------------------------------------------
@@ -129,9 +161,9 @@ def checked(files):
 
 
 def test_create_stores_sequence_and_sequence_position(tmp_path):
-	rows = [("R", "s1", "Paper2020", "REF1", "chrI", 10, "A", "G"),
-		("A.1", "s1", "Paper2020", "REF1", "chrII", 10, "T", "C"),
-		("B.1", "s1", "Paper2020", "REF1", "chrII", 250, "G", "A")]
+	rows = [("R", 1, "Paper2020", "REF1", "chrI", 10, "A", "G", "", "yes"),
+		("A.1", 1, "Paper2020", "REF1", "chrII", 10, "T", "C", "", "yes"),
+		("B.1", 1, "Paper2020", "REF1", "chrII", 250, "G", "A", "", "yes")]
 	files = helpers.write_sources(tmp_path, rows)
 	db = create(tmp_path, files)
 	conn = sqlite3.connect(db)
@@ -152,21 +184,21 @@ def test_old_header_is_refused_with_the_conversion_hint(tmp_path):
 
 
 def test_same_position_on_two_sequences_is_allowed(tmp_path):
-	rows = [("R", "s1", "Paper2020", "REF1", "chrI", 50, "A", "G"),
-		("A.1", "s1", "Paper2020", "REF1", "chrII", 50, "T", "C")]
+	rows = [("R", 1, "Paper2020", "REF1", "chrI", 50, "A", "G", "", "yes"),
+		("A.1", 1, "Paper2020", "REF1", "chrII", 50, "T", "C", "", "yes")]
 	assert checked(helpers.write_sources(tmp_path, rows)) == []
 
 
 def test_same_sequence_and_position_twice_is_refused(tmp_path):
-	rows = [("R", "s1", "Paper2020", "REF1", "chrII", 50, "A", "G"),
-		("A.1", "s1", "Paper2020", "REF1", "chrII", 50, "T", "C")]
+	rows = [("R", 1, "Paper2020", "REF1", "chrII", 50, "A", "G", "", "yes"),
+		("A.1", 1, "Paper2020", "REF1", "chrII", 50, "T", "C", "", "yes")]
 	problems = checked(helpers.write_sources(tmp_path, rows))
 	assert any("position 50 on sequence 'chrII' of 'REF1' is annotated 2 times" in p for p in problems), problems
 
 
 def test_empty_sequence_is_refused(tmp_path):
-	rows = [("R", "s1", "Paper2020", "REF1", "chrI", 10, "A", "G"),
-		("A.1", "s1", "Paper2020", "REF1", "", 20, "T", "C")]
+	rows = [("R", 1, "Paper2020", "REF1", "chrI", 10, "A", "G", "", "yes"),
+		("A.1", 1, "Paper2020", "REF1", "", 20, "T", "C", "", "yes")]
 	files = helpers.write_sources(tmp_path, rows)
 	problems = checked(files)
 	assert problems == ["{0}:3: sequence is empty, it must name a sequence of the reference genome".format(files["snp"])], problems
@@ -174,13 +206,38 @@ def test_empty_sequence_is_refused(tmp_path):
 
 def test_a_snp_whose_node_is_not_in_the_tree_is_refused(tmp_path):
 	message = refused(tmp_path, write_sources(tmp_path,
-		snp=with_snp_row("X.9\ts1\tPaper2020\tREF1\tCP000001.1\t900\tA\tC")))
-	assert "snp_id 'X.9' does not appear in" in message
+		snp=with_snp_row("X.9\t1\tPaper2020\tREF1\tCP000001.1\t900\tA\tC\t\tyes")))
+	assert "node 'X.9' does not appear in" in message
 
 
 def test_a_short_snp_row_is_refused(tmp_path):
-	message = refused(tmp_path, write_sources(tmp_path, snp=with_snp_row("B.1\ts2\tPaper2020")))
-	assert "expected 8 columns, found 3" in message
+	message = refused(tmp_path, write_sources(tmp_path, snp=with_snp_row("B.1\t1\tPaper2020")))
+	assert "expected 10 columns, found 3" in message
+
+
+def test_a_2_3_snp_file_still_builds_as_typed_rank_1_canSNPs(tmp_path):
+	'''the SNP file of 2.3.0 holds one canSNP per node; it is read as rank 1 of its node,
+		typed and without a score, so a scheme in that format still builds'''
+	files = write_sources(tmp_path, snp=SNP_FILE_2_3_HEADER + SNP_FILE_2_3_ROWS)
+	db = create(tmp_path, files)
+	conn = sqlite3.connect(db)
+	stored = conn.execute("SELECT snp_id, snp_annotation.rank, score, typed FROM snp_annotation"
+		" ORDER BY snp_id").fetchall()
+	conn.close()
+	assert stored == [("A.1", 1, None, 1), ("A.2", 1, None, 1), ("B.1", 1, None, 1), ("R", 1, None, 1)]
+
+
+def test_a_2_3_snp_file_passes_the_source_checks(tmp_path):
+	assert checked(write_sources(tmp_path, snp=SNP_FILE_2_3_HEADER + SNP_FILE_2_3_ROWS)) == []
+
+
+def test_a_header_with_neither_node_nor_snp_id_is_refused(tmp_path):
+	header = ("name", "rank", "reference", "genome", "sequence", "sequence_position",
+		"derived_base", "ancestral_base", "score", "typed")
+	files = helpers.write_sources(tmp_path, [("R", 1, "Paper2020", "REF1", "chrI", 10, "A", "G", "", "yes")],
+		header=header)
+	problems = checked(files)
+	assert any("has no column(s) node" in problem for problem in problems), problems
 
 
 def test_comments_blank_lines_and_a_comment_column_are_still_accepted(tmp_path):

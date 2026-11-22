@@ -17,10 +17,10 @@ from CanSNPer2.modules.LogSetup import setup_logging
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TREE = "R\nR\tA.1\nR\tA.1\tA.2\nR\tB.1\n"
-ROWS = ["R\ts1\tP\tREF1\tCP000001.1\t10\tA\tG",
-	"A.1\ts1\tP\tREF1\tCP000001.1\t20\tT\tC",
-	"A.2\ts1\tP\tREF1\tCP000001.1\t30\tG\tA",
-	"B.1\ts1\tP\tREF1\tCP000001.1\t40\tC\tA"]
+ROWS = ["R\t1\tP\tREF1\tCP000001.1\t10\tA\tG\t\tyes",
+	"A.1\t1\tP\tREF1\tCP000001.1\t20\tT\tC\t\tyes",
+	"A.2\t1\tP\tREF1\tCP000001.1\t30\tG\tA\t\tyes",
+	"B.1\t1\tP\tREF1\tCP000001.1\t40\tC\tA\t\tyes"]
 
 
 def run(tmp_path, *args, logs=True, cwd=None):
@@ -165,7 +165,7 @@ def test_export_snp_failure_leaves_no_tree(tmp_path, scheme, monkeypatch):
 	db, _ = scheme
 	o = tmp_path / "o"
 	real_print = print
-	monkeypatch.setattr(ExportDatabase, "SNP_COLUMNS", None)  ## printing *None fails after the tree is written
+	monkeypatch.setattr(ExportDatabase, "CANSNP_COLUMNS", None)  ## printing *None fails after the tree is written
 	with pytest.raises(Exception):
 		export_source(db, str(o))
 	assert not os.path.exists(str(o)) or os.listdir(str(o)) == []

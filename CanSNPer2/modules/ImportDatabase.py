@@ -59,12 +59,13 @@ def import_from_sources(tree, annotation, references, database, tmpdir="/tmp", v
 				"edit the tree file so a single root remains and import again".format(e))
 		counts = {table: conn.execute("SELECT COUNT(*) FROM {0}".format(table)).fetchone()[0]
 			for table in ("nodes", "tree", "snp_annotation", "snp_references")}
+		counts["typed"] = conn.execute("SELECT COUNT(*) FROM snp_annotation WHERE typed = 1").fetchone()[0]
 	except Exception:
 		conn.close()
 		os.remove(database)
 		raise
 	conn.close()
 
-	logger.info("Imported {db}: {nodes} nodes, {tree} links, {snp_annotation} SNPs, "
+	logger.info("Imported {db}: {nodes} nodes, {tree} links, {snp_annotation} canSNPs ({typed} typed), "
 		"{snp_references} reference genomes".format(db=database, **counts))
 	return counts

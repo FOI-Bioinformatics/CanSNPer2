@@ -24,12 +24,14 @@ from CanSNPer2.modules.DatabaseConnection import GENOME_SOURCE_COLUMNS
 
 logger = logging.getLogger(__name__)
 
-## the SNP header of CanSNPer2-data (validate.py SNP_HEADER), so an export can be added there
-## as it is. The database keeps no strain per SNP: the strain of the SNP's reference genome is
-## written, as CanSNPCreator does. The date column is not written, it is not part of that
-## header; a database built from the export gets the build date.
-SNP_COLUMNS = ("snp_id", "strain", "reference", "genome", "sequence", "sequence_position", "derived_base",
-	"ancestral_base")
+## the canSNP header of CanSNPer2-data, so an export can be added there as it is. Every canSNP
+## of every node is written, ranked within its node, with the ones the scheme types marked. The
+## date column is not written, it is not part of that header; a database built from the export
+## gets the build date
+CANSNP_COLUMNS = ("node", "rank", "reference", "genome", "sequence", "sequence_position",
+	"derived_base", "ancestral_base", "score", "typed")
+## the typed column as the canSNP file spells it
+TYPED_TEXT = {1: "yes", 0: "no"}
 
 
 class ExportError(Exception):
@@ -126,8 +128,14 @@ def _umask():
 	return mask
 
 
+def typed_text(value):
+	'''the typed column of one canSNP row; anything that is not 0 is a canSNP the scheme types,
+		so that a database written by hand does not export a canSNP no node would call'''
+	return TYPED_TEXT.get(value, "no" if value in (0, "0") else "yes")
+
+
 def export_source(database, outdir, name=None):
-	'''Write the tree, SNP and reference source files of database into outdir and return
+	'''Write the tree, canSNP and reference source files of database into outdir and return
 		their paths. name is the file prefix, by default the database file name.'''
 	if name is None:
 		name = os.path.basename(database).rsplit(".", 1)[0]
@@ -136,25 +144,30 @@ def export_source(database, outdir, name=None):
 		paths = tree_paths(conn)
 		references = conn.execute("SELECT {cols} FROM snp_references ORDER BY id".format(
 			cols=",".join(GENOME_SOURCE_COLUMNS))).fetchall()
-		snps = conn.execute("""SELECT a.snp_id, g.strain, a.reference, g.genome, a.sequence, a.sequence_position,
-				a.derived_base, a.ancestral_base
+		## every canSNP, the alternatives of a node included, so that the export and a database
+		## built from it hold the same canSNPs
+		snps = conn.execute("""SELECT a.snp_id, a.rank, a.reference, g.genome, a.sequence, a.sequence_position,
+				a.derived_base, a.ancestral_base, a.score, a.typed
 			FROM snp_annotation a LEFT JOIN snp_references g ON g.id = a.genome_i
-			ORDER BY a.node_id""").fetchall()
+			ORDER BY a.node_id, a.rank""").fetchall()
 	finally:
 		conn.close()
 	without_genome = [row[0] for row in snps if row[3] is None]
 	if without_genome:
-		raise ExportError("{n} SNP(s) point to a reference genome that is not in the snp_references table: "
+		raise ExportError("{n} canSNP(s) point to a reference genome that is not in the snp_references table: "
 			"{snps}".format(n=len(without_genome), snps=", ".join(map(str, without_genome[:10]))))
 
-	files = {key: os.path.join(outdir, "{name}_{key}.txt".format(name=name, key=key))
+	files = {key: os.path.join(outdir, "{name}_{file}.txt".format(name=name,
+			file="canSNPs" if key == "snp" else key))
 		for key in ("tree", "snp", "references")}
 	lines = lambda rows: "".join("\t".join(row) + "\n" for row in rows)
+	rows = [[text(value) for value in row[:-1]] + [typed_text(row[-1])] for row in snps]
 	write_outputs({
 		files["tree"]: lines(paths),
-		files["snp"]: lines([SNP_COLUMNS] + [[text(value) for value in row] for row in snps]),
+		files["snp"]: lines([CANSNP_COLUMNS] + rows),
 		files["references"]: lines([GENOME_SOURCE_COLUMNS] + [[text(value) for value in row] for row in references]),
 	})
-	logger.info("Exported {nodes} nodes, {snps} SNPs and {refs} reference genomes to {outdir}".format(
-		nodes=len(paths), snps=len(snps), refs=len(references), outdir=outdir))
+	typed = sum(1 for row in snps if typed_text(row[-1]) == "yes")
+	logger.info("Exported {nodes} nodes, {snps} canSNPs ({typed} typed) and {refs} reference genomes to {outdir}".format(
+		nodes=len(paths), snps=len(snps), typed=typed, refs=len(references), outdir=outdir))
 	return files

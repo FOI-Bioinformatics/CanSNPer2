@@ -26,6 +26,29 @@ def sha(text):
 	return hashlib.sha256(text.encode()).hexdigest()
 
 
+CANSNPS = ("node\trank\treference\tgenome\tsequence\tsequence_position\tderived_base\tancestral_base\tscore\ttyped\n"
+       "A.1\t1\tTest2026\tREF1\tCP000001.1\t100\tT\tC\t\tyes\n"
+       "A.1\t2\tTest2026\tREF1\tCP000001.1\t150\tA\tG\t480\tno\n"
+       "B.1\t1\tTest2026\tREF1\tCP000001.1\t200\tG\tA\t\tyes\n")
+
+
+def cansnp_repo(name="test_scheme", status="verified", cansnps=CANSNPS):
+	'''a collection whose canSNPs are in the canSNP file, which is where they are now'''
+	folder = "schemes/{n}/{n}".format(n=name)
+	files = {
+		folder + "_canSNPs.txt": cansnps,
+		folder + "_tree.txt": TREE,
+		folder + "_references.txt": REFERENCES,
+		"schemes/{n}/README.md".format(n=name): "# Test\n\n| Field | Value |\n|---|---|\n| Status | {s} |\n".format(s=status),
+		"schemes.toml": '[taxo]\nkind = "taxonomy"\n',
+		"database/{n}.manifest.json".format(n=name): json.dumps({"sources": {
+			folder + "_canSNPs.txt": sha(cansnps),
+			folder + "_tree.txt": sha(TREE),
+			folder + "_references.txt": sha(REFERENCES)}}),
+	}
+	return files
+
+
 def scheme_repo(name="test_scheme", status="verified", manifest=True, snp=SNP):
 	folder = "schemes/{n}/{n}".format(n=name)
 	files = {
@@ -320,3 +343,42 @@ def test_a_github_token_is_sent_to_the_api_only(monkeypatch):
 	FetchScheme.fetch("https://raw.githubusercontent.com/a/b/master/schemes.toml")
 	assert seen == {"https://api.github.com/repos/a/b/commits/master": "Bearer secret",
 	                "https://raw.githubusercontent.com/a/b/master/schemes.toml": None}
+
+
+# the canSNP file of a collection ---------------------------------------------------------
+
+def test_a_canSNP_scheme_is_downloaded_and_built(tmp_path):
+	db = str(tmp_path / "test_scheme.db")
+	provenance = build_scheme("test_scheme", db, source=source(cansnp_repo()))
+	conn = sqlite3.connect(db)
+	rows = conn.execute("SELECT snp_id, snp_annotation.rank, score, typed FROM snp_annotation"
+		" ORDER BY snp_id, snp_annotation.rank").fetchall()
+	conn.close()
+	assert rows == [("A.1", 1, None, 1), ("A.1", 2, "480", 0), ("B.1", 1, None, 1)]
+	assert provenance["sources"]["schemes/test_scheme/test_scheme_canSNPs.txt"] == sha(CANSNPS)
+
+
+def test_a_collection_with_only_the_old_snp_file_is_still_built(tmp_path, caplog):
+	'''a branch from before the canSNP file keeps one canSNP per node'''
+	db = str(tmp_path / "test_scheme.db")
+	build_scheme("test_scheme", db, source=source(scheme_repo()))
+	conn = sqlite3.connect(db)
+	rows = conn.execute("SELECT snp_id, snp_annotation.rank, typed FROM snp_annotation ORDER BY snp_id").fetchall()
+	conn.close()
+	assert rows == [("A.1", 1, 1), ("B.1", 1, 1)]
+	assert any("_canSNPs.txt" in record.message for record in caplog.records), [r.message for r in caplog.records]
+
+
+def test_a_canSNP_file_the_manifest_has_no_hash_for_is_refused(tmp_path):
+	files = cansnp_repo()
+	folder = "schemes/test_scheme/test_scheme"
+	files["database/test_scheme.manifest.json"] = json.dumps({"sources": {
+		folder + "_tree.txt": sha(TREE), folder + "_references.txt": sha(REFERENCES)}})
+	db = str(tmp_path / "test_scheme.db")
+	with pytest.raises(SchemeError):
+		build_scheme("test_scheme", db, source=source(files))
+	assert build_scheme("test_scheme", db, source=source(files), allow_unverified=True)
+
+
+def test_list_schemes_finds_a_canSNP_scheme(tmp_path):
+	assert source(cansnp_repo()).list_schemes() == [("test_scheme", "verified")]

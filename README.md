@@ -96,8 +96,8 @@ source	FOI-Bioinformatics/CanSNPer2-data
 ref	dev
 commit	abc1234000000000000000000000000000000000
 known_issues	B.1
-format	2.3
-built_with	2.3.0
+format	2.4
+built_with	2.4.0
 built	2026-11-21
 ```
 
@@ -119,7 +119,7 @@ For more options CanSNPer2 --help
 ## Quick start custom databases
 Create database, download references annotated in the database and run CanSNPer2
 ```sh
-CanSNPer2-database --database francisella_tularensis.db --annotation snps.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
+CanSNPer2-database --database francisella_tularensis.db --annotation canSNPs.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
 CanSNPer2-download --database francisella_tularensis.db
 CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --save_tree
 ```
@@ -134,10 +134,10 @@ before 2.3.0 with the hint to convert it), and a build that fails part way leave
 | File | Refused |
 |---|---|
 | tree | a line that does not start at the root of the first line, a node with more than one parent, an empty column |
-| SNP | a sequence_position that is not a positive integer, the old header with a `position` column, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a snp_id or a (sequence, sequence_position) on one genome listed twice, a row with too few columns |
+| canSNP | a sequence_position that is not a positive integer, the old header with a `position` column, a base other than A, C, G or T, equal derived and ancestral bases, a genome missing from the references file, a node missing from the tree, a (sequence, sequence_position) on one genome listed twice, a row with too few columns, a rank that is not a positive integer, ranks of a node that are not 1, 2, 3 ... in order, a score that is not a number, a `typed` that is not yes or no, a node with no typed canSNP or with more than one |
 | references | a genome listed twice, a row with too few columns |
 
-`#` comment lines, blank lines, a trailing comment column in the SNP file, `;` separated
+`#` comment lines, blank lines, a trailing comment column in the canSNP file, `;` separated
 trees and nodes without a SNP are accepted.
 
 ### CanSNPer2-database
@@ -225,18 +225,19 @@ Run any command with --help for its arguments; examples in README.md.
 | File | Content |
 |---|---|
 | `<db>_tree.txt` | one line per node, the tab separated path from the root to the node |
-| `<db>_snp.txt` | `snp_id strain reference genome sequence sequence_position derived_base ancestral_base` |
+| `<db>_canSNPs.txt` | `node rank reference genome sequence sequence_position derived_base ancestral_base score typed` |
 | `<db>_references.txt` | `genome strain genbank_id refseq_id assembly_name` |
 
-The SNP file has the header CanSNPer2-data requires. The database keeps no strain per SNP, so
-the strain of the SNP's reference genome is written; the date column is not exported, and a
+The canSNP file has the header CanSNPer2-data requires. It holds every canSNP of every node,
+ranked within the node, with `typed` marking the ones the scheme types; `score` is empty for a
+canSNP taken from a publication. The date column is not exported, and a
 database built from the files gets the build date. A database created from these files has the
 same tree, SNPs and reference genomes, so a scheme can be exported, edited as text and rebuilt:
 
 ```sh
 CanSNPer2-database --database my_scheme.db --export -o scheme/
 CanSNPer2-database --database rebuilt.db --import --tree scheme/my_scheme_tree.txt \
-    --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
+    --annotation scheme/my_scheme_canSNPs.txt --references scheme/my_scheme_references.txt
 ```
 
 A database whose tree has a node with more than one parent, more than one root, or SNPs that
@@ -252,7 +253,7 @@ the text, import back:
 
 ```sh
 CanSNPer2-database --import --database new_scheme.db --tree scheme/my_scheme_tree.txt \
-    --annotation scheme/my_scheme_snp.txt --references scheme/my_scheme_references.txt
+    --annotation scheme/my_scheme_canSNPs.txt --references scheme/my_scheme_references.txt
 ```
 
 The source files carry no scheme information, so `--export` does not write the `scheme_info`
@@ -333,15 +334,25 @@ LVS     LVS     GCA_000009245.1 GCF_000009245.1 ASM924v1
 SCHUS4.2        SCHUS4  GCA_000008985.1 GCF_000008985.1 ASM898v1
 
 ```
-Example structure of snps.txt (NEW headerline; `sequence` is the GenBank accession of the
-sequence the SNP lies on and `sequence_position` the 1-based position on that sequence)
+Example structure of canSNPs.txt (`sequence` is the GenBank accession of the sequence the
+canSNP lies on and `sequence_position` the 1-based position on that sequence; `rank` counts
+from 1 within a node, `score` is what the canSNP scored when the scheme was made and is empty
+for a canSNP taken from a publication, and `typed` marks the canSNPs CanSNPer2 calls, one per
+node)
 ```
-snp_id	strain	reference	genome	sequence	sequence_position	derived_base	ancestral_base
-T/N.1	francisella	Svensson2009	SCHUS4.2	AJ749949.2	83976	A	G
-T.1	francisella	Svensson2009	SCHUS4.2	AJ749949.2	1165688	G	A
-M.1	francisella	Vogler2009	SCHUS4.2	AJ749949.2	75124	T	C
+node	rank	reference	genome	sequence	sequence_position	derived_base	ancestral_base	score	typed
+T/N.1	1	Svensson2009	SCHUS4.2	AJ749949.2	83976	A	G		yes
+T.1	1	Svensson2009	SCHUS4.2	AJ749949.2	1165688	G	A		yes
+M.1	1	Vogler2009	SCHUS4.2	AJ749949.2	75124	T	C		yes
+M.1	2	Vogler2009	SCHUS4.2	AJ749949.2	75299	A	G	480	no
 ...
 ```
+
+A node carries its canSNPs at the ranks 1, 2, 3 ... in the order of the file, and exactly one
+of them is `typed yes`. CanSNPer2 calls that one; the others are the alternatives of the node,
+which an assay may use, and which `--export` writes back. The SNP file of 2.3.0 and earlier,
+one canSNP per node with a `snp_id` and a `strain` column, is still read by `--annotation`: its
+canSNPs become rank 1 of their node, typed and without a score.
 Example structure of tree.txt
 ```
 T/N.1
@@ -590,9 +601,38 @@ Every run with queries writes `summary.html`, the results overview, and `--summa
   is `NA` for a sample that was not called.
 - `summary_tree.html`: the tree with the final SNPs of the run in green.
 
+### Upgrading from 2.3
+
+Version 2.4.0 changes where the canSNPs of a scheme come from. Up to 2.3.0 a scheme had a
+SNP file, `<name>_snp.txt`, with one canSNP per node. From 2.4.0 it has a canSNP file,
+`<name>_canSNPs.txt`, which holds every canSNP of every node, ranked within the node, with
+`typed` marking the ones CanSNPer2 calls. The database stores all of them, so `--export`
+writes them back, and a later release can call more than one canSNP per node without
+another change of format.
+
+A database of 2.3.0 is refused:
+
+```
+The database old.db cannot be used. Its snp_annotation table holds one canSNP per node,
+without the rank, score and typed columns of the current format. Convert it with
+CanSNPer2-database --convert, or download the current database with
+CanSNPer2-download --scheme.
+```
+
+`--convert` upgrades it, and a `<name>_snp.txt` as well. Neither needs reference files,
+because no position moves:
+
+```sh
+CanSNPer2-database --convert --database my_scheme.db -o upgraded/
+CanSNPer2-database --convert --annotation my_scheme_snp.txt -o upgraded/
+```
+
+`--annotation` also keeps reading a `<name>_snp.txt` as it is, as rank 1 of each node,
+typed and without a score, so a scheme in that format still builds.
+
 ### Upgrading from 2.2
 
-Version 2.3.0 changes how a SNP position is stored. Up to 2.2 it was one number along all
+Version 2.3.0 changed how a SNP position is stored. Up to 2.2 it was one number along all
 the sequences of the reference joined in the order of the reference fasta file, which made
 a result depend on that order. From 2.3.0 the database and the source files hold the
 sequence and the position on it (`sequence`, `sequence_position`; the `position` column
@@ -608,19 +648,28 @@ download the current database with CanSNPer2-download --scheme.
 
 A database made by 2.3.0 cannot be read by 2.2.x, which stops with `no such column: position`.
 
-`--convert` rewrites the positions of a SNP source file or a database. Each SNP is located on
-the sequence of its reference genome, which is read from `--refdir` (`<genome>.fna`; missing
-files are downloaded). A SNP whose base in the reference is neither its derived nor its
-ancestral base is reported, and nothing is written. The result is written to the folder
-given with `-o`, under the name of the input file, which is not changed.
+`--convert` brings a SNP source file or a database of an older format to the current one, in
+one step, and writes it to the folder given with `-o`. The input is not changed.
+
+A file or database from before 2.3.0 has its positions located on the sequence of its reference
+genome, which is read from `--refdir` (`<genome>.fna`; missing files are downloaded). A SNP whose
+base in the reference is neither its derived nor its ancestral base is reported, and nothing is
+written. A file or database of 2.3.0 only gains the rank, score and typed columns of the canSNP
+format, so it needs no reference files: every canSNP becomes rank 1 of its node, typed, without
+a score. A converted SNP file is written as the canSNP file of its scheme
+(`<name>_snp.txt` becomes `<name>_canSNPs.txt`).
 
 ```sh
-# a SNP source file; --references is optional and names the genomes of the file
+# a SNP source file from before 2.3.0; --references is optional and names the genomes of the file
 CanSNPer2-database --convert --annotation old_snp.txt --references old_references.txt \
     --refdir references/ -o converted/
 
-# a database
+# a database from before 2.3.0
 CanSNPer2-database --convert --database old.db --refdir references/ -o converted/
+
+# a SNP file or database of 2.3.0: no reference files are needed
+CanSNPer2-database --convert --annotation my_scheme_snp.txt -o converted/
+CanSNPer2-database --convert --database my_scheme.db -o converted/
 ```
 
 The reference files must have their sequences in the order in which the old positions were
@@ -653,7 +702,7 @@ only when every step succeeded.
 | `The source files cannot be built into a database, N problem(s):` followed by `<file>:<line>: ...` | `CanSNPer2-database --create`, `--import`, `CanSNPer2-download --scheme` | Correct the listed rows; all problems are listed together. |
 | `<file>:<line>: genbank_id '...' is not an assembly accession` | as above, and `--references` | Give the GenBank (GCA_) or RefSeq (GCF_) assembly accession with its version, such as GCA_000008985.1. |
 | `<file>:<line>: genbank_id '...' of genome '...' is already used by genome '...'` | as above, and `--references` on an existing database | Each genome needs its own assembly accession, as one reference file is written per accession. |
-| `The files cannot be added to <db>, N problem(s):` | `CanSNPer2-database --mod_file` with `--annotation` or `--references` | A SNP on a node that is not in the tree of the database or the modification file, on a genome that is not listed, a short row, or a genome, snp_id or position the database already holds. Correct the files; the database was not changed. |
+| `The files cannot be added to <db>, N problem(s):` | `CanSNPer2-database --mod_file` with `--annotation` or `--references` | A canSNP on a node that is not in the tree of the database or the modification file, on a genome that is not listed, a short row, or a genome, a rank of its node, a second typed canSNP of its node, or a position the database already holds. Correct the files; the database was not changed. |
 | `The selected parent node (X) could not be found`, `The node X could not be found`, `X is a root of the tree` | `CanSNPer2-database --mod_file`, `--remove` | Give a node of the database with `--parent`; the root cannot be removed. |
 | `The SNP X could not be written to <db>`, `The node X could not be written to <db>` | `CanSNPer2-database` | The disk is full or the database cannot be written to; free space or check the permissions, then run again. |
 | `scheme X on owner/name@ref uses positions on the joined reference (before 2.3.0)` | `CanSNPer2-download --scheme` | The branch holds the format before 2.3.0. Use CanSNPer2 2.2 for it, or a branch converted for 2.3.0. |
@@ -663,8 +712,9 @@ only when every step succeeded.
 | `REF: the database has no genbank_id for this genome` | `CanSNPer2-download --database` | Give the assembly accession of the genome in the references file and build the database again. |
 | `The SNP positions of X could not be read` | `CanSNPer2-download --database`, `CanSNPer2` | The database is damaged; export it with `CanSNPer2-database --export`, correct the files and build it again. |
 | `N reference genome(s) of X have no file <genome>.fna in DIR: ...` | `CanSNPer2` | Fetch them with `CanSNPer2-download --database X --outdir DIR`. Without them the SNPs on these genomes would not be compared. To type without them on purpose, for example to test a scheme with a reference genome left out, give `--allow_missing_references`: the run then continues with one warning that names the missing genomes. It still stops when no genome of the database has a file. |
-| `The database X has no SNPs`, `The database X lists no reference genomes` | `CanSNPer2` | Build the database again with its SNP file and its references file. |
-| `The database X has N SNP(s) on node ids that are not in the nodes or tree table` | `CanSNPer2` | Export the database, correct the tree or SNP file and build it again. Nodes without SNPs are allowed. |
+| `The database X has no canSNPs`, `The database X lists no reference genomes` | `CanSNPer2` | Build the database again with its canSNP file and its references file. |
+| `The database X has N canSNP(s) but none of them is marked typed` | `CanSNPer2` | Every node needs one canSNP marked `typed yes`; build the database again from a canSNP file that marks them. |
+| `The database X has N SNP(s) on node ids that are not in the nodes or tree table` | `CanSNPer2` | Export the database, correct the tree or canSNP file and build it again. Nodes without canSNPs are allowed. |
 
 These cases give a warning and keep exit status 0: a draft scheme or a scheme of unknown
 status; a reference whose base matches neither the ancestral nor the derived base at fewer

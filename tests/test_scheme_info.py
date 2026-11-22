@@ -28,8 +28,9 @@ def run(tmp_path, module, arguments, extra_path=()):
 
 
 def create(tmp_path, db, *extra):
-	paths = helpers.write_sources(tmp_path / "src", ["A.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC",
-		"B.1\tfrancisella\tBirdsell2014\tREF1\tCP000001.1\t200\tG\tA"])
+	paths = helpers.write_sources(tmp_path / "src", ["A.1\t1\tBirdsell2014\tREF1\tCP000001.1\t100\tT\tC\t\tyes",
+		"A.1\t2\tBirdsell2014\tREF1\tCP000001.1\t150\tA\tG\t480\tno",
+		"B.1\t1\tBirdsell2014\tREF1\tCP000001.1\t200\tG\tA\t\tyes"])
 	return run(tmp_path, "CanSNPer2.SNPDatabase", ["--create", "--database", db, "--tree", paths["tree"],
 		"--annotation", paths["snp"], "--references", paths["references"], "--logs", "logs"] + list(extra)), paths
 
@@ -39,7 +40,7 @@ def test_create_writes_format_and_version(tmp_path):
 	result, _paths = create(tmp_path, db, "--scheme_name", "my_scheme", "--scheme_status", "draft",
 		"--scheme_source", "my-folder")
 	assert result.returncode == 0, result.stderr
-	assert read_scheme_info(db) == {"format": "2.3", "built_with": __version__,
+	assert read_scheme_info(db) == {"format": "2.4", "built_with": __version__,
 		"built": datetime.date.today().isoformat(), "scheme": "my_scheme", "status": "draft", "source": "my-folder"}
 
 
@@ -60,7 +61,7 @@ def test_import_writes_format_and_version_and_scheme_options(tmp_path):
 		"--scheme_status", "verified", "--logs", "logs"])
 	assert result.returncode == 0, result.stderr
 	info = read_scheme_info(imported)
-	assert info["format"] == "2.3" and info["built_with"] == __version__
+	assert info["format"] == "2.4" and info["built_with"] == __version__
 	assert info["scheme"] == "my_scheme" and info["status"] == "verified"
 
 
@@ -89,7 +90,7 @@ def test_info_prints_the_table(tmp_path):
 	assert result.returncode == 0, result.stderr
 	lines = result.stdout.splitlines()
 	assert "scheme\tmy_scheme" in lines and "status\tverified" in lines
-	assert "format\t2.3" in lines and "built_with\t{v}".format(v=__version__) in lines
+	assert "format\t2.4" in lines and "built_with\t{v}".format(v=__version__) in lines
 	assert any(line.startswith("built\t") for line in lines)
 
 
@@ -109,7 +110,7 @@ def test_scheme_download_records_status_commit_and_known_issues(tmp_path):
 	assert info["scheme"] == "test_scheme" and info["status"] == "draft"
 	assert info["source"] == DATA_REPO and info["ref"] == "dev" and info["commit"] == COMMIT
 	assert info["known_issues"] == "B.1,A.1"
-	assert info["format"] == "2.3" and info["built_with"] == __version__
+	assert info["format"] == "2.4" and info["built_with"] == __version__
 	assert os.path.exists(provenance_path(db))
 	level, text = scheme_notice(db)
 	assert level == logging.WARNING

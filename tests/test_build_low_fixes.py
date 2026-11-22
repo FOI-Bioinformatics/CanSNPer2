@@ -69,7 +69,7 @@ def test_empty_references_file_is_said_to_be_empty(tmp_path):
 def test_snp_file_with_only_a_header_is_refused(tmp_path):
 	files = write_sources(tmp_path, snp=SNP_HEADER)
 	message = refused(tmp_path, files)
-	assert "no SNP" in message
+	assert "no canSNP rows" in message
 
 
 @pytest.mark.parametrize("name", ["a/b", "../x", ".hidden", "a b", "a\\b", "a:b"])
@@ -80,9 +80,9 @@ def test_unsafe_genome_names_are_refused(tmp_path, name):
 
 
 def test_duplicate_column_names_are_refused(tmp_path):
-	header = SNP_HEADER.rstrip("\n") + "\tstrain\n"
+	header = SNP_HEADER.rstrip("\n") + "\tscore\n"
 	rows = "".join(line + "\tx\n" for line in SNP_ROWS.splitlines())
-	assert "'strain'" in joined(problems(tmp_path, snp=header + rows))
+	assert "'score'" in joined(problems(tmp_path, snp=header + rows))
 	references = REFERENCES.replace("assembly_name", "strain")
 	assert "'strain'" in joined(problems(tmp_path, references=references))
 
@@ -96,7 +96,7 @@ def test_two_genomes_with_one_refseq_id_are_refused(tmp_path):
 def test_a_tree_path_of_3000_levels_can_be_created(tmp_path):
 	names = ["N{0}".format(i) for i in range(3000)]
 	tree = "\t".join(names) + "\n"
-	snp_rows = ["{0}\ts1\tP\tREF1\tCP000001.1\t{1}\tA\tG".format(names[-1], 10)]
+	snp_rows = ["{0}\t1\tP\tREF1\tCP000001.1\t{1}\tA\tG\t\tyes".format(names[-1], 10)]
 	files = helpers.write_sources(tmp_path, snp_rows, tree=tree,
 		references="genome\tstrain\tgenbank_id\trefseq_id\tassembly_name\nREF1\ts1\tGCA_000000001.1\tGCF_000000001.1\tasm\n")
 	db = create(tmp_path, files)
@@ -110,9 +110,7 @@ def test_newick_of_a_tree_with_descending_ids_and_3000_levels(tmp_path):
 	conn = sqlite3.connect(db)
 	conn.executescript("""CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
 		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), sequence varchar(40),
-			sequence_position integer, ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);""")
+		""" + helpers.SNP_ANNOTATION_TABLE)
 	## the root has id 1 and the ids fall with the depth: a node is read before its parent
 	n = 3000
 	conn.execute("INSERT INTO nodes VALUES (1, 'N0')")
@@ -132,9 +130,7 @@ def newick_of(tmp_path, names):
 	conn = sqlite3.connect(db)
 	conn.executescript("""CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
 		CREATE TABLE tree (parent integer, child integer, rank_i integer);
-		CREATE TABLE snp_annotation (node_id integer PRIMARY KEY, snp_id varchar(6), sequence varchar(40),
-			sequence_position integer, ancestral_base varchar(1), derived_base varchar(1), reference varchar(20),
-			date datetime, genome_i integer);""")
+		""" + helpers.SNP_ANNOTATION_TABLE)
 	for i, name in enumerate(names, start=1):
 		conn.execute("INSERT INTO nodes VALUES (?, ?)", (i, name))
 		conn.execute("INSERT INTO tree VALUES (?, ?, 1)", (1, i))
