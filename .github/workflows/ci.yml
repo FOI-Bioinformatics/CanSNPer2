@@ -129,10 +129,12 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           CanSNPer2 --database ba.db --refdir references -o results_minimap2 query_Ames.fna --summary --aligner minimap2
-          diff results/snps_summary.txt results_minimap2/snps_summary.txt
+          # the # lines record the run (date, aligner) and differ; the rows must not
+          diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_minimap2/snps_summary.txt)
 
       - name: Type the reference genome with MUMmer4, same call as progressiveMauve
         working-directory: ${{ runner.temp }}
         run: |
           CanSNPer2 --database ba.db --refdir references -o results_mummer4 query_Ames.fna --summary --aligner mummer4
-          diff results/snps_summary.txt results_mummer4/snps_summary.txt
+          # the # lines record the run (date, aligner) and differ; the rows must not
+          diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_mummer4/snps_summary.txt)

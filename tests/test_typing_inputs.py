@@ -193,8 +193,8 @@ def test_the_snp_path_is_the_chain_of_the_final_snp(tmp_path):
 	fake_alignment(obj, ["A.1", "B.1", "C.1"], states, q)
 	obj.run(database=db)
 	lines = result_lines(obj, "x")
-	assert "SNP path: A.1;B.1" in lines
-	assert any(line.startswith("Final SNP: B.1") for line in lines)
+	assert "# SNP path: A.1;B.1" in lines
+	assert any(line.startswith("# Final SNP: B.1") for line in lines)
 	# the table keeps a row for every called SNP
 	rows = [l.split("\t")[0] for l in lines if l.split("\t")[0] in ("A.1", "B.1", "C.1")]
 	assert sorted(rows) == ["A.1", "B.1", "C.1"]
@@ -210,7 +210,7 @@ def test_a_call_without_other_derived_snps_is_clean(tmp_path):
 	fake_alignment(obj, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, q)
 	obj.run(database=db)
 	assert obj.sample_reports["x"]["severity"] == "clean"
-	assert "SNP path: A.1;B.1" in result_lines(obj, "x")
+	assert "# SNP path: A.1;B.1" in result_lines(obj, "x")
 
 
 # 7. the query fasta
