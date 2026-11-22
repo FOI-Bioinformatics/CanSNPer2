@@ -1,4 +1,4 @@
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 COMMANDS_HELP = """
 available CanSNPer2 commands (installed together):

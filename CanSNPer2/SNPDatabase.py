@@ -146,7 +146,7 @@ def convert(args, logger):
 	sequences = set()
 	'''what the input needs: its positions moved onto each reference sequence (the format before
 		2.3.0, which needs the reference files), or only the rank, score and typed columns of the
-		canSNP format added (2.3.0)'''
+		canSNP file (2.4.0)'''
 	try:
 		if args.annotation:
 			stage = table_stage(source)

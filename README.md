@@ -96,8 +96,8 @@ source	FOI-Bioinformatics/CanSNPer2-data
 ref	dev
 commit	abc1234000000000000000000000000000000000
 known_issues	B.1
-format	2.3
-built_with	2.3.0
+format	2.4
+built_with	2.4.0
 built	2026-11-21
 ```
 
@@ -601,9 +601,38 @@ Every run with queries writes `summary.html`, the results overview, and `--summa
   is `NA` for a sample that was not called.
 - `summary_tree.html`: the tree with the final SNPs of the run in green.
 
+### Upgrading from 2.3
+
+Version 2.4.0 changes where the canSNPs of a scheme come from. Up to 2.3.0 a scheme had a
+SNP file, `<name>_snp.txt`, with one canSNP per node. From 2.4.0 it has a canSNP file,
+`<name>_canSNPs.txt`, which holds every canSNP of every node, ranked within the node, with
+`typed` marking the ones CanSNPer2 calls. The database stores all of them, so `--export`
+writes them back, and a later release can call more than one canSNP per node without
+another change of format.
+
+A database of 2.3.0 is refused:
+
+```
+The database old.db cannot be used. Its snp_annotation table holds one canSNP per node,
+without the rank, score and typed columns of the current format. Convert it with
+CanSNPer2-database --convert, or download the current database with
+CanSNPer2-download --scheme.
+```
+
+`--convert` upgrades it, and a `<name>_snp.txt` as well. Neither needs reference files,
+because no position moves:
+
+```sh
+CanSNPer2-database --convert --database my_scheme.db -o upgraded/
+CanSNPer2-database --convert --annotation my_scheme_snp.txt -o upgraded/
+```
+
+`--annotation` also keeps reading a `<name>_snp.txt` as it is, as rank 1 of each node,
+typed and without a score, so a scheme in that format still builds.
+
 ### Upgrading from 2.2
 
-Version 2.3.0 changes how a SNP position is stored. Up to 2.2 it was one number along all
+Version 2.3.0 changed how a SNP position is stored. Up to 2.2 it was one number along all
 the sequences of the reference joined in the order of the reference fasta file, which made
 a result depend on that order. From 2.3.0 the database and the source files hold the
 sequence and the position on it (`sequence`, `sequence_position`; the `position` column
