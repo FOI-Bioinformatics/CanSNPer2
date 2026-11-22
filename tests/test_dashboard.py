@@ -103,3 +103,14 @@ def test_dashboard_wires_only_existing_elements(tmp_path):
 		assert 'id="' + element_id + '"' in head, "the script wires #" + element_id + ", the page has no such element"
 	assert "window.onerror" in script, "the page must report its own script failures"
 	assert "stayed empty" in script, "the page must notice that it stayed empty"
+
+
+def test_dashboard_table_keeps_every_column_in_view(tmp_path):
+	# long sample and SNP names pushed the final SNP and call columns out of the 400 px side panel;
+	# the columns have fixed widths and long names wrap inside their column (the start of long
+	# names is often shared, so cutting them would hide what tells the samples apart)
+	page, data = dashboard_payload(tmp_path)
+	assert "table-layout: fixed" in page
+	assert "<colgroup>" in page
+	assert "overflow-wrap: anywhere" in page
+	assert 'title="' in page.split("tr.innerHTML", 1)[1].split(";", 1)[0]

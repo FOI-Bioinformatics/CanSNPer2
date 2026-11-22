@@ -380,7 +380,8 @@ input[type="checkbox"] { width: 13px; height: 13px; accent-color: #3a7d5c; }
 #detail a { color: #2563eb; }
 #search { margin: 8px 12px; padding: 6px 9px; border: 1px solid #d4d9de; border-radius: 7px; font: inherit; font-size: 13px; }
 #tableWrap { flex: 1; overflow-y: auto; }
-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; table-layout: fixed; }
+td.cut { overflow-wrap: anywhere; }
 th { position: sticky; top: 0; background: #f4f6f8; text-align: left; padding: 6px 8px; font-weight: 600; border-bottom: 1px solid #e3e6e9; }
 td { padding: 5px 8px; border-bottom: 1px solid #eef1f3; vertical-align: top; }
 tr.row { cursor: pointer; }
@@ -417,7 +418,7 @@ text { fill: #333; font-size: 11px; pointer-events: none; user-select: none; }
 <div id="side">
 <div id="detail"></div>
 <input id="search" type="text" placeholder="filter samples by name...">
-<div id="tableWrap"><table><thead><tr><th>sample</th><th>final SNP</th><th>call</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div id="tableWrap"><table><colgroup><col><col style="width: 34%"><col style="width: 112px"></colgroup><thead><tr><th>sample</th><th>final SNP</th><th>call</th></tr></thead><tbody id="rows"></tbody></table></div>
 </div>
 <div id="tree"></div>
 <script>
@@ -635,7 +636,7 @@ function buildTable(filter){
 \t\ttr.className = "row";
 \t\ttr.setAttribute("data-i", i);
 \t\tvar note = (s.reasons || []).length ? '<span class="warn" title="' + esc(s.reasons.join("; ")) + '">&#9888; ' + s.reasons.length + "</span>" : "";
-\t\ttr.innerHTML = "<td>" + esc(s.name) + "</td><td>" + esc(s.final) + "</td>"
+\t\ttr.innerHTML = '<td class="cut" title="' + esc(s.name) + '">' + esc(s.name) + '</td><td class="cut" title="' + esc(s.final) + '">' + esc(s.final) + "</td>"
 \t\t\t+ '<td><span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span> " + note + "</td>";
 \t\ttr.onclick = function(){ paint(i); };
 \t\trows.appendChild(tr);
