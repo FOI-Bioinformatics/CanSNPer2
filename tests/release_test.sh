@@ -238,43 +238,46 @@ expect "mauve left no sslist in the input folders" "0" "$(find "$OUT/refs" "$OUT
 cmd type-query ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_query" --tmpdir "$OUT/tmp_type" --logdir "$OUT/logs/type" --save_tree
 # the table rows, header included; the "# " lines after the table record the run
-expect "query_snps.txt rows" "17" "$(grep -vc '^#' "$OUT/res_query/query_snps.txt")"
-expect "query_not_called.txt rows" "313" "$(grep -vc '^#' "$OUT/res_query/query_not_called.txt")"
+expect "query_snps.txt rows" "17" "$(grep -vc '^#' "$OUT/res_query/samples/query_snps.txt")"
+expect "query_not_called.txt rows" "313" "$(grep -vc '^#' "$OUT/res_query/samples/query_not_called.txt")"
 # issue #23: both tables carry the query trace columns (Name, Reference,
 # Sequence, Pos, QuerySeq, QueryPosition, Ancestral base, Derived base, Target base, Edge flag)
-expect "snps table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_snps.txt")"
-expect "not_called table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/query_not_called.txt")"
-BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(#|SNP path|Final SNP|Query file|Typing settings)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+expect "snps table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/samples/query_snps.txt")"
+expect "not_called table columns (#23)" "10" "$(awk -F'\t' 'NR==1 {print NF}' "$OUT/res_query/samples/query_not_called.txt")"
+BADQ=$(awk -F'\t' 'NR>1 && $1 !~ /^(#|SNP path|Final SNP|Query file|Typing settings)/ && ($5=="" || $6=="") {c++} END {print c+0}' "$OUT/res_query/samples/query_snps.txt")
 expect "query trace columns filled in every SNP row" "0" "$BADQ"
-QPNUM=$(awk -F'\t' 'NR>1 && $6 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/query_snps.txt")
+QPNUM=$(awk -F'\t' 'NR>1 && $6 ~ /^[0-9]+$/ {c++} END {print c+0}' "$OUT/res_query/samples/query_snps.txt")
 if [ "$QPNUM" -gt 0 ]; then
     printf '  ok    %-52s %s rows with a numeric QueryPosition\n' "query coordinates traced (#23)" "$QPNUM"
     PASSED=$((PASSED+1))
 else
     printf '  FAIL  %-52s no row has a numeric QueryPosition\n' "query coordinates traced (#23)"; FAILED=$((FAILED+1))
 fi
-if [ -s "$OUT/res_query/query_tree.html" ]; then
-    printf '  ok    %-52s %s bytes\n' "query_tree.html written" "$(wc -c < "$OUT/res_query/query_tree.html" | tr -d ' ')"
+if [ -s "$OUT/res_query/samples/query_tree.html" ]; then
+    printf '  ok    %-52s %s bytes\n' "query_tree.html written" "$(wc -c < "$OUT/res_query/samples/query_tree.html" | tr -d ' ')"
     PASSED=$((PASSED+1))
 else
     printf '  FAIL  %-52s missing or empty\n' "query_tree.html written"; FAILED=$((FAILED+1))
 fi
+# the per-sample tree page is opt-in since the results overview shows every sample's tree:
+# res_query is the only run here that gives --save_tree
+expect "tree pages only where --save_tree was given" "1" "$(find "$OUT"/res_* -path '*/samples/*_tree.html' 2>/dev/null | wc -l | tr -d ' ')"
 
 mkdir -p "$OUT/tmp_skip/CanSNPer2" && cp "$OUT"/align/*.xmfa "$OUT"/align/*.xmfa.sequences "$OUT/tmp_skip/CanSNPer2/"
 cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
-expect "same snps through --skip_mauve" "17" "$(grep -vc '^#' "$OUT/res_skip/query_snps.txt")"
-expect "same not-called through --skip_mauve" "313" "$(grep -vc '^#' "$OUT/res_skip/query_not_called.txt")"
+expect "same snps through --skip_mauve" "17" "$(grep -vc '^#' "$OUT/res_skip/samples/query_snps.txt")"
+expect "same not-called through --skip_mauve" "313" "$(grep -vc '^#' "$OUT/res_skip/samples/query_not_called.txt")"
 
 # every SNP of the database tree has to show up in one of the two files: a position that no
 # alignment carried a base for used to be missing from both, so the only way to see it was the
 # tree html and the log (#27). The wide mask pushes those positions in artificially.
 cmd mask-no-data any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_mask" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/mask" --skip_mauve --mask 20000
-NODATA=$(awk -F'\t' 'NR>1 && $9=="N/A"' "$OUT/res_mask/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
+NODATA=$(awk -F'\t' 'NR>1 && $9=="N/A"' "$OUT/res_mask/samples/query_not_called.txt" 2>/dev/null | wc -l | tr -d ' ')
 COVERED=$("$PY" -c "
-nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_not_called.txt')) if i and not l.startswith('#'))
-sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/query_snps.txt')) if i and not l.startswith(('#', 'SNP path', 'Final SNP', 'Query file', 'Typing settings')))
+nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/samples/query_not_called.txt')) if i and not l.startswith('#'))
+sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/samples/query_snps.txt')) if i and not l.startswith(('#', 'SNP path', 'Final SNP', 'Query file', 'Typing settings')))
 print(nc + sc)")
 if [ "$NODATA" -gt 0 ] && [ "$COVERED" = 328 ] && grep -q "no alignment data" "$LASTLOG"; then
     printf '  ok    %-52s %s positions listed, the two files cover all 328 SNPs\n' "SNPs without any alignment data are listed (#27)" "$NODATA"
@@ -290,8 +293,8 @@ fi
 cmd na-min-hits any "" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/inputs/query.fna" -db "$DB" \
     --refdir "$OUT/refs" -o "$OUT/res_na" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/na" \
     --skip_mauve --min_required_hits 999
-NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(#|SNP path|Final SNP|Query file|Typing settings)/' "$OUT/res_na/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$NA_ROWS" -gt 0 ] && grep -q "^# SNP path: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null && grep -q "^# Final SNP: NA$" "$OUT/res_na/query_snps.txt" 2>/dev/null; then
+NA_ROWS=$(awk -F'\t' 'NR>1 && $1!~/^(#|SNP path|Final SNP|Query file|Typing settings)/' "$OUT/res_na/samples/query_snps.txt" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$NA_ROWS" -gt 0 ] && grep -q "^# SNP path: NA$" "$OUT/res_na/samples/query_snps.txt" 2>/dev/null && grep -q "^# Final SNP: NA$" "$OUT/res_na/samples/query_snps.txt" 2>/dev/null; then
     printf '  ok    %-52s %s called SNPs listed although the call is NA\n' "NA sample keeps its called SNPs (#35)" "$NA_ROWS"
     PASSED=$((PASSED+1))
 else
@@ -305,18 +308,20 @@ cmd keep-going-mixed ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
     "$OUT/no_such_file.fna" "$OUT/inputs/query.fna" -db "$DB" --refdir "$OUT/refs" \
     -o "$OUT/res_keepgoing" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/keepgoing_ok" \
     --keep_going --skip_mauve
-expect "keep_going kept the working sample's output" "17" "$(grep -vc '^#' "$OUT/res_keepgoing/query_snps.txt" 2>/dev/null || echo 0)"
+expect "keep_going kept the working sample's output" "17" "$(grep -vc '^#' "$OUT/res_keepgoing/samples/query_snps.txt" 2>/dev/null || echo 0)"
 
 if ls "$ROOT"/test_data/*.fasta >/dev/null 2>&1; then
     ls "$ROOT"/test_data/*.fasta > "$OUT/real_list.txt"
     cmd real-data-batch ok "B.75" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$OUT/real_list.txt" -db "$DB" \
         --refdir "$OUT/refs" -o "$OUT/res_real" --tmpdir "$OUT/tmp_real" --logdir "$OUT/logs/real" --save_tree
-    for pair in "A271_1_FDC408_complete.fasta B.75 21 312" "FSC458.fasta B.77 18 315"; do
+    # row counts include the header and the four # comment lines; the numbers rose by one
+    # SNP row and two not-called rows when the scheme grew its per-node canSNPs (2.4.0)
+    for pair in "A271_1_FDC408_complete.fasta B.75 22 314" "FSC458.fasta B.77 19 317"; do
         set -- $pair
         LABEL=$(grep -h "^$(basename $1 .fasta):" "$LASTLOG" | tail -1 | sed 's/.*: //')
         expect "known answer $1" "$2" "$LABEL"
-        expect "  snps for $1" "$3" "$(wc -l < "$OUT/res_real/$(basename $1 .fasta)_snps.txt" 2>/dev/null || echo 0)"
-        expect "  not called for $1" "$4" "$(wc -l < "$OUT/res_real/$(basename $1 .fasta)_not_called.txt" 2>/dev/null || echo 0)"
+        expect "  snps for $1" "$3" "$(wc -l < "$OUT/res_real/samples/$(basename $1 .fasta)_snps.txt" 2>/dev/null || echo 0)"
+        expect "  not called for $1" "$4" "$(wc -l < "$OUT/res_real/samples/$(basename $1 .fasta)_not_called.txt" 2>/dev/null || echo 0)"
     done
 else
     warn "known answer batch" "no test_data/*.fasta found in $ROOT"
@@ -347,7 +352,7 @@ for q in FSC200 FTNF002-00 LVS OSU18 SCHUS4.2; do
         --refdir "$OUT/loo_refs_$q" -o "$OUT/res_loo_$q" --tmpdir "$OUT/tmp_loo_$q" \
         --logdir "$OUT/logs/loo_$q" --allow_missing_references
     SUB=$(grep -h "$q:" "$LASTLOG" | tail -1 | sed "s/.*: //")
-    SNPS=$(wc -l < "$OUT/res_loo_$q/${q}_snps.txt" 2>/dev/null | tr -d ' ')
+    SNPS=$(wc -l < "$OUT/res_loo_$q/samples/${q}_snps.txt" 2>/dev/null | tr -d ' ')
     EXP=$(loo_expect "$q")
     echo "leave-one-out $q -> ${SUB:-no result} (snps ${SNPS:-0}, expected $EXP)" >> "$OUT/leave_one_out_baseline.txt"
     if [ -n "$SUB" ] && [ "$SUB" != NA ] && [ "${SNPS:-0}" -gt 0 ]; then

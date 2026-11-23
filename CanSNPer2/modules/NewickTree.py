@@ -837,10 +837,10 @@ function paint(i){
 	var reasons = (s.reasons || []).map(function(r){ return '<div class="reason">' + esc(r) + "</div>"; }).join("");
 	var links = [];
 	if (s.severity !== "failed" && INFO.snp_files !== false) {
-		links.push(fileLink(s.name + "_snps.txt", "called SNPs"));
-		links.push(fileLink(s.name + "_not_called.txt", "not called"));
+		links.push(fileLink("samples/" + s.name + "_snps.txt", "called SNPs"));
+		links.push(fileLink("samples/" + s.name + "_not_called.txt", "not called"));
 	}
-	if (s.severity !== "failed" && INFO.save_tree) { links.push(fileLink(s.name + "_tree.html", "tree")); }
+	if (s.severity !== "failed" && INFO.save_tree) { links.push(fileLink("samples/" + s.name + "_tree.html", "tree")); }
 	var line = "Final SNP <b>" + esc(s.final) + "</b>" + finalLabels(s);
 	if (called(s)) { line += " &middot; Support " + esc(support(s)) + " &middot; No data " + esc(noData(s)); }
 	var path = pathOf(s);

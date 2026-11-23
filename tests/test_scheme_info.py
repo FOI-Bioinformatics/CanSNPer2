@@ -219,7 +219,7 @@ def test_typing_warns_once_for_a_draft_database(tmp_path):
 	db = toy_database(tmp_path, status="draft")
 	result = type_toy(tmp_path, db)
 	assert result.returncode == 0, result.stdout + result.stderr
-	assert os.path.exists(tmp_path / "out" / "sample_snps.txt")
+	assert os.path.exists(tmp_path / "out" / "samples" / "sample_snps.txt")
 	notices = [line for line in result.stderr.splitlines() if "toy (draft)" in line]
 	assert len(notices) == 1, result.stderr
 	assert "WARN" in notices[0]
@@ -229,7 +229,7 @@ def test_a_database_without_scheme_info_is_typed_with_one_warning(tmp_path):
 	db = toy_database(tmp_path)
 	result = type_toy(tmp_path, db)
 	assert result.returncode == 0, result.stdout + result.stderr
-	assert os.path.exists(tmp_path / "out" / "sample_snps.txt")
+	assert os.path.exists(tmp_path / "out" / "samples" / "sample_snps.txt")
 	assert result.stderr.count(MISSING_TEXT) == 1, result.stderr
 
 
@@ -418,7 +418,7 @@ def test_allow_missing_references_types_with_one_warning(tmp_path):
 	db = two_genome_toy(tmp_path)
 	result = type_toy(tmp_path, db, "--allow_missing_references")
 	assert result.returncode == 0, result.stdout + result.stderr
-	assert os.path.exists(tmp_path / "out" / "sample_snps.txt")
+	assert os.path.exists(tmp_path / "out" / "samples" / "sample_snps.txt")
 	warnings = [line for line in result.stderr.splitlines() if "REF_B" in line]
 	assert len(warnings) == 1 and "WARN" in warnings[0], result.stderr
 	assert "not compared" in warnings[0], warnings

@@ -83,7 +83,7 @@ def test_workdir_holds_the_log_and_tmp_folders(tmp_path):
 	assert result.returncode == 0, result.stderr
 	assert not (tmp_path / "lg").exists() and not (tmp_path / "tmpA").exists()
 	assert any(name.startswith("CanSNPer2") for name in os.listdir(tmp_path / "wd" / "lg"))
-	assert (tmp_path / "wd" / "res" / "sample_snps.txt").exists()
+	assert (tmp_path / "wd" / "res" / "samples" / "sample_snps.txt").exists()
 
 
 # 26: --skip_alignment

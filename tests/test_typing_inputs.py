@@ -75,7 +75,7 @@ def test_the_call_is_printed_with_no_snpfiles(tmp_path, capsys):
 	obj.min_required_hits = 2
 	obj.run(database=db)
 	assert "x: " in capsys.readouterr().out
-	assert not os.path.exists(os.path.join(obj.outdir, "x_snps.txt"))
+	assert not os.path.exists(os.path.join(obj.results_dir, "x_snps.txt"))
 
 
 # 2. query list detection
@@ -183,7 +183,7 @@ def test_folders_that_appear_during_creation_are_not_an_error(tmp_path, monkeypa
 # 6. the SNP path
 
 def result_lines(obj, name):
-	return open(os.path.join(obj.outdir, name + "_snps.txt")).read().splitlines()
+	return open(os.path.join(obj.results_dir, name + "_snps.txt")).read().splitlines()
 
 
 def test_the_snp_path_is_the_chain_of_the_final_snp(tmp_path):

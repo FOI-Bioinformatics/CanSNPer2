@@ -74,8 +74,8 @@ def test_the_same_file_given_twice_is_typed_once(tmp_path, caplog):
 
 
 def result_file(obj, name, source_line):
-	os.makedirs(obj.outdir, exist_ok=True)
-	path = os.path.join(obj.outdir, name + "_snps.txt")
+	os.makedirs(obj.results_dir, exist_ok=True)
+	path = os.path.join(obj.results_dir, name + "_snps.txt")
 	with open(path, "w") as out:
 		out.write("SNP path: S.1\nFinal SNP: S.1 found/depth: 1/1\n" + source_line)
 	return path
