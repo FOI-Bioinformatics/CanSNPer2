@@ -121,7 +121,7 @@ Create database, download references annotated in the database and run CanSNPer2
 ```sh
 CanSNPer2-database --database francisella_tularensis.db --annotation canSNPs.txt --tree tree.txt --reference references.txt --source_type CanSNPer --create
 CanSNPer2-download --database francisella_tularensis.db
-CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db --save_tree
+CanSNPer2 sample1.fasta sample2.fasta --database francisella_tularensis.db
 ```
 
 The source files are checked before a database is built, with the rules of
@@ -367,15 +367,15 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
-                       [--summary] [--annotations FILE] [--refdir]
-                       [--allow_missing_references] [--workdir] [--read_input]
-                       [--min_required_hits MIN_REQUIRED_HITS]
-                       [--strictness STRICTNESS] [--mask MASK] [--keep_going]
-                       [--rerun] [--aligner] [--alignment_timeout MINUTES]
-                       [--aligner_path] [--skip_alignment] [--keep_temp]
-                       [--tmpdir] [--logdir] [--verbose] [--debug] [--supress]
-                       [query ...]
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--no_save_tree] [--no_snpfiles]
+                 [--summary] [--annotations FILE] [--refdir]
+                 [--allow_missing_references] [--workdir] [--read_input]
+                 [--min_required_hits MIN_REQUIRED_HITS]
+                 [--strictness STRICTNESS] [--mask MASK] [--keep_going]
+                 [--rerun] [--aligner] [--alignment_timeout MINUTES]
+                 [--aligner_path] [--skip_alignment] [--keep_temp] [--tmpdir]
+                 [--logdir] [--verbose] [--debug] [--supress]
+                 [query ...]
 
 CanSNPer2 - type query assemblies (or reads) against a CanSNP database
 
@@ -390,8 +390,8 @@ Required arguments:
 
 Output options:
   -o DIR, --outdir DIR  Output directory
-  --save_tree           Save the tree of each sample as <sample>_tree.html
-                        (default False)
+  --no_save_tree        Do not write the tree of each sample as
+                        <sample>_tree.html (it is written by default)
   --no_snpfiles         Do not write the result files (<sample>_snps.txt,
                         <sample>_not_called.txt); the call is still printed
   --summary             Output a summary file and tree with all called SNPs
@@ -447,6 +447,13 @@ Logging and debug options:
   --verbose             Verbose output
   --debug               Debug output
   --supress             Supress warnings
+
+available CanSNPer2 commands (installed together):
+  CanSNPer2            type query assemblies or reads against a CanSNP database
+  CanSNPer2-database   create, modify and export CanSNP databases
+  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
+  CanSNPer2-test       check the installation: imports and aligner programs in PATH
+Run any command with --help for its arguments; examples in README.md.
 ```
 
 ### Annotating the tree
@@ -559,7 +566,7 @@ Each sample gives these files in `--outdir`:
 - `x_not_called.txt`: the same columns for the SNP positions that were not called, and for
   the positions without alignment data (`Target base` `N/A`), followed by the
   `# Query file:` and `# Typing settings:` lines.
-- `x_tree.html` (with `--save_tree`): the tree of the database painted with the states of the
+- `x_tree.html` (unless `--no_save_tree`): the tree of the database painted with the states of the
   sample. The header names the sample, the scheme, the final SNP and its support, and the
   run (CanSNPer2 version, aligner, settings, database and its SHA-256, reference genomes,
   date). The SNP path is listed next to the tree, from the root to the final SNP, with the

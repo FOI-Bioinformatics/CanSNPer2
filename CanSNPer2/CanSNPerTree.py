@@ -129,7 +129,11 @@ def command():
 
 	output_options = parser.add_argument_group("Output options")
 	output_options.add_argument('-o', '--outdir', 			metavar='DIR', default="results",		help="Output directory")
-	output_options.add_argument('--save_tree',				action='store_true',					help='Save the tree of each sample as <sample>_tree.html (default False)')
+	'''--save_tree asked for the tree that most runs want, so the tree is written unless
+		--no_save_tree says otherwise (issue #78). --save_tree is still accepted and does
+		nothing, so a command line that gives it keeps working.'''
+	output_options.add_argument('--save_tree',				action='store_true', default=True,		help=argparse.SUPPRESS)
+	output_options.add_argument('--no_save_tree',			action='store_false', dest='save_tree',	help='Do not write the tree of each sample as <sample>_tree.html (it is written by default)')
 	output_options.add_argument('--no_snpfiles', 			action='store_false',					help="Do not write the result files (<sample>_snps.txt, <sample>_not_called.txt); the call is still printed")
 	output_options.add_argument('--summary',				action='store_true',					help="Output a summary file and tree with all called SNPs\nnot affected by no_snpfiles")
 	output_options.add_argument('--annotations', metavar='FILE', default=None, help="TSV file annotating tree nodes: <snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]. 'node' draws a badge under the SNP dot, 'clade' a dashed box around its whole subtree; rank is a level carried by the annotation (type, subspecies, marker...), never a tree depth")

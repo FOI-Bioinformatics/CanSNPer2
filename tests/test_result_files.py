@@ -129,3 +129,33 @@ def test_the_summary_gives_na_support_for_a_sample_without_a_call(tmp_path):
 	obj, q = typed(tmp_path, [], {"A.1": 2}, summary=True)
 	rows = table_rows(os.path.join(obj.outdir, "snps_summary.txt"))
 	assert rows[1] == ["x", "NA", "NA", "NA"]
+
+
+# -- the tree is written by default, and a reused result says so (issue #78) --
+
+def test_the_tree_of_a_sample_is_written_without_asking_for_it(tmp_path):
+	"""--save_tree used to be needed for the file most runs want."""
+	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
+	assert os.path.exists(os.path.join(obj.outdir, "x_tree.html"))
+
+
+def test_no_save_tree_leaves_the_tree_out(tmp_path):
+	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, save_tree=False)
+	assert not os.path.exists(os.path.join(obj.outdir, "x_tree.html"))
+	assert os.path.exists(os.path.join(obj.outdir, "x_snps.txt")), "only the tree is left out"
+
+
+def test_a_sample_whose_result_exists_prints_its_call_and_how_to_redo_it(tmp_path, capsys):
+	"""The skip was a debug line, so a second run into the same folder announced the
+		alignments and then said nothing at all (issue #78)."""
+	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
+	first = capsys.readouterr().out
+	assert "x: B.1" in first
+
+	again, db = project(tmp_path, [q], min_required_hits=2)
+	again.outdir = obj.outdir
+	fake_alignment(again, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, q)
+	again.run(database=db)
+	printed = capsys.readouterr().out
+	assert "x: B.1" in printed, "the call of the earlier run is reported"
+	assert "--rerun" in printed, "and what to do to type it again"

@@ -74,7 +74,10 @@ def test_control_characters_in_scheme_options_are_refused(tmp_path, option, bad)
 def test_save_tree_and_no_snpfiles_help_describe_the_behaviour():
 	text = open(os.path.join(ROOT, "CanSNPer2", "CanSNPerTree.py")).read()
 	assert "ETE3" not in text and "PDF" not in text
-	assert "html" in text.split("--save_tree")[1].split("\n")[0]
+	# the tree is written by default, so --no_save_tree is the flag that carries the help;
+	# the option line, not the first mention, since the comment above it names the flags too
+	option = [line for line in text.splitlines() if "add_argument('--no_save_tree'" in line]
+	assert len(option) == 1 and "html" in option[0], option
 	assert "Don´t save" not in text
 
 
