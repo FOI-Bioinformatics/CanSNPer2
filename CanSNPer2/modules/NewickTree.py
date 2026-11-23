@@ -284,7 +284,7 @@ function layout(){
 	return next;
 }
 function edgeAttrs(n){
-	if (n.onPath) { return ' stroke="' + C.derived + '" stroke-width="3"'; }
+	if (n.onPath) { return ' stroke="' + C.derived + '" stroke-width="' + (n.edgeWidth || 3) + '"'; }
 	if (n.kind === "derived" || n.kind === "ancestral" || n.kind === "other_base" || n.kind === "label") { return ' stroke="#6b7280" stroke-width="1.4"'; }
 	return ' stroke="#c4c9cf" stroke-width="1.4" stroke-dasharray="4,3"';
 }
@@ -294,6 +294,7 @@ function tipTitle(n){
 	if (words[n.kind]) { t += ": " + words[n.kind]; }
 	if (n.edge) { t += ", near an alignment edge"; }
 	if (n.onPath) { t += ", on the SNP path"; }
+	if (n.count) { t += ", " + n.count + " sample paths run through here"; }
 	if (hasCalled(n)) { if (visKids(n).length) { t += " (branch with derived SNPs, stays open)"; } }
 	else if (visKids(n).length || hiddenKids(n)) { t += " (click to " + (n.collapsed ? "expand" : "collapse") + ")"; }
 	return t;
@@ -336,7 +337,7 @@ function render(){
 			parts.push('<circle class="node" data-id="' + n.id + '" cx="' + n.x + '" cy="' + n.y + '" r="2.5" fill="#9ca3af"><title>' + esc(n.name) + '</title></circle>');
 		} else {
 			var d = DOT[n.kind] || DOT.untested;
-			r = d[3];
+			r = n.dotR || d[3];
 			if (n.edge) { parts.push('<circle cx="' + n.x + '" cy="' + n.y + '" r="' + (r + 3) + '" fill="none" stroke="#d97706" stroke-width="2"/>'); }
 			parts.push('<circle class="node" data-id="' + n.id + '" cx="' + n.x + '" cy="' + n.y + '" r="' + r + '" fill="' + d[0] + '" stroke="' + d[1] + '" stroke-width="' + d[2] + '"><title>' + tipTitle(n) + '</title></circle>');
 		}
@@ -344,10 +345,11 @@ function render(){
 			var weight = n.onPath ? ' font-weight="600"' : "";
 			var fill = n.final ? C.derived_text : "#222222";
 			if (visKids(n).length) {
-				/*an inner SNP is labelled above the branch that leads to it, where no other line runs*/
-				parts.push('<text x="' + (n.x - r - 3) + '" y="' + (n.y - 5) + '" text-anchor="end" fill="' + fill + '"' + weight + '>' + esc(n.name) + '</text>');
+				/*an inner SNP is labelled above the branch that leads to it, where no other line runs;
+					in the dashboard's support overview n.count adds how many sample paths run through*/
+				parts.push('<text x="' + (n.x - r - 3) + '" y="' + (n.y - 5) + '" text-anchor="end" fill="' + fill + '"' + weight + '>' + esc(n.name) + (n.count ? '<tspan fill="#6b7280" font-weight="400"> ×' + n.count + '</tspan>' : "") + '</text>');
 			} else {
-				var extra = hiddenKids(n) ? " (" + subtreeSize(n) + " hidden)" : "";
+				var extra = (n.count ? " ×" + n.count : "") + (hiddenKids(n) ? " (" + subtreeSize(n) + " hidden)" : "");
 				parts.push('<text x="' + (n.x + Math.max(r, triW) + 5) + '" y="' + (n.y + 4) + '" fill="' + fill + '"' + weight + '>' + esc(n.name) + '<tspan fill="#6b7280" font-weight="400">' + esc(extra) + '</tspan></text>');
 			}
 		}
@@ -681,11 +683,16 @@ __BASECSS__
 #detail .links { margin: 4px 0 6px 0; }
 #detail a { color: var(--accent); }
 #detail .panelTitle { margin-top: 6px; }
+#detail details summary { cursor: pointer; font-weight: 600; font-size: 12px; color: var(--muted); }
+#detail .topFinal { display: inline-block; margin: 2px 6px 2px 0; padding: 1px 8px; border-radius: 999px;
+                    background: #eef2f6; border: 1px solid var(--line); font-size: 11.5px; }
 #statusKey { padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
 #statusKey summary { cursor: pointer; font-weight: 600; font-size: 12px; }
 #statusKey div { margin: 3px 0; }
 #statusKey .badge { min-width: 66px; text-align: center; margin-right: 4px; }
-#search { margin: 8px 12px; padding: 5px 9px; border: 1px solid #d4d9de; border-radius: 6px; font: inherit; font-size: 12px; }
+#search, #pathFilter { display: block; width: calc(100% - 24px); margin: 8px 12px; padding: 5px 9px;
+                       border: 1px solid #d4d9de; border-radius: 6px; font: inherit; font-size: 12px; }
+#search { margin-bottom: 0; }
 #tableWrap { flex: 1; overflow-y: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; table-layout: fixed; }
 td.cut { overflow-wrap: anywhere; }
@@ -741,7 +748,7 @@ tr.selected { background: #e8f0fe; }
 <div id="main">
 <div id="side">
 <div id="detail"></div>
-<details id="statusKey" open><summary>Status key</summary>
+<details id="statusKey"><summary>Status key</summary>
 <div><span class="badge sev-clean">clean</span>SNP path confirmed; every SNP on it has alignment data, none is near an alignment edge, and no derived SNP lies outside it.</div>
 <div><span class="badge sev-review">review</span>SNP path confirmed, but SNPs on it have no alignment data or lie near an alignment edge, or derived SNPs lie outside it.</div>
 <div><span class="badge sev-notcalled">not called</span>No SNP path met min_required_hits and strictness, no derived SNP was found, or two SNP paths competed at the same depth.</div>
@@ -749,6 +756,7 @@ tr.selected { background: #e8f0fe; }
 <div><span class="badge sev-reused">reused</span>Result read from an earlier run; --rerun computes it again and shows it in the tree.</div>
 </details>
 <input id="search" type="text" placeholder="Filter samples by name">
+<input id="pathFilter" type="text" placeholder="Filter by any SNP in the path, e.g. B.33 (also one not shown)">
 <div id="tableWrap"><table><colgroup><col><col style="width: 25%"><col style="width: 60px"><col style="width: 58px"><col style="width: 100px"></colgroup><thead><tr><th>Sample</th><th>Final SNP</th><th class="num" title="Derived SNPs found on the SNP path / SNPs on the SNP path">Support</th><th class="num" title="SNP positions on the SNP path without alignment data">No data</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
 </div>
 <div id="tree"></div>
@@ -806,6 +814,7 @@ var current = -1;
 function svgName(){ return "cansnper2_" + (current >= 0 ? samples[current].name : "results") + "_tree.svg"; }
 function paint(i){
 	current = i;
+	nodes.forEach(function(n){ n.count = 0; n.edgeWidth = undefined; n.dotR = undefined; });
 	var s = samples[i];
 	var states = s.states || {}, calledSet = {}, edge = {}, onPath = {};
 	var hasStates = Object.keys(states).length > 0;
@@ -837,9 +846,11 @@ function paint(i){
 	var path = pathOf(s);
 	var head = called(s) ? "SNP path, root to final SNP" : (path.length ? "Derived SNPs (no SNP path confirmed)" : "SNP path");
 	document.getElementById("detail").innerHTML = "<h2>" + esc(s.name) + ' <span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span></h2>"
+		+ '<details><summary>details, files and SNP path</summary>'
 		+ '<div class="line">' + line + "</div>" + reasons
 		+ (links.length ? '<div class="links">' + links.join(" &middot; ") + "</div>" : "")
-		+ '<div class="panelTitle">' + head + "</div>" + pathHtml(path, s.final);
+		+ '<div class="panelTitle">' + head + "</div>" + pathHtml(path, s.final)
+		+ "</details>";
 	var rows = document.querySelectorAll("#rows tr");
 	for (var k = 0; k < rows.length; k++) { rows[k].className = rows[k].className.replace(" selected", ""); }
 	var sel = document.querySelector("#rows tr[data-i='" + i + "']");
@@ -848,12 +859,22 @@ function paint(i){
 	fitInitial();
 }
 wirePath(document.getElementById("detail"));
-function buildTable(filter){
+function pathTokens(s){
+	return s.path && s.path !== "NA" ? s.path.split(";") : [];
+}
+function buildTable(filter, snpFilter){
 	var rows = document.getElementById("rows");
 	rows.innerHTML = "";
 	order.forEach(function(i){
 		var s = samples[i];
 		if (filter && s.name.toLowerCase().indexOf(filter) === -1) { return; }
+		/*the SNP path holds every SNP the call walks through, also the ones the tree cannot
+			show (no alignment data there), so filtering matches the full path, one token*/
+		if (snpFilter) {
+			var hit = (s.final || "").toLowerCase() === snpFilter;
+			pathTokens(s).forEach(function(t){ if (t.trim().toLowerCase() === snpFilter) { hit = true; } });
+			if (!hit) { return; }
+		}
 		var tr = document.createElement("tr");
 		tr.className = "row" + (i === current ? " selected" : "");
 		tr.setAttribute("data-i", i);
@@ -877,9 +898,60 @@ function tsvText(){
 	return out.join(NL) + NL;
 }
 document.getElementById("downloadTsv").onclick = function(){ download("cansnper2_results" + (INFO.scheme ? "_" + INFO.scheme : "") + ".tsv", tsvText(), "text/tab-separated-values"); };
-document.getElementById("search").oninput = function(){ buildTable(this.value.trim().toLowerCase()); };
-buildTable("");
-paint(order[0]);
+function applyFilters(){ buildTable(document.getElementById("search").value.trim().toLowerCase(), document.getElementById("pathFilter").value.trim().toLowerCase()); }
+document.getElementById("search").oninput = applyFilters;
+document.getElementById("pathFilter").oninput = applyFilters;
+/*the start view is the joint picture: every sample's SNP path drawn as one tree, the edge
+	to a node and the node itself growing with the number of paths that run through it - a
+	feeling for where the genomes of the dataset ended up. clicking a row drops into the
+	single-sample view, the Overview button comes back here*/
+function paintOverview(){
+	current = -1;
+	var count = {}, finals = {}, typed = 0;
+	samples.forEach(function(s){
+		if (!called(s)) { return; }
+		typed += 1;
+		var seen = {};
+		pathTokens(s).forEach(function(t){
+			var name = t.trim();
+			if (seen[name]) { return; }
+			seen[name] = 1;
+			count[name] = (count[name] || 0) + 1;
+		});
+		if (s.final && s.final !== "NA") { finals[s.final] = (finals[s.final] || 0) + 1; }
+	});
+	var max = 1;
+	nodes.forEach(function(n){ if (count[n.name] > max) { max = count[n.name]; } });
+	nodes.forEach(function(n){
+		n.count = count[n.name] || 0;
+		n.called = n.count > 0;
+		n.onPath = n.count > 0;
+		n.final = false;
+		n.edge = false;
+		if (isLabel(n)) { n.kind = "label"; n.dot = false; }
+		else { n.dot = true; n.kind = n.count ? "derived" : "untested"; }
+		n.edgeWidth = n.onPath ? 1 + 5 * Math.sqrt(n.count / max) : undefined;
+		n.dotR = n.count ? 3 + 5 * Math.sqrt(n.count / max) : undefined;
+	});
+	markCalled();
+	autoCollapse();
+	overviewState = nodes.map(function(n){ return n.collapsed; });
+	var top = Object.keys(finals).sort(function(a, b){ return finals[b] - finals[a] || (a < b ? -1 : 1); });
+	document.getElementById("detail").innerHTML = "<h2>All samples together</h2>"
+		+ '<details><summary>where the genomes of this run ended up</summary>'
+		+ '<div class="line">' + typed + " of " + samples.length + " samples have a confirmed SNP path. Line thickness and dot size grow with the number of paths running through a node; the ×N at a name is that count.</div>"
+		+ '<div class="panelTitle">Final SNPs (' + top.length + ")</div>"
+		+ top.map(function(f){ return '<span class="topFinal" title="' + finals[f] + ' samples end here">' + esc(f) + " ×" + finals[f] + "</span>"; }).join("")
+		+ '<div class="panelTitle">Click a sample in the table below to see its own tree.</div>'
+		+ "</details>";
+	var rows = document.querySelectorAll("#rows tr");
+	for (var k = 0; k < rows.length; k++) { rows[k].className = rows[k].className.replace(" selected", ""); }
+	render();
+	fitInitial();
+}
+document.getElementById("overview").onclick = function(){ paintOverview(); };
+buildTable("", "");
+paintOverview();
 if (document.querySelectorAll("#rows tr").length !== samples.length || !svgEl) {
 	window.onerror("the sample table or the tree stayed empty", "", 0);
 }

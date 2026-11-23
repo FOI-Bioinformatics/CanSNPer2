@@ -200,7 +200,9 @@ cmd skip-mauve-without-alignments fail "No alignments were produced" "$PY" -m Ca
 # wrote no files and still exited 0, which is why the reporter saw "no output at all" (#43)
 cmd keep-going-no-output fail "No sample was typed" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" \
     "$OUT/no_such_file.fna" -db "$DB" --refdir "$OUT/refs" -o "$OUT/r_keepgoing" \
-    --tmpdir "$OUT/t_keepgoing" --logdir "$OUT/logs/keepgoing" --keep_going --skip_mauve
+    --tmpdir "$OUT/t_keepgoing" --logdir "$OUT/logs/keepgoing" --keep_going
+    # no --skip_mauve: --skip_alignment needs an existing --tmpdir to read alignments from (ca946f8)
+    # and this failure path types nothing at all, so there is nothing to skip
 expect "keep_going wrote nothing but the results overview" "1" "$(ls "$OUT/r_keepgoing" 2>/dev/null | wc -l | tr -d ' ')"
 if grep -q "no_such_file" "$OUT/r_keepgoing/summary.html" 2>/dev/null; then
     printf '  ok    %-52s the overview lists the failed sample\n' "keep_going overview names the failed sample"; PASSED=$((PASSED+1))

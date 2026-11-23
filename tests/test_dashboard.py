@@ -114,3 +114,31 @@ def test_dashboard_table_keeps_every_column_in_view(tmp_path):
 	assert "<colgroup>" in page
 	assert "overflow-wrap: anywhere" in page
 	assert 'title="' in page.split("tr.innerHTML", 1)[1].split(";", 1)[0]
+
+
+def test_dashboard_starts_with_the_support_overview(tmp_path):
+	"""the page opens on the joint picture, not on one selected sample: all sample
+		paths as one tree, edge and dot thickness growing with the number of paths
+		through a node, so the run shows where its genomes ended up"""
+	page, _data = dashboard_payload(tmp_path)
+	assert "function paintOverview" in page
+	assert "n.edgeWidth" in page and "n.dotR" in page
+	assert "paintOverview();" in page
+	assert "paint(order[0]);" not in page
+
+
+def test_dashboard_table_filters_on_snps_in_the_path(tmp_path):
+	"""any SNP of the path can be filtered, also the ones the tree cannot show
+		because no alignment carried data at that position"""
+	page, _data = dashboard_payload(tmp_path)
+	assert 'id="pathFilter"' in page
+	assert "pathTokens" in page
+
+
+def test_dashboard_side_panels_start_collapsed(tmp_path):
+	"""the table is the main part of the page, so the other sections of the side
+		panel stay closed until opened by hand, also when a sample is selected"""
+	page, _data = dashboard_payload(tmp_path)
+	assert '<details id="statusKey">' in page
+	assert "<summary>details, files and SNP path</summary>" in page
+	assert "<summary>where the genomes of this run ended up</summary>" in page
