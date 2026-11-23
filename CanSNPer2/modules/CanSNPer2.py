@@ -185,7 +185,8 @@ class CanSNPer2(object):
 		self.refdir = os.path.join(self.workdir, self.refdir)
 
 		'''Fetch other key word arguments'''
-		self.save_tree = kwargs.get("save_tree",False)
+		'''the tree is written unless it is turned off, as --no_save_tree does (issue #78)'''
+		self.save_tree = kwargs.get("save_tree",True)
 		'''tree annotations for the html views: a file path (load_annotations parses it) or
 			an already built list of {node, kind, rank, label} dicts. A file that cannot be read
 			must not leave the run directory made above behind.'''
@@ -1203,11 +1204,16 @@ class CanSNPer2(object):
 						if old_sha is None:
 							logger.info("{outputfile} does not record its input (older version), it is used again as it is".format(outputfile=outputfile))
 						logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
+						'''the skip used to be a debug line, so a run that typed nothing said nothing
+							after announcing the alignments (issue #78); the call of the earlier run is
+							printed like a computed one, with what to do to recompute it'''
 						self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(outputfile=outputfile)
 						self.reused.add(self.query_name)
 						'''the dashboard lists reused samples too, but without states: the tree cannot
 							paint a result it did not compute in this run'''
 						old_final,old_path = self.read_result_file(outputfile)
+						print("{query}: {SNP} (from an earlier run, use --rerun to type it again)".format(
+								query=self.query_name, SNP=old_final))
 						self.add_sample_report(self.query_name,"reused",old_final,old_path,
 								["result from an earlier run, use --rerun to recompute it and see it in the tree"],
 								support=self.read_result_support(outputfile))
