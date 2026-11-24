@@ -92,8 +92,18 @@ for tool in CanSNPerTree SNPDatabase DownloadGenomes; do
         fi
     done
 done
+# the cansnper2 verbs of 2.6.0 have their own spelling and must be documented too
+for verb in "type" "selftest" "db create" "db import" "db export" "db info" \
+        "db convert" "db modify" "db remove" "scheme list" "scheme get" "ref get"; do
+    for opt in $("$PY" -m CanSNPer2.cli $verb --help 2>&1 | grep -o -- '--[a-z][a-z-]*' | sort -u); do
+        if grep -q -- "$opt" "$REPO/README.md"; then :; else
+            printf '  FAIL  %-52s %s is not documented in README.md\n' "cansnper2 $verb $opt" "$opt"
+            DOCMISS=$((DOCMISS+1)); FAILED=$((FAILED+1))
+        fi
+    done
+done
 if [ "$DOCMISS" = 0 ]; then
-    printf '  ok    %-52s all options of the three commands appear in README.md\n' "README matches --help"
+    printf '  ok    %-52s all options of the commands and verbs appear in README.md\n' "README matches --help"
     PASSED=$((PASSED+1))
 fi
 
@@ -132,6 +142,27 @@ NW=$(ls "$OUT/export_nwk"/*.nwk 2>/dev/null | head -1)
 # The export must contain the database root (T/N.1) rendered as the ROOT node, exactly once
 ROOTHIT=$(grep -o "T/N.1)ROOT;" "$NW" 2>/dev/null | head -1)
 expect "newick contains the database root as ROOT ($(basename "${NW:-none}"))" "T/N.1)ROOT;" "$ROOTHIT"
+
+say "== the cansnper2 verbs (2.6.0): same jobs, one command"
+cmd cli-selftest ok "usable aligners" "$PY" -m CanSNPer2.cli selftest
+cmd cli-scheme-list ok "francisella_tularensis" "$PY" -m CanSNPer2.cli scheme list --data-dir "$DATA"
+cmd cli-db-create ok "" "$PY" -m CanSNPer2.cli db create -d "$OUT/cli.db" \
+    --tree "$SRC/francisella_tularensis_tree.txt" --cansnps "$SRC/francisella_tularensis_canSNPs.txt" \
+    --references "$SRC/francisella_tularensis_references.txt" --scheme-name francisella_tularensis \
+    --log-dir "$OUT/logs/cli"
+cmd cli-db-info ok "francisella_tularensis" "$PY" -m CanSNPer2.cli db info -d "$OUT/cli.db" \
+    --log-dir "$OUT/logs/cli"
+CLICOUNTS=$("$PY" -c "import sqlite3;c=sqlite3.connect('$OUT/cli.db');print(' '.join(str(c.execute('SELECT COUNT(*) FROM '+t).fetchone()[0]) for t in ('nodes','tree','rank','snp_annotation','snp_references')))")
+expect "db create wrote the same rows as --create" "328 328 2 328 5" "$CLICOUNTS"
+cmd cli-db-import ok "" "$PY" -m CanSNPer2.cli db import -d "$OUT/cli_import.db" \
+    --tree "$OUT/export_src/gate_tree.txt" --cansnps "$OUT/export_src/gate_canSNPs.txt" \
+    --references "$OUT/export_src/gate_references.txt" --log-dir "$OUT/logs/cli"
+cmd cli-export-newick ok "" "$PY" -m CanSNPer2.cli db export -d "$OUT/cli.db" --format newick \
+    -o "$OUT/cli_nwk" --log-dir "$OUT/logs/cli"
+expect "db export --format newick writes the same tree" "same" \
+    "$(cmp -s "$OUT/export_nwk/gate_tree.nwk" "$OUT/cli_nwk/cli_tree.nwk" && echo same || echo differs)"
+cmd cli-db-convert-nothing fail "convert" "$PY" -m CanSNPer2.cli db convert \
+    --log-dir "$OUT/logs/cli"
 
 say "== the id 0 regression (issues #202, #222)"
 cat > "$OUT/id0_check.py" <<'PYEOF'
@@ -268,6 +299,16 @@ cmd skip-mauve-reuse ok "query: B.22" "$PY" "$PKG/CanSNPer2/CanSNPerTree.py" "$O
     --refdir "$OUT/refs" -o "$OUT/res_skip" --tmpdir "$OUT/tmp_skip" --logdir "$OUT/logs/skip" --skip_mauve
 expect "same snps through --skip_mauve" "17" "$(grep -vc '^#' "$OUT/res_skip/samples/query_snps.txt")"
 expect "same not-called through --skip_mauve" "313" "$(grep -vc '^#' "$OUT/res_skip/samples/query_not_called.txt")"
+
+# the same alignments read through the new verb: cansnper2 type must call give what
+# CanSNPer2 gave, with its hyphenated spellings
+cmd cli-type-skip-alignment ok "query: B.22" "$PY" -m CanSNPer2.cli type "$OUT/inputs/query.fna" \
+    -d "$DB" --ref-dir "$OUT/refs" -o "$OUT/res_cli" --tmp-dir "$OUT/tmp_skip" \
+    --log-dir "$OUT/logs/clitype" --skip-alignment
+expect "same snps through cansnper2 type" "17" "$(grep -vc '^#' "$OUT/res_cli/samples/query_snps.txt")"
+expect "same not-called through cansnper2 type" "313" "$(grep -vc '^#' "$OUT/res_cli/samples/query_not_called.txt")"
+cmd cli-ref-get-missing-db fail "does not exist" \
+    "$PY" -m CanSNPer2.cli ref get -d "$OUT/no_such.db" --log-dir "$OUT/logs/refget"
 
 # every SNP of the database tree has to show up in one of the two files: a position that no
 # alignment carried a base for used to be missing from both, so the only way to see it was the

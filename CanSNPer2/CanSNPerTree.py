@@ -117,8 +117,9 @@ def minutes(value):
 	return number
 
 
-def command():
-	'''Initiate CanSNPer2 object'''
+def build_parser():
+	'''the argument parser of the command, split from running (2.6.0) so cansnper2 type can
+		reuse the run without repeating its checks'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2 - type query assemblies (or reads) against a CanSNP database',
 		epilog=COMMANDS_HELP,
@@ -165,17 +166,11 @@ def command():
 	debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")
 	debugopts.add_argument('--supress',	action='store_const', const=logging.ERROR,	default=logging.WARNING,	help="Supress warnings")
 	parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
+	return parser
 
-	args = parser.parse_args()
-	if len(sys.argv)==1:
-		parser.print_help()
-		parser.exit()
-	'''
-		Setup logging and debug options
-	'''
-	if args.version:
-		print("CanSNPer2 - version {version}".format(version=__version__))
-		exit()
+
+def run_command(args, parser):
+	'''everything after parsing, given the parsed options: shared by CanSNPer2 and cansnper2 type'''
 	if args.read_input:
 		'''a flag that is not implemented must not leave with status 0: a script that passed
 		--read_input looked like it had typed something (issue #227)'''
@@ -317,6 +312,19 @@ def command():
 		was used again, made from the same input, counts as typed'''
 	if not CanSNPer2_obj.typed and not CanSNPer2_obj.reused and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
 		exit(1)
+
+
+def command():
+	'''Initiate CanSNPer2 object'''
+	parser = build_parser()
+	args = parser.parse_args()
+	if len(sys.argv)==1:
+		parser.print_help()
+		parser.exit()
+	if args.version:
+		print("CanSNPer2 - version {version}".format(version=__version__))
+		exit()
+	run_command(args, parser)
 
 
 def main():

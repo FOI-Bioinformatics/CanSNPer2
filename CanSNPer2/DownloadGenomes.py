@@ -351,7 +351,9 @@ class DownloadGenomes(object):
 		logging.info("Done!")
 		return 0
 
-def command():
+def build_parser():
+	'''the argument parser, split from running (2.6.0) so the cansnper2 scheme and ref verbs
+		can reuse the run'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-download - fetch the reference genomes a database needs from NCBI',
 		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
@@ -380,8 +382,11 @@ def command():
 	debugopts.add_argument('--logs', metavar='', default='logs', 				help='Specify log directory')
 	debugopts.add_argument('--verbose',	action='store_const', const=logging.DEBUG, help='Verbose logging')
 	debugopts.add_argument('--debug',	action='store_const', const=logging.DEBUG, help='Debug logging, and the traceback of an unexpected error')
+	return parser
 
-	args = parser.parse_args()
+
+def run_command(args, parser):
+	'''everything after parsing, shared by CanSNPer2-download and the cansnper2 scheme/ref verbs'''
 	if not (args.database or args.scheme or args.list_schemes):
 		parser.error("give a database with --database, a scheme with --scheme, or --list_schemes")
 	if args.no_references and not args.scheme:
@@ -469,6 +474,12 @@ def command():
 		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
 		exit(1)
 	print("Downloaded the reference genomes of {db} from {source} into {d}".format(db=args.database, source=args.source, d=args.outdir))
+
+
+def command():
+	parser = build_parser()
+	args = parser.parse_args()
+	run_command(args, parser)
 
 
 def main():

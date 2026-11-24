@@ -37,7 +37,53 @@ Read input (not yet implemeted)
 * BWA
 * Minimap2
 
+## The cansnper2 command (since 2.6.0)
+
+A single command with a verb for every job. It runs the same code as the four commands
+CanSNPer2, CanSNPer2-database, CanSNPer2-download and CanSNPer2-test, which keep working
+with their old arguments; the shared options have one spelling here, and new scripts
+should use `cansnper2`. `cansnper2 --version` prints the version, `--help` documents any
+verb.
+
+```sh
+cansnper2 type query.fna -d scheme.db          # type assemblies (was CanSNPer2)
+cansnper2 selftest                             # check the installation (was CanSNPer2-test)
+cansnper2 db create -d new.db --tree tree.txt --cansnps snps.txt --references refs.txt
+cansnper2 db import -d new.db --tree tree.txt --cansnps snps.txt --references refs.txt
+cansnper2 db export -d scheme.db --format source --outdir export/    # or newick, tab
+cansnper2 db info -d scheme.db
+cansnper2 db convert -d old.db --ref-dir references/ --outdir converted/
+cansnper2 db modify -d scheme.db --mod-file changes.txt --parent NODE --replace
+cansnper2 db remove -d scheme.db --parent NODE
+cansnper2 scheme list                          # schemes of CanSNPer2-data (was --list_schemes)
+cansnper2 scheme get francisella_tularensis    # build its database and fetch references
+cansnper2 ref get -d scheme.db --source genbank --outdir references/  # was CanSNPer2-download
+```
+
+`db create` and `db import` also take `--scheme-name`, `--scheme-status` and
+`--scheme-source` to record what scheme the database holds; `db modify` also takes
+`--cansnps` and `--references` for changes to the annotations and the reference list;
+`db convert` takes `--cansnps` instead of `-d` to convert a SNP source file. `scheme get`
+and `scheme list` take `--repo owner/name`, `--branch ref` and `--data-dir DIR` for
+another source repository, and `scheme get` takes `--overwrite`, `--no-references` and
+`--allow-unverified`.
+
+Every verb has the same logging options: `--log-dir DIR` for the log files, `-v` or
+`--verbose` for process information, `--debug` for debug output and the traceback of an
+unexpected error, and `--quiet` to suppress warnings (the old `--supress`).
+
+The options of `type` are the arguments of CanSNPer2 with one consistent spelling:
+`--database` replaces `-db`, and underscores became hyphens (`--min-required-hits`,
+`--alignment-timeout`, `--aligner-path`, `--allow-missing-references`,
+`--keep-going`, `--keep-temp`, `--skip-alignment`, `--ref-dir`, `--tmp-dir`,
+`--log-dir`); `--supress` became `--quiet`, `--annotations` became `--node-labels`,
+and `--no-snp-files` the counterpart of the old `--no_snpfiles`. The rest are spelled
+as before: `--outdir`, `--save-tree`, `--summary`, `--workdir`, `--strictness`,
+`--mask`, `--rerun`, `--aligner`, `--verbose`. `--read_input` (never implemented) and
+the hidden `--no_save_tree` are not offered by the verb.
+
 ## User guide CanSNPer2 (for custom databases see below)
+
 1. Build a database from a scheme in [CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data) and download its reference genomes
 
 ```sh

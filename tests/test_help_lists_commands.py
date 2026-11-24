@@ -6,9 +6,10 @@ so nothing pointed a new user at database creation or reference download."""
 import subprocess
 import sys
 
-COMMANDS = ["CanSNPer2", "CanSNPer2-database", "CanSNPer2-download", "CanSNPer2-test"]
+COMMANDS = ["CanSNPer2", "CanSNPer2-database", "CanSNPer2-download", "CanSNPer2-test",
+	"cansnper2"]
 MODULES = ["CanSNPer2.CanSNPerTree", "CanSNPer2.SNPDatabase",
-	"CanSNPer2.DownloadGenomes", "CanSNPer2.selftest"]
+	"CanSNPer2.DownloadGenomes", "CanSNPer2.selftest", "CanSNPer2.cli"]
 
 
 def help_output(module):

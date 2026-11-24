@@ -48,10 +48,9 @@ supported_output = ["source", "newick", "tab"]
 import argparse
 
 
-def get_arguments():
-	'''The command used to parse its arguments and open its log file at import time, so
-		importing CanSNPer2.SNPDatabase consumed sys.argv and wrote a log file as a side
-		effect (issue #174)'''
+def build_parser():
+	'''the argument parser, split from parsing and running (2.6.0) so the cansnper2 verbs
+		can reuse the run; get_arguments keeps the old behaviour of this command'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-database - create, modify and export CanSNP databases',
 		epilog=COMMANDS_HELP,
@@ -103,7 +102,14 @@ def get_arguments():
 																	default=logging.WARNING,	help="supress warnings")
 
 	parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
+	return parser
 
+
+def get_arguments():
+	'''The command used to parse its arguments and open its log file at import time, so
+		importing CanSNPer2.SNPDatabase consumed sys.argv and wrote a log file as a side
+		effect (issue #174)'''
+	parser = build_parser()
 	args = parser.parse_args()
 	if len(sys.argv)==1:
 		parser.print_help()
@@ -326,9 +332,8 @@ def modify(args, logger):
 	return 0
 
 
-def command():
-	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
-	args = get_arguments()
+def run_command(args):
+	'''everything after parsing, shared by CanSNPer2-database and the cansnper2 db verbs (2.6.0)'''
 	logger = get_logger(args)
 	logger.debug(args)
 	if not check_mode(args, logger):
@@ -492,6 +497,11 @@ def command():
 	else:
 		logger.error("No datafile supplied, nothing to process!")
 		exit(1)
+
+
+def command():
+	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
+	run_command(get_arguments())
 
 
 def main():
