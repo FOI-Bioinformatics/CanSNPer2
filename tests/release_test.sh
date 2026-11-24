@@ -84,15 +84,7 @@ cmd selftest ok "usable aligners" "$PY" -m CanSNPer2.selftest
 
 say "== the documentation names every command line option"
 DOCMISS=0
-for tool in CanSNPerTree SNPDatabase DownloadGenomes; do
-    for opt in $("$PY" "$PKG/CanSNPer2/$tool.py" --help 2>&1 | grep -o -- '--[a-z_]*' | sort -u); do
-        if grep -q -- "$opt" "$REPO/README.md"; then :; else
-            printf '  FAIL  %-52s %s is not documented in README.md\n' "$tool $opt" "$opt"
-            DOCMISS=$((DOCMISS+1)); FAILED=$((FAILED+1))
-        fi
-    done
-done
-# the cansnper2 verbs of 2.6.0 have their own spelling and must be documented too
+# since 2.6.0 only the verbs are installed and only the verbs are documented
 for verb in "type" "selftest" "db create" "db import" "db export" "db info" \
         "db convert" "db modify" "db remove" "scheme list" "scheme get" "ref get"; do
     for opt in $("$PY" -m CanSNPer2.cli $verb --help 2>&1 | grep -o -- '--[a-z][a-z-]*' | sort -u); do
@@ -320,7 +312,8 @@ COVERED=$("$PY" -c "
 nc = sum(1 for i, l in enumerate(open('$OUT/res_mask/samples/query_not_called.txt')) if i and not l.startswith('#'))
 sc = sum(1 for i, l in enumerate(open('$OUT/res_mask/samples/query_snps.txt')) if i and not l.startswith(('#', 'SNP path', 'Final SNP', 'Query file', 'Typing settings')))
 print(nc + sc)")
-if [ "$NODATA" -gt 0 ] && [ "$COVERED" = 328 ] && grep -q "no alignment data" "$LASTLOG"; then
+if [ "$NODATA" -gt 0 ] && [ "$COVERED" = 328 ] && grep -q "no alignment data" "$OUT"/logs/mask/*.log \
+        && grep -q "warnings about the results" "$LASTLOG"; then
     printf '  ok    %-52s %s positions listed, the two files cover all 328 SNPs\n' "SNPs without any alignment data are listed (#27)" "$NODATA"
     PASSED=$((PASSED+1))
 else

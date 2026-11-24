@@ -366,7 +366,7 @@ def test_a_2_3_database_is_refused_by_the_database_check(tmp_path):
 	source = database_2_3(tmp_path / "old.db")
 	with pytest.raises(DBConnectionError) as error:
 		check_database(source)
-	assert "--convert" in str(error.value) and "typed" in str(error.value)
+	assert "db convert" in str(error.value) and "typed" in str(error.value)
 	assert check_database(source, current_format=False)
 
 

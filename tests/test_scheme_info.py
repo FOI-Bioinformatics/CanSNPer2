@@ -429,5 +429,5 @@ def test_allow_missing_references_still_stops_when_no_genome_has_a_file(tmp_path
 	os.rename(str(tmp_path / "refs" / "REF_A.fna"), str(tmp_path / "refs" / "OTHER.fna"))
 	result = type_toy(tmp_path, db, "--allow_missing_references")
 	assert result.returncode == 1, result.stdout + result.stderr
-	assert "REF_A, REF_B" in result.stderr and "CanSNPer2-download --database" in result.stderr, result.stderr
+	assert "REF_A, REF_B" in result.stderr and "cansnper2 ref get" in result.stderr, result.stderr
 	assert "Traceback" not in result.stderr

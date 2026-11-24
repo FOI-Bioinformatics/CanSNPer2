@@ -267,7 +267,7 @@ class CanSNPer2(object):
 				db=database, n=n_snps))
 		if orphans:
 			raise CanSNPer2Error("The database {db} has {n} SNP(s) on node ids that are not in the nodes or tree table: "
-				"{snps}; export it with CanSNPer2-database --export, correct the files and build it again".format(
+				"{snps}; export it with cansnper2 db export, correct the files and build it again".format(
 				db=database, n=len(orphans),
 				snps=listing("{snp} (node {id})".format(snp=snp, id=node_id) for snp, node_id in orphans)))
 		return self.read_reference_snps()
@@ -290,7 +290,7 @@ class CanSNPer2(object):
 				db.disconnect()
 		except Exception as e:
 			raise CanSNPer2Error("The SNP positions of {db} could not be read ({e}), so the references cannot be checked "
-				"against them; export it with CanSNPer2-database --export, correct the files and build it again".format(
+				"against them; export it with cansnper2 db export, correct the files and build it again".format(
 				db=self.database, e=e))
 		return self.reference_snps
 
@@ -332,7 +332,7 @@ class CanSNPer2(object):
 			refs = sorted(ref for ref in os.listdir(self.refdir) if ref.endswith(".fna"))
 		except OSError:
 			refs = []
-		download = "CanSNPer2-download --database {database} --outdir {refdir}".format(database=self.database,refdir=self.refdir)
+		download = "cansnper2 ref get -d {database} -o {refdir}".format(database=self.database,refdir=self.refdir)
 		if not refs:
 			'''without references there is nothing to align against, say so instead of failing later
 				as "Mauve error skip" for every sample (issue #124)'''

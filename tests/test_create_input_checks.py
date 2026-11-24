@@ -180,7 +180,7 @@ def test_old_header_is_refused_with_the_conversion_hint(tmp_path):
 	files = helpers.write_sources(tmp_path, [("R", "s1", "Paper2020", "REF1", 10, "A", "G")], header=header)
 	problems = checked(files)
 	assert len(problems) == 1, problems
-	assert "--convert" in problems[0]
+	assert "db convert" in problems[0]
 
 
 def test_same_position_on_two_sequences_is_allowed(tmp_path):
@@ -424,7 +424,7 @@ def test_the_command_line_mod_file_refuses_an_old_header_with_the_conversion_hin
 		"--mod_file", str(mod), "--parent", "R", "--annotation", str(old), "--logs", str(tmp_path / "logs")],
 		capture_output=True, text=True, cwd=str(tmp_path))
 	assert result.returncode == 1, result.stdout + result.stderr
-	assert "--convert" in result.stderr, result.stderr
+	assert "db convert" in result.stderr, result.stderr
 
 
 def test_check_source_headers_refuses_joined_positions_with_the_conversion_hint():

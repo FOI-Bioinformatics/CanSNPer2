@@ -181,4 +181,4 @@ def test_the_command_line_export(tmp_path, export_format):
 		capture_output=True, text=True, cwd=str(tmp_path))
 	assert result.returncode == 0, result.stderr
 	assert sorted(os.listdir(out)) == ["scheme_canSNPs.txt", "scheme_references.txt", "scheme_tree.txt"]
-	assert "Import back with: CanSNPer2-database --import" in result.stdout
+	assert "Import back with: cansnper2 db import" in result.stdout

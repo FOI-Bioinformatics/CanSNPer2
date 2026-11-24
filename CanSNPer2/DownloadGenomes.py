@@ -312,7 +312,7 @@ class DownloadGenomes(object):
 			snps = reference_snps(self.database)
 		except Exception as e:
 			logger.error("The SNP positions of {db} could not be read ({e}), so the downloaded references "
-				"cannot be checked; build the database again with CanSNPer2-database --create".format(db=database, e=e))
+				"cannot be checked; build the database again with cansnper2 db create".format(db=database, e=e))
 			return 1
 		results = _MP_CTX.Queue()
 		threads = []
@@ -471,7 +471,7 @@ def run_command(args, parser):
 	# create a database connection
 	DG = DownloadGenomes(args.database,args.source,args.outdir)
 	if DG.run():
-		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
+		logger.error("The references of the database were not all fetched, see the messages above")
 		exit(1)
 	print("Downloaded the reference genomes of {db} from {source} into {d}".format(db=args.database, source=args.source, d=args.outdir))
 

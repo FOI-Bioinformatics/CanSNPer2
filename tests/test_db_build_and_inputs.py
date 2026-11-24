@@ -188,7 +188,7 @@ def test_joined_database_is_refused(tmp_path):
 	db = helpers.make_db(tmp_path / "joined.db", [("A.1", "chrI", 50, "C", "T")], joined=True)
 	with pytest.raises(ConnectionError) as error:
 		check_database(db)
-	assert "--convert" in str(error.value)
+	assert "db convert" in str(error.value)
 	assert check_database(db, current_format=False)
 	assert check_database(helpers.make_db(tmp_path / "current.db", [("A.1", "chrI", 50, "C", "T")]))
 
@@ -207,7 +207,7 @@ def test_cli_refuses_joined_database(tmp_path, module, arguments):
 	result = subprocess.run([sys.executable, "-m", module, "--database", db] + arguments,
 		capture_output=True, text=True, cwd=str(tmp_path), env=env)
 	assert result.returncode != 0, result.stdout + result.stderr
-	assert "--convert" in result.stderr, (result.stdout, result.stderr)
+	assert "db convert" in result.stderr, (result.stdout, result.stderr)
 
 
 def run_database_cli(tmp_path, arguments, code=None):
@@ -249,7 +249,7 @@ def test_create_refuses_an_existing_joined_database(tmp_path):
 	before = row_counts(db)
 	result = run_database_cli(tmp_path, create_arguments(tmp_path, db))
 	assert result.returncode == 1, result.stdout + result.stderr
-	assert "--convert" in result.stderr, (result.stdout, result.stderr)
+	assert "db convert" in result.stderr, (result.stdout, result.stderr)
 	assert row_counts(db) == before
 
 

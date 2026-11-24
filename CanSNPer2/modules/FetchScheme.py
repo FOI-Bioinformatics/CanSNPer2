@@ -370,7 +370,7 @@ class GitHubSchemeSource(SchemeSource):
 
 	def list_hint(self):
 		repo = "" if self.repo == DATA_REPO else " --repo {repo}".format(repo=self.repo)
-		return "CanSNPer2-download --list_schemes{repo} --branch {ref}".format(repo=repo, ref=self.ref)
+		return "cansnper2 scheme list{repo} --branch {ref}".format(repo=repo, ref=self.ref)
 
 	def source_name(self):
 		return self.repo
@@ -421,10 +421,10 @@ class LocalSchemeSource(SchemeSource):
 		return "in {d}".format(d=self.directory)
 
 	def old_format_hint(self):
-		return "use CanSNPer2 2.2 for it, or convert its SNP file with CanSNPer2-database --convert"
+		return "use CanSNPer2 2.2 for it, or convert its SNP file with cansnper2 db convert"
 
 	def list_hint(self):
-		return "CanSNPer2-download --list_schemes --data_dir {d}".format(d=self.directory)
+		return "cansnper2 scheme list --data-dir {d}".format(d=self.directory)
 
 	def git(self, *arguments):
 		'''output of a git command in the directory, None when it is not a git checkout'''

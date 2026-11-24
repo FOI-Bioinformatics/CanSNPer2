@@ -448,8 +448,8 @@ def run_command(args):
 				logger.error("The database cannot be exported: {error}".format(error=e))
 				exit(1)
 			print("Exported to {files}".format(files=", ".join(files.values())))
-			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} "
-				"--annotation {snp} --references {references}".format(**files))
+			print("Import back with: cansnper2 db import -d <new.db> --tree {tree} "
+				"--cansnps {snp} --references {references}".format(**files))
 		exit()
 	if not args.create:
 		if not (args.mod_file or args.annotation or args.references):

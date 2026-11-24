@@ -270,7 +270,7 @@ def test_a_local_git_checkout_records_its_commit_and_uncommitted_files(tmp_path,
 
 def test_a_missing_local_scheme_names_the_list_command(tmp_path):
 	src = LocalSchemeSource(str(write_tree(tmp_path / "data", scheme_repo())))
-	with pytest.raises(SchemeError, match="--list_schemes --data_dir"):
+	with pytest.raises(SchemeError, match="scheme list --data-dir"):
 		build_scheme("missing", str(tmp_path / "m.db"), source=src)
 
 

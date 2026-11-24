@@ -177,11 +177,11 @@ def run_command(args, parser):
 		print("Read input is not implemented in this version, fasta input is required.")
 		exit(1)
 	if not args.database:
-		print("A database is required: CanSNPer2 --database database.db query.fasta")
+		print("A database is required: cansnper2 type query.fasta -d database.db")
 		exit(1)
 	if not args.query:
 		'''a run without queries used to warn, exit 0 and leave an empty run directory'''
-		print("No query files were given: CanSNPer2 --database database.db query.fasta", file=sys.stderr)
+		print("No query files were given: cansnper2 type query.fasta -d database.db", file=sys.stderr)
 		exit(1)
 	'''fail with a clear message on a bad database path instead of creating an empty database'''
 	try:

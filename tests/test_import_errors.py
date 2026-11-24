@@ -317,7 +317,7 @@ CASES = [
 	case("modify: short SNP row", "CanSNPer2-database",
 		modification(snp_rows=["C.1\t1\tPaper2022\tREF1\tCP000001.1"]), 1, "expected 10 columns, found 5"),
 	case("modify: SNP file with the old header", "CanSNPer2-database",
-		modification(header=OLD_SNP_HEADER, snp_rows=["C.1\ts1\tPaper2022\tREF1\t500\tA\tC"]), 1, "--convert"),
+		modification(header=OLD_SNP_HEADER, snp_rows=["C.1\ts1\tPaper2022\tREF1\t500\tA\tC"]), 1, "db convert"),
 	case("modify: canSNP of a rank that the node already has", "CanSNPer2-database",
 		modification(snp_rows=[NEW_SNP, "A.1\t1\tPaper2022\tREF1\tCP000001.1\t900\tA\tC\t\tno"]), 1,
 		"node 'A.1' already has a canSNP of rank 1 in"),
@@ -404,9 +404,9 @@ CASES = [
 
 	# 4. typing start-up ------------------------------------------------------------------
 	case("typing: a database genome has no reference file", "CanSNPer2",
-		typing(files=("REF",)), 1, ["REF2", "CanSNPer2-download --database"]),
+		typing(files=("REF",)), 1, ["REF2", "cansnper2 ref get"]),
 	case("typing: no reference file matches the database", "CanSNPer2",
-		typing(files=("OTHER",)), 1, ["REF, REF2", "CanSNPer2-download --database"]),
+		typing(files=("OTHER",)), 1, ["REF, REF2", "cansnper2 ref get"]),
 	case("typing: SNPs cannot be read", "CanSNPer2",
 		typing(sql=["UPDATE snp_annotation SET sequence_position='abc' WHERE node_id=2"]), 1,
 		"The SNP positions of"),
