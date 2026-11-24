@@ -10,10 +10,13 @@ import hashlib
 import datetime
 import tempfile
 import logging
+import statistics
 logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
-from CanSNPer2.modules.Aligners import Aligner, get_aligner
+from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, write_sites_bed
+from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
+from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
@@ -138,6 +141,17 @@ class CanSNPer2(object):
 		self.worker_join_timeout = kwargs.get("worker_join_timeout", 2*60)
 		'''SNPs closer to an alignment edge than this are not evaluated (issue #175)'''
 		self.mask = int(kwargs.get("mask",0) or 0)
+		'''read typing (ReadInput, Aligners.ReadMapper). A read sample stands in self.query for
+			its first read file; read_samples gives the sample of that file. Each platform has
+			its own mapper, with the thresholds given here or the defaults of the platform'''
+		self.read_samples = {}
+		self.read_mappers = {}
+		self.platform = kwargs.get("platform") or DEFAULT_PLATFORM
+		self.samplesheet = kwargs.get("samplesheet")
+		self.threads = int(kwargs.get("threads") or 4)
+		self.read_options = {key: kwargs.get(key) for key in ("min_mapq", "min_baseq", "min_depth", "min_allele_fraction")}
+		mixed_sites = kwargs.get("mixed_sites")
+		self.mixed_sites = 3 if mixed_sites is None else int(mixed_sites)
 		'''how long one round of alignments (the query against all references, in parallel) may
 			take before the aligners are stopped, in minutes; 0 means no limit. progressiveMauve
 			never returns on some inputs, which used to hang the run'''
@@ -298,7 +312,16 @@ class CanSNPer2(object):
 		'''Stop before the first sample when the aligner program cannot be found: this used to show
 			up after the run had started, once for every sample, as a raw "No such file" error.
 			--skip_alignment reads alignments that exist and needs no aligner.'''
-		if self.skip_alignment or self.aligner.available():
+		if self.skip_alignment:
+			return
+		if self.read_samples:
+			missing = [mapper for mapper in self.read_mappers.values() if not mapper.available()]
+			if missing:
+				raise CanSNPer2Error("Read typing needs minimap2 and samtools; {m} was not found. Install both (for example "
+					"conda install -c bioconda minimap2 samtools) and make sure they are in PATH".format(
+					m=" or ".join(sorted({p for mapper in missing for p in (mapper.executable(), mapper.samtools) if not shutil.which(p)})) or "one of them"))
+			return
+		if self.aligner.available():
 			return
 		raise CanSNPer2Error("The aligner {name} was not found (looked for {program}); install it, give its location with "
 			"--aligner_path, or choose another --aligner. CanSNPer2-test lists the aligners that are installed".format(
@@ -608,7 +631,10 @@ class CanSNPer2(object):
 		names = []     # (reference, query) of each command
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
-		query_file = self.not_an_option(self.stage_input(self.clean_input_fasta(query,"query"),"query"))
+		if self.is_read(query):
+			query_file = tuple(self.not_an_option(f) for f in self.query_files(query))
+		else:
+			query_file = self.not_an_option(self.stage_input(self.clean_input_fasta(query,"query"),"query"))
 		for ref in references:	  ## For each reference in the reference folder align to query
 			ref_name = ref.rsplit(".",1)[0] ## remove file ending
 			output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
@@ -624,6 +650,9 @@ class CanSNPer2(object):
 			commands.append(self.aligner.command(ref_file, query_file, output))
 			if not self.skip_alignment:
 				self.aligner.prepare(ref_file, query_file, output)
+				if getattr(self.aligner, "needs_sites", False):
+					'''the read mapper lists the read bases at the canSNP positions of the reference only'''
+					write_sites_bed(output + ".sites.bed", self.reference_snps.get(ref_name, []))
 			logs.append(self.aligner.log_path(self.logdir, ref_name, self.query_name))
 			names.append((ref_name, self.query_name))
 			self.alignment_files.append(output)        ## the alignment files are read later
@@ -646,7 +675,7 @@ class CanSNPer2(object):
 		'''the name is set here, from the query actually being aligned, so that the commands
 			never depend on run() having set it before and the retry below keeps the original
 			sample name for its alignment files (issue #160)'''
-		self.query_name = os.path.basename(query).rsplit(".",1)[0]
+		self.query_name = self.sample_name(query)
 		self.alignment_files = []
 		self.alignment_references = []
 		commands,logs,names = self.create_alignment_commands(query,references)
@@ -697,7 +726,8 @@ class CanSNPer2(object):
 			return False
 		head = head[3:] if head.startswith(b"\xef\xbb\xbf") else head
 		head = head.lstrip()
-		return bool(head) and not head.startswith((b">", b"\x1f\x8b"))
+		'''a FASTQ file (reads) starts with "@"'''
+		return bool(head) and not head.startswith((b">", b"\x1f\x8b", b"@"))
 
 	def resolve_queries(self,queries):
 		'''The query files of the run. A file whose first non-blank line is not a FASTA header is a
@@ -935,8 +965,71 @@ class CanSNPer2(object):
 		return SNPS,SNP_info,called_snps
 
 	def sample_name(self, path):
-		'''the sample name of a query file: its file name without the last extension'''
+		'''the sample name of a query file: its file name without the last extension; for reads
+			the name ReadInput gave the sample'''
+		if path in self.read_samples:
+			return self.read_samples[path].name
 		return os.path.basename(path).rsplit(".",1)[0]
+
+	def is_read(self, query):
+		'''True when the query is a read sample'''
+		return query in self.read_samples
+
+	def query_files(self, query):
+		'''the input files of a query: the assembly, or the read file(s) of a read sample'''
+		if query in self.read_samples:
+			return tuple(self.read_samples[query].files)
+		return (query,)
+
+	def query_digest(self, query):
+		'''sha256 of the query: of the file, or for two read files of their two sha256 sums'''
+		files = self.query_files(query)
+		if len(files) == 1:
+			return self.file_sha256(files[0])
+		return hashlib.sha256(" ".join(self.file_sha256(f) for f in files).encode()).hexdigest()
+
+	def resolve_read_input(self, queries):
+		'''The read samples of the run, from --samplesheet or from the query files when they are
+			reads; returns the queries, with each read sample standing for its first read file.
+			Assemblies are returned unchanged. A run types reads or assemblies: they take
+			different settings and are compared differently, so both in one run is refused.'''
+		if self.samplesheet:
+			if queries:
+				raise CanSNPer2Error("Give the read files in --samplesheet or as query arguments, not both")
+			try:
+				samples = read_samplesheet(self.samplesheet, self.platform)
+			except (ReadInputError, OSError) as e:
+				raise CanSNPer2Error(str(e))
+		else:
+			kinds = {q: input_kind(q) for q in queries}
+			reads = [q for q in queries if kinds[q] == "reads"]
+			if not reads:
+				return list(queries)
+			if len(reads) != len(queries):
+				others = [q for q in queries if kinds[q] != "reads"]
+				raise CanSNPer2Error("reads and assemblies cannot be typed in one run: {n} read file(s) and {m} other file(s) were given ({files}); type them in separate runs".format(
+						n=len(reads), m=len(others), files=listing(others)))
+			try:
+				samples = pair_read_files(reads, self.platform)
+			except ReadInputError as e:
+				raise CanSNPer2Error(str(e))
+		self.read_samples = {sample.files[0]: sample for sample in samples}
+		for sample in samples:
+			if sample.platform not in self.read_mappers:
+				self.read_mappers[sample.platform] = ReadMapper(platform=sample.platform, threads=self.threads, **self.read_options)
+		self.aligner = self.read_mappers[samples[0].platform]
+		if self.mask:
+			logger.warning("--mask is not used for reads: it leaves out canSNPs near the ends of assembly alignments, while read ends are filtered by base quality")
+		return [sample.files[0] for sample in samples]
+
+	def collect_site_counts(self, alignment_files):
+		'''the site count rows of a read sample, from the .counts file the reader wrote next to
+			each pileup'''
+		rows = []
+		for path in alignment_files:
+			if os.path.isfile(path + ".counts"):
+				rows.extend(read_site_counts(path + ".counts"))
+		return rows
 
 	def sample_output(self, name, suffix):
 		'''path of a per-sample output inside the samples subfolder of --outdir; the folder
@@ -1025,15 +1118,19 @@ class CanSNPer2(object):
 
 	def query_source_line(self, query):
 		'''the trailer line that records which input a result file was made from'''
-		return "Query file: {path} sha256:{sha}".format(path=os.path.abspath(query), sha=self.query_sha256)
+		return "Query file: {path} sha256:{sha}".format(path=" ".join(os.path.abspath(f) for f in self.query_files(query)), sha=self.query_sha256)
 
 	def settings_line(self):
 		'''the trailer line that records the database and the settings a result was made with:
 			a result file from another database or another threshold was reused without a word'''
 		if getattr(self, "_database_sha256", None) is None:
 			self._database_sha256 = self.file_sha256(self.database)
-		return "Typing settings: database sha256:{sha} min_required_hits={hits} strictness={strict} mask={mask}".format(
+		line = "Typing settings: database sha256:{sha} min_required_hits={hits} strictness={strict} mask={mask}".format(
 			sha=self._database_sha256, hits=self.min_required_hits, strict=self.strictness, mask=self.mask)
+		if isinstance(self.aligner, ReadMapper):
+			'''read thresholds change the call as much as the others'''
+			line += " " + self.aligner.settings()
+		return line
 
 	def run_info(self):
 		'''What the result pages and snps_summary.txt record about the run: the CanSNPer2
@@ -1168,12 +1265,14 @@ class CanSNPer2(object):
 	def _run(self,database):
 		logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
 		self.run_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-		if len(self.query) > 0:
+		if len(self.query) > 0 or self.samplesheet:
 			'''A query list file (file paths, one per line) is read, see resolve_queries'''
-			self.query = self.resolve_queries(self.query)
+			self.query = self.resolve_queries(self.query) if self.query else []
+			'''read files are grouped into samples (paired-end mates, or --samplesheet)'''
+			self.query = self.resolve_read_input(self.query)
 			self.query = self.check_sample_names(self.query)
 			'''a missing query used to be found only after the queries before it were aligned'''
-			unusable = [q for q in self.query if not os.path.isfile(q)]
+			unusable = [q for q in self.query if not all(os.path.isfile(f) for f in self.query_files(q))]
 			if unusable and not self.keep_going:
 				shown = ", ".join(unusable[:5]) + (" and {n} more".format(n=len(unusable)-5) if len(unusable) > 5 else "")
 				raise CanSNPer2Error("{n} query file(s) were not found or are not files: {files}".format(n=len(unusable), files=shown))
@@ -1202,6 +1301,10 @@ class CanSNPer2(object):
 			for q in self.query:			## For each query file_path
 				try:
 					self.query_name = self.sample_name(q)  ## get name of file and remove ending
+					if self.is_read(q):
+						'''the mapper and the thresholds of the platform of this sample'''
+						self.aligner = self.read_mappers[self.read_samples[q].platform]
+						alignment_reader = self.aligner.reader(database=database, verbose=self.verbose)
 
 					qfile = q.rsplit("/")[-1]   ## Remove path from query name
 					if os.path.isdir(q):
@@ -1210,7 +1313,7 @@ class CanSNPer2(object):
 						raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
 
 					outputfile = self.sample_output(self.query_name, "_snps.txt")
-					self.query_sha256 = self.file_sha256(q)
+					self.query_sha256 = self.query_digest(q)
 					if os.path.exists(outputfile) and not self.rerun:
 						'''a result is only used again when it was made from the same input: the
 							name alone used to let a different genome with the same file name be
@@ -1275,6 +1378,21 @@ class CanSNPer2(object):
 							--keep_going is set, as other failures do, instead of being skipped quietly.'''
 						self.alignment_files = []
 						raise CanSNPer2Error("alignment files of {qfile} are missing: {error}".format(qfile=qfile,error=e)) from e
+					'''reads: the counts of every canSNP site, and the sites where no base reached the
+						allele fraction, which suggest more than one strain in the sample'''
+					site_rows = self.collect_site_counts(alignment_files) if self.is_read(q) else None
+					mixed = [row["Name"] for row in site_rows if row["state"] == "mixed"] if site_rows is not None else []
+					reads_line = None
+					if site_rows is not None:
+						depths = [int(row["depth"]) for row in site_rows]
+						reads_line = "Reads: platform={p} files={n} median_depth={d:g} mixed_sites={m}".format(
+								p=self.read_samples[q].platform, n=len(self.query_files(q)),
+								d=statistics.median(depths) if depths else 0, m=len(mixed))
+						if self.export:
+							with open(self.sample_output(self.query_name, "_site_counts.tsv"), "w") as counts_out:
+								print("\t".join(SITE_COUNT_COLUMNS), file=counts_out)
+								for row in site_rows:
+									print("\t".join(row[c] for c in SITE_COUNT_COLUMNS), file=counts_out)
 					'''If file export is requested the result of each SNP position is written to the two
 						result files after the call; the rows of the called SNPs are collected here'''
 					if self.export:
@@ -1334,8 +1452,9 @@ class CanSNPer2(object):
 							print("\t".join(SNP_FILE_COLUMNS),file=called_out)
 							for row in called_rows:
 								print("\t".join(row),file=called_out)
-							for line in ("SNP path: {path}".format(path=path_text), final_line, self.query_source_line(q), self.settings_line()):
-								print("# " + line,file=called_out)
+							for line in ("SNP path: {path}".format(path=path_text), final_line, reads_line, self.query_source_line(q), self.settings_line()):
+								if line is not None:
+									print("# " + line,file=called_out)
 						logger.info("Printing SNP info of non called SNPs to {file}".format(file=outputfile))
 						if no_data_snps:
 							logger.info("Listing {n} SNP positions without any alignment data in {file}".format(n=len(no_data_snps),file=outputfile))
@@ -1379,6 +1498,12 @@ class CanSNPer2(object):
 						if severity == "clean":
 							severity = "review"
 						reasons.append("{k} derived SNP(s) called outside the SNP path, on another branch: {ids}".format(k=len(off_chain),ids=", ".join(off_chain)))
+					if len(mixed) >= self.mixed_sites and mixed:
+						'''isolates are typed; reads that disagree at several canSNPs suggest a mixture'''
+						if severity == "clean":
+							severity = "review"
+						reasons.append("possibly mixed: at {k} canSNP sites no base reached the allele fraction: {ids}".format(k=len(mixed), ids=", ".join(mixed[:20])))
+						logger.warning("{sample} is possibly mixed: at {k} canSNP sites no base reached the allele fraction ({ids})".format(sample=self.query_name, k=len(mixed), ids=", ".join(mixed[:20])))
 					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
 							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),
 							no_data=[row[0] for row in no_data_snps],support=support,
