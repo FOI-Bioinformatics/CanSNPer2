@@ -101,11 +101,11 @@ class ParsePAF(AlignmentReader):
 				k = pos - at
 				if identical:
 					base = self.snplist[(sequence, pos)][0]  ## identical bases: the reference base
-					self.observe(sequence, pos, base, pos - start + 1, block_length, query_name=qname, query_pos=query_pos(qdone + k))
+					self.observe(sequence, pos, base, pos - start + 1, block_length, query_name=qname, query_pos=query_pos(qdone + k), query_strand=strand)
 				elif query_bases is None:
-					self.observe(sequence, pos, "-", pos - start + 1, block_length, query_name=qname, query_pos="N/A")
+					self.observe(sequence, pos, "-", pos - start + 1, block_length, query_name=qname, query_pos="N/A", query_strand=strand)
 				else:
-					self.observe(sequence, pos, query_bases[k], pos - start + 1, block_length, query_name=qname, query_pos=query_pos(qdone + k))
+					self.observe(sequence, pos, query_bases[k], pos - start + 1, block_length, query_name=qname, query_pos=query_pos(qdone + k), query_strand=strand)
 				next_snp += 1
 			at += span
 			if query_bases is not None or identical:
