@@ -93,6 +93,11 @@ def test_paired_reads_are_typed_like_the_genome(tmp_path, capsys):
 	assert any(line.startswith("Reads: ") and "platform=illumina" in line and "mixed_sites=0" in line for line in header)
 	reads_line = [line for line in header if line.startswith("Reads: ")][0]
 	assert "sites_with_reads=6/6" in reads_line
+	assert any("platform=illumina min_depth=5" in line for line in header if line.startswith("Typing settings:"))
+	rows = read_site_counts(str(out / "sa_site_counts.tsv"))
+	assert {r["Name"]: r["state"] for r in rows} == {"A.1": "derived", "A.2": "derived", "A.3": "derived",
+		"B.1": "ancestral", "B.2": "ancestral", "B.3": "ancestral"}
+	assert all(int(r["depth"]) >= 5 for r in rows)
 
 
 def test_the_median_depth_counts_only_sites_with_reads(tmp_path):
@@ -104,11 +109,6 @@ def test_the_median_depth_counts_only_sites_with_reads(tmp_path):
 	assert "sites_with_reads=3/6" in reads_line
 	depth = int(reads_line.split("median_depth=")[1].split()[0])
 	assert depth >= 15, "the median of the three sites with reads, not of all six"
-	assert any("platform=illumina min_depth=5" in line for line in header if line.startswith("Typing settings:"))
-	rows = read_site_counts(str(out / "sa_site_counts.tsv"))
-	assert {r["Name"]: r["state"] for r in rows} == {"A.1": "derived", "A.2": "derived", "A.3": "derived",
-		"B.1": "ancestral", "B.2": "ancestral", "B.3": "ancestral"}
-	assert all(int(r["depth"]) >= 5 for r in rows)
 
 
 def test_too_few_reads_give_no_call_not_a_wrong_one(tmp_path):
