@@ -13,9 +13,8 @@ matching old parser, so the shared run sees exactly what it always saw.
 
 import argparse
 import logging
-import sys
 
-from CanSNPer2 import COMMANDS_HELP, __version__
+from CanSNPer2 import __version__
 from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 
@@ -172,7 +171,7 @@ def add_source_file_options(parser):
 def add_db_subparsers(subparsers):
 	db = subparsers.add_parser('db',
 		description='create, import, export, inspect and modify CanSNP databases',
-		help="create, import, export, inspect and modify CanSNP databases")
+		help="create, import, export, info, convert, modify, remove")
 	db_sub = db.add_subparsers(dest='db_action', metavar='<action>', required=True)
 	parsers = {}
 
@@ -272,7 +271,7 @@ DB_MODES = {'db create': dict(create=True), 'db import': dict(do_import=True),
 
 def add_scheme_subparsers(subparsers):
 	scheme = subparsers.add_parser('scheme',
-		help="list the schemes of CanSNPer2-data and build a database from one")
+		help="list the schemes of CanSNPer2-data; get builds one's database")
 	scheme_sub = scheme.add_subparsers(dest='scheme_action', metavar='<action>',
 		required=True)
 
@@ -305,7 +304,7 @@ def add_scheme_subparsers(subparsers):
 
 def add_ref_subparsers(subparsers):
 	ref = subparsers.add_parser('ref',
-		help="fetch the reference genomes a database needs from NCBI")
+		help="get the reference genomes a database needs from NCBI")
 	ref_sub = ref.add_subparsers(dest='ref_action', metavar='<action>',
 		required=True)
 	get = ref_sub.add_parser('get',
@@ -334,14 +333,19 @@ def download_defaults(parser, **mode):
 
 def build_parsers():
 	'''the top-level parser and a dict of every leaf subparser, keyed by its verb
-		names, so a verb gets its own usage and error messages'''
+		names, so a verb gets its own usage and error messages. The main commands
+		are the top of the help and every verb names the subcommands or options it
+		uses, which are shown in detail only in the help of that verb'''
 	parser = argparse.ArgumentParser(
 		prog='cansnper2',
 		description='CanSNPer2 - one command with a verb for every job:\n'
 			'type assemblies against a CanSNP database, build and maintain the\n'
-			'databases, and fetch the schemes and reference genomes they need.\n'
-			'Run cansnper2 <command> --help for the arguments of a command.',
-		epilog=COMMANDS_HELP,
+			'databases, and fetch the schemes and reference genomes they need.',
+		epilog='The commands CanSNPer2, CanSNPer2-database, CanSNPer2-download and\n'
+			'CanSNPer2-test do the same jobs with their old arguments and keep\n'
+			'working; cansnper2 runs the same code with one spelling for the shared\n'
+			'options. Run cansnper2 <command> --help for the arguments of a verb;\n'
+			'examples in README.md.',
 		formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument('--version', action='version',
 		version="CanSNPer2 - version {version}".format(version=__version__))
