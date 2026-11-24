@@ -375,9 +375,10 @@ usage: CanSNPer2 [-h] [-db ] [-o DIR] [--save_tree] [--no_snpfiles]
                  [--samplesheet FILE] [--min_depth MIN_DEPTH]
                  [--min_allele_fraction MIN_ALLELE_FRACTION]
                  [--min_mapq MIN_MAPQ] [--min_baseq MIN_BASEQ]
-                 [--mixed_sites MIXED_SITES] [--threads THREADS]
-                 [--skip_alignment] [--keep_temp] [--tmpdir ] [--logdir ]
-                 [--verbose] [--debug] [--supress]
+                 [--mixed_sites MIXED_SITES] [--local_references]
+                 [--local_rounds LOCAL_ROUNDS] [--screen_reads SCREEN_READS]
+                 [--threads THREADS] [--skip_alignment] [--keep_temp]
+                 [--tmpdir ] [--logdir ] [--verbose] [--debug] [--supress]
                  [query ...]
 
 CanSNPer2 - type query assemblies (or reads) against a CanSNP database
@@ -471,6 +472,18 @@ Read typing options:
   --mixed_sites MIXED_SITES
                         Mixed canSNP sites at which a sample is reported as
                         possibly mixed (default 3)
+  --local_references    After the first round, map the reads again to the
+                        genome of the scheme closest to the sample (chosen
+                        among the representatives below the first call, see
+                        CanSNPer2-download --local_references) and read the
+                        canSNPs at their positions lifted to it
+  --local_rounds LOCAL_ROUNDS
+                        With --local_references: at most this many rounds
+                        against local references (default 2)
+  --screen_reads SCREEN_READS
+                        With --local_references: reads of each file mapped to
+                        the candidate genomes to choose the local reference
+                        (default 100000)
   --threads THREADS     Threads of minimap2 and samtools sort for each
                         reference (default 4)
 
@@ -932,4 +945,41 @@ line names the read thresholds. `<sample>_site_counts.tsv` lists every canSNP wi
 of A, C, G and T, the depth, the fraction of the derived base and its state. `--keep_temp`
 keeps the sorted reads (`<reference>_<sample>.pileup.bam`) and the pileups, and
 `--skip_alignment --tmpdir` types from them again. `--mask` does not apply to reads.
+
+### Local references
+
+Reads map to a reference only where they are close to it: short reads need roughly 95 %
+identity over their length, while an assembly aligns with far less. For a scheme that spans
+a genus and has one reference genome, many canSNPs of the species far from that reference
+get no reads, and the call stops above them. Two *B. anthropi* read sets typed with
+`brucella_genus` (reference *B. melitensis* 16M) had reads at 169 and 171 of its 283 canSNPs,
+and stopped one node above `BR.anthropi`; one of the draft assemblies of the same samples was
+called at `BR.anthropi.1.1.1.1`.
+
+`--local_references` adds rounds against a genome of the scheme closer to the sample:
+
+1. From the call of the first round, the candidates are the representative genomes of the
+   terminal nodes below it (all of them without a call), from the genomes file of the scheme
+   (`CanSNPer2-database --genomes`).
+2. A subsample of the reads (`--screen_reads`, default 100,000 per file) is mapped to all
+   candidates at once, and the genome with the most matched bases is the local reference.
+3. The canSNP positions are lifted from the scheme reference to the local reference by
+   aligning the two genomes with minimap2 (asm20, as assembly typing does); a canSNP is lifted
+   only when the local genome has its ancestral or derived base there. The lift is cached in
+   `<refdir>/local/lift/`. A local genome that carries the ancestral base at more of the
+   lifted canSNPs on the path to its own node than the derived base is not used.
+4. The reads are mapped to the local reference and counted at the lifted positions. Per
+   canSNP, these counts are used when they reach `--min_depth`, otherwise those of the
+   first round. When both reach it and give different bases, the canSNP is a `conflict` and
+   counts as no data.
+5. This repeats from the new call while the chosen genome changes, at most `--local_rounds`
+   times (default 2).
+
+The local genomes are read from `<refdir>/local/<accession>.fna`;
+`CanSNPer2-download --database <db> --outdir <refdir> --local_references` fetches the
+representatives of a scheme. The site count file gives for each canSNP the genome its counts
+came from (`source`) and the lifted position (`lifted_position`, contig:position and strand),
+and the `Reads:` line names the local reference, its node, its share of the screened bases and
+the number of conflicts. When the second genome of the screen has 20 % or more of the
+matched bases, a warning says that the sample may hold more than one strain.
 
