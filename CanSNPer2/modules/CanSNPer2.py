@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, write_sites_bed
 from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
 from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
+from CanSNPer2.modules.LiftOver import lift
+from CanSNPer2.modules.LocalReferences import candidates, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
+from CanSNPer2.modules.ParsePileup import PLATFORMS
+import subprocess
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
@@ -150,6 +154,12 @@ class CanSNPer2(object):
 		self.samplesheet = kwargs.get("samplesheet")
 		self.threads = int(kwargs.get("threads") or 4)
 		self.read_options = {key: kwargs.get(key) for key in ("min_mapq", "min_baseq", "min_depth", "min_allele_fraction")}
+		'''a second round of read typing against the genome of the scheme closest to the sample
+			(LocalReferences): off unless asked for'''
+		self.local_references = bool(kwargs.get("local_references", False))
+		self.local_rounds = int(kwargs.get("local_rounds") or 2)
+		self.screen_reads = int(kwargs.get("screen_reads") or 100000)
+		self.warned_missing_local = False
 		mixed_sites = kwargs.get("mixed_sites")
 		self.mixed_sites = 3 if mixed_sites is None else int(mixed_sites)
 		'''how long one round of alignments (the query against all references, in parallel) may
@@ -1022,6 +1032,107 @@ class CanSNPer2(object):
 			logger.warning("--mask is not used for reads: it leaves out canSNPs near the ends of assembly alignments, while read ends are filtered by base quality")
 		return [sample.files[0] for sample in samples]
 
+	def provisional_call(self, states, called):
+		'''the call of the tree walk for states, without writing anything; "NA" without a call'''
+		result = self.create_tree(states, self.query_name + "_provisional", called, False,
+				min_required_hits=self.min_required_hits, strictness=self.strictness)
+		if isinstance(result, tuple) and result[0] and result[0][2][0]:
+			return result[0][1]
+		return "NA"
+
+	def local_reference_rounds(self, q, site_rows, database):
+		'''Further rounds of a read sample against a local reference (LocalReferences): from the
+			call of the counts so far, the representatives below it are screened with a read
+			subsample, the canSNPs are lifted to the best one, the reads are mapped to it and the
+			counts merged. Repeats while the chosen genome changes, at most local_rounds times.
+			Returns the merged site rows and what was done, {"genome", "node", "share", "rounds"},
+			or None when no round was made.'''
+		sample = self.read_samples[q]
+		mapper = self.aligner
+		done = None
+		chosen = set()
+		cache_dir = os.path.join(self.refdir, LOCAL_FOLDER, "lift")
+		if not os.access(os.path.join(self.refdir, LOCAL_FOLDER), os.W_OK):
+			cache_dir = os.path.join(self.tmpdir, "lift")
+		for round_number in range(1, self.local_rounds + 1):
+			states, _info, called = states_from_rows(site_rows)
+			call = self.provisional_call(states, called)
+			found, missing = candidates(database, call, self.refdir)
+			if missing and not self.warned_missing_local:
+				logger.warning("{n} representative genome(s) of the scheme have no file in {folder} and are not used as local references; "
+					"fetch them with CanSNPer2-download --database {db} --outdir {refdir} --local_references".format(
+					n=len(missing), folder=os.path.join(self.refdir, LOCAL_FOLDER), db=self.database, refdir=self.refdir))
+				self.warned_missing_local = True
+			if not found:
+				logger.info("{s}: no local reference below {call}".format(s=sample.name, call=call))
+				break
+			ranked = screen(sample.files, {c.genome: c.path for c in found}, preset=PLATFORMS[mapper.platform]["preset"],
+					n_reads=self.screen_reads, tmpdir=self.tmpdir, threads=mapper.threads, minimap2=mapper.executable())
+			best = ranked[0]
+			if best[2] == 0:
+				logger.info("{s}: no read of the screen mapped to the local references below {call}".format(s=sample.name, call=call))
+				break
+			local = next(c for c in found if c.genome == best[0])
+			if local.genome in chosen:
+				break
+			chosen.add(local.genome)
+			if len(ranked) > 1 and ranked[1][1] >= 0.2:
+				logger.warning("{s}: the screen gave {a} {pa:.0%} and {b} {pb:.0%} of the matched bases; the sample may hold more than one strain".format(
+						s=sample.name, a=ranked[0][0], pa=ranked[0][1], b=ranked[1][0], pb=ranked[1][1]))
+			lifts = {}
+			for ref in self.get_references():
+				ref_name = ref.rsplit(".", 1)[0]
+				snps = self.reference_snps.get(ref_name, [])
+				if snps:
+					lifts[ref_name] = lift(os.path.join(self.refdir, ref), local.path, snps, cache_dir, self.tmpdir)
+			if not self.local_reference_fits(database, local, lifts):
+				logger.warning("{s}: the canSNP bases of {g} do not type it to its own node {n}, it is not used as local reference".format(
+						s=sample.name, g=local.genome, n=local.node))
+				break
+			output = os.path.join(self.tmpdir, "{g}_{s}.local{r}.pileup".format(g=local.genome, s=sample.name, r=round_number))
+			sites = [(snp_id, lf.contig, lf.position, "", "") for lifted in lifts.values() for snp_id, lf in lifted.items()]
+			write_sites_bed(output + ".sites.bed", sites)
+			if not (self.skip_alignment and os.path.isfile(output)):
+				with open(os.path.join(self.logdir, "{g}_{s}.local.log".format(g=local.genome, s=sample.name)), "w") as log:
+					status = subprocess.run(mapper.command(local.path, sample.files, output), stdout=log, stderr=STDOUT).returncode
+				if status != 0:
+					raise CanSNPer2Error("mapping the reads of {s} to the local reference {g} failed (exit code {c}), see the log in {logdir}".format(
+							s=sample.name, g=local.genome, c=status, logdir=self.logdir))
+			second = []
+			for ref_name, lifted in lifts.items():
+				reader = mapper.reader(database=database, lift=lifted, source=local.genome)
+				reader.counts_file = output + "." + ref_name + ".counts"
+				reader.run(output, reference=ref_name)
+				second.extend(read_site_counts(reader.counts_file))
+			site_rows = merge_counts(site_rows, second, mapper.setting("min_depth"))
+			done = {"genome": local.genome, "node": local.node, "share": best[1], "rounds": round_number}
+			logger.info("{s}: round {r} against the local reference {g} ({n}), {share:.0%} of the screened bases".format(
+					s=sample.name, r=round_number + 1, g=local.genome, n=local.node, share=best[1]))
+		return site_rows, done
+
+	def local_reference_fits(self, database, local, lifts):
+		'''True when the local genome carries the derived base at more of the lifted canSNPs on the
+			path from the root to its own node than the ancestral base: a genome on another branch
+			than its place in the scheme (a wrong accession, a mislabelled genome) would carry the
+			reads to wrong bases. A tree call of its bases is not enough: a short path gives no
+			call, and no call cannot tell a wrong genome from a right one'''
+		path = set(node_path(database, local.node))
+		derived = ancestral = 0
+		for lifted in lifts.values():
+			for snp_id, lf in lifted.items():
+				if snp_id in path:
+					if lf.base == self.derived_base(snp_id):
+						derived += 1
+					else:
+						ancestral += 1
+		return derived > ancestral
+
+	def derived_base(self, snp_id):
+		'''the derived base of a typed canSNP'''
+		if not hasattr(self, "_derived"):
+			self._derived = {row[0]: row[4] for rows in self.reference_snps.values() for row in rows}
+		return self._derived.get(snp_id)
+
 	def collect_site_counts(self, alignment_files):
 		'''the site count rows of a read sample, from the .counts file the reader wrote next to
 			each pileup'''
@@ -1130,6 +1241,8 @@ class CanSNPer2(object):
 		if isinstance(self.aligner, ReadMapper):
 			'''read thresholds change the call as much as the others'''
 			line += " " + self.aligner.settings()
+			if self.local_references:
+				line += " local_references=on local_rounds={n}".format(n=self.local_rounds)
 		return line
 
 	def run_info(self):
@@ -1381,6 +1494,12 @@ class CanSNPer2(object):
 					'''reads: the counts of every canSNP site, and the sites where no base reached the
 						allele fraction, which suggest more than one strain in the sample'''
 					site_rows = self.collect_site_counts(alignment_files) if self.is_read(q) else None
+					local_done = None
+					if site_rows is not None and self.local_references:
+						'''further rounds against the genome of the scheme closest to the sample'''
+						site_rows, local_done = self.local_reference_rounds(q, site_rows, database)
+						if local_done:
+							SNPS, SNP_info, called_snps = states_from_rows(site_rows)
 					mixed = [row["Name"] for row in site_rows if row["state"] == "mixed"] if site_rows is not None else []
 					reads_line = None
 					if site_rows is not None:
@@ -1390,6 +1509,11 @@ class CanSNPer2(object):
 						reads_line = "Reads: platform={p} files={n} sites_with_reads={k}/{t} median_depth={d:g} mixed_sites={m}".format(
 								p=self.read_samples[q].platform, n=len(self.query_files(q)), k=len(depths), t=len(site_rows),
 								d=statistics.median(depths) if depths else 0, m=len(mixed))
+						if self.local_references:
+							conflicts = sum(1 for row in site_rows if row["state"] == "conflict")
+							reads_line += (" local_reference={g} local_node={n} screen_share={s:.2f} local_rounds={r} conflicts={c}".format(
+									g=local_done["genome"], n=local_done["node"], s=local_done["share"], r=local_done["rounds"], c=conflicts)
+									if local_done else " local_reference=none")
 						if self.export:
 							with open(self.sample_output(self.query_name, "_site_counts.tsv"), "w") as counts_out:
 								print("\t".join(SITE_COUNT_COLUMNS), file=counts_out)

@@ -183,3 +183,22 @@ def screen(read_files, genomes, preset, n_reads, tmpdir, threads=2, minimap2="mi
 	os.remove(reads)
 	total = sum(score.values()) or 1
 	return sorted(((g, s / total, s) for g, s in score.items()), key=lambda t: -t[2])
+
+
+def node_path(database, node):
+	'''the names of the nodes from the root down to node, node included; [] for a node not in
+		the tree'''
+	conn = sqlite3.connect(str(database))
+	try:
+		names = dict(conn.execute("SELECT id, name FROM nodes"))
+		parent = {child: par for par, child in conn.execute("SELECT parent, child FROM tree WHERE parent != child")}
+	finally:
+		conn.close()
+	ids = {name: i for i, name in names.items()}
+	if node not in ids:
+		return []
+	path, i = [], ids[node]
+	while i is not None:
+		path.append(names[i])
+		i = parent.get(i)
+	return path[::-1]

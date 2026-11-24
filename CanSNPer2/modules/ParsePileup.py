@@ -132,7 +132,7 @@ class PileupReader(AlignmentReader):
 
 	def read_alignment(self, path):
 		'''the base counts of the canSNP positions, in observations {(sequence, position): counts}'''
-		self.counts_path = path + ".counts"
+		self.counts_path = getattr(self, "counts_file", None) or path + ".counts"
 		lifted = {}
 		if self.lift is not None:
 			by_id = {snp_id: key for key, (_a, _d, snp_id) in self.snplist.items()}

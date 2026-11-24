@@ -163,6 +163,9 @@ def command():
 	read_options.add_argument('--min_mapq',		type=non_negative_int, default=None,	help="Minimum mapping quality of a read (default 20)")
 	read_options.add_argument('--min_baseq',		type=non_negative_int, default=None,	help="Minimum base quality (default: illumina 20, ont 10, hifi 20)")
 	read_options.add_argument('--mixed_sites',	type=positive_int, default=3,			help="Mixed canSNP sites at which a sample is reported as possibly mixed (default 3)")
+	read_options.add_argument('--local_references', action='store_true',				help="After the first round, map the reads again to the genome of the scheme closest to the sample (chosen among the representatives below the first call, see CanSNPer2-download --local_references) and read the canSNPs at their positions lifted to it")
+	read_options.add_argument('--local_rounds',	type=positive_int, default=2,			help="With --local_references: at most this many rounds against local references (default 2)")
+	read_options.add_argument('--screen_reads',	type=positive_int, default=100000,		help="With --local_references: reads of each file mapped to the candidate genomes to choose the local reference (default 100000)")
 	read_options.add_argument('--threads',		type=positive_int, default=4,			help="Threads of minimap2 and samtools sort for each reference (default 4)")
 
 	'''Remove the two below when script is complete, possibly keep as hidden for debug'''
@@ -302,7 +305,10 @@ def command():
 									min_mapq=args.min_mapq,
 									min_baseq=args.min_baseq,
 									mixed_sites=args.mixed_sites,
-									threads=args.threads
+									threads=args.threads,
+									local_references=args.local_references,
+									local_rounds=args.local_rounds,
+									screen_reads=args.screen_reads
 		)
 	except CanSNPer2Error as e:
 		logger.error(e.value) ## an unusable output, log or tmp folder is reported before anything is aligned
