@@ -91,6 +91,19 @@ def test_paired_reads_are_typed_like_the_genome(tmp_path, capsys):
 	out = tmp_path / "out" / "samples"
 	header = comments(out / "sa_snps.txt")
 	assert any(line.startswith("Reads: ") and "platform=illumina" in line and "mixed_sites=0" in line for line in header)
+	reads_line = [line for line in header if line.startswith("Reads: ")][0]
+	assert "sites_with_reads=6/6" in reads_line
+
+
+def test_the_median_depth_counts_only_sites_with_reads(tmp_path):
+	# reads of the first half of the genome only: the B sites (11-17 kb) get none
+	db, a, _ = make_scheme(tmp_path)
+	obj = run(tmp_path, write_pair(tmp_path, "half", [(a[:10000], 30, 15)]), db=db)
+	header = comments(tmp_path / "out" / "samples" / "half_snps.txt")
+	reads_line = [line for line in header if line.startswith("Reads: ")][0]
+	assert "sites_with_reads=3/6" in reads_line
+	depth = int(reads_line.split("median_depth=")[1].split()[0])
+	assert depth >= 15, "the median of the three sites with reads, not of all six"
 	assert any("platform=illumina min_depth=5" in line for line in header if line.startswith("Typing settings:"))
 	rows = read_site_counts(str(out / "sa_site_counts.tsv"))
 	assert {r["Name"]: r["state"] for r in rows} == {"A.1": "derived", "A.2": "derived", "A.3": "derived",

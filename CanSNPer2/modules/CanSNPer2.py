@@ -1384,9 +1384,11 @@ class CanSNPer2(object):
 					mixed = [row["Name"] for row in site_rows if row["state"] == "mixed"] if site_rows is not None else []
 					reads_line = None
 					if site_rows is not None:
-						depths = [int(row["depth"]) for row in site_rows]
-						reads_line = "Reads: platform={p} files={n} median_depth={d:g} mixed_sites={m}".format(
-								p=self.read_samples[q].platform, n=len(self.query_files(q)),
+						'''the median depth is over the sites with reads: with a distant reference many
+							sites have none, and a median over all of them hid the depth of the rest'''
+						depths = [int(row["depth"]) for row in site_rows if int(row["depth"]) > 0]
+						reads_line = "Reads: platform={p} files={n} sites_with_reads={k}/{t} median_depth={d:g} mixed_sites={m}".format(
+								p=self.read_samples[q].platform, n=len(self.query_files(q)), k=len(depths), t=len(site_rows),
 								d=statistics.median(depths) if depths else 0, m=len(mixed))
 						if self.export:
 							with open(self.sample_output(self.query_name, "_site_counts.tsv"), "w") as counts_out:

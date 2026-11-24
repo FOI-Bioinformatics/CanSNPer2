@@ -907,7 +907,8 @@ from repeated regions can also make a site mixed.
 
 **Output.** The result files have the columns of assembly typing, with `QuerySeq` `reads`
 and `QueryPosition` the read depth. `<sample>_snps.txt` has the extra comment line
-`Reads: platform=... files=... median_depth=... mixed_sites=...`, and the typing settings
+`Reads: platform=... files=... sites_with_reads=... median_depth=... mixed_sites=...` (the median
+depth is over the canSNP sites that have reads), and the typing settings
 line names the read thresholds. `<sample>_site_counts.tsv` lists every canSNP with its counts
 of A, C, G and T, the depth, the fraction of the derived base and its state. `--keep_temp`
 keeps the sorted reads (`<reference>_<sample>.pileup.bam`) and the pileups, and
