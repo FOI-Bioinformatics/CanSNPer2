@@ -46,10 +46,11 @@ PLATFORMS = {
 DEFAULT_PLATFORM = "illumina"
 
 SITE_COUNT_COLUMNS = ["Name", "Reference", "Sequence", "Pos", "Ancestral base", "Derived base",
-	"A", "C", "G", "T", "depth", "fraction_derived", "state"]
+	"A", "C", "G", "T", "depth", "fraction_derived", "state", "source", "lifted_position"]
 
 STATES = {"derived": DERIVED, "ancestral": ANCESTRAL, "other_base": OTHER_BASE,
-	"mixed": NO_DATA, "low_depth": NO_DATA, "no_reads": NO_DATA}
+	"mixed": NO_DATA, "low_depth": NO_DATA, "no_reads": NO_DATA, "not_lifted": NO_DATA, "conflict": NO_DATA}
+COMPLEMENT = {"A": "T", "C": "G", "G": "C", "T": "A"}
 
 
 def parse_bases(column, ref="N"):
@@ -113,10 +114,16 @@ def read_site_counts(path):
 class PileupReader(AlignmentReader):
 	'''Reader of samtools mpileup output (one sample, without -f or with it); the reference
 		sequence and the 1-based position of each line are the database coordinates'''
-	def __init__(self, verbose=False, min_depth=5, min_allele_fraction=0.8, **kwargs):
+	def __init__(self, verbose=False, min_depth=5, min_allele_fraction=0.8, lift=None, source=None, **kwargs):
+		'''lift: {snp_id: LiftOver.Lifted} when the reads were mapped to a local reference: the
+			pileup is then on the contigs of that genome and is read at the lifted positions, the
+			counts of a canSNP lifted to the "-" strand complemented. source: the genome the reads
+			were mapped to, for the site count rows (default: the reference)'''
 		super(PileupReader, self).__init__(verbose=verbose, **kwargs)
 		self.min_depth = int(min_depth)
 		self.min_allele_fraction = float(min_allele_fraction)
+		self.lift = lift
+		self.source = source
 
 	def _reset(self):
 		super(PileupReader, self)._reset()
@@ -126,6 +133,10 @@ class PileupReader(AlignmentReader):
 	def read_alignment(self, path):
 		'''the base counts of the canSNP positions, in observations {(sequence, position): counts}'''
 		self.counts_path = path + ".counts"
+		lifted = {}
+		if self.lift is not None:
+			by_id = {snp_id: key for key, (_a, _d, snp_id) in self.snplist.items()}
+			lifted = {(lf.contig, lf.position): (by_id[snp_id], lf.strand) for snp_id, lf in self.lift.items() if snp_id in by_id}
 		with open(path) as fin:
 			for number, line in enumerate(fin, 1):
 				if not line.strip():
@@ -135,6 +146,16 @@ class PileupReader(AlignmentReader):
 					raise ValueError("{path} line {n} is not samtools mpileup output (sequence, position, reference base, depth, bases, qualities): {line}".format(
 							path=path, n=number, line=line.strip()[:80]))
 				sequence = fields[0]
+				if self.lift is not None:
+					site = lifted.get((sequence, int(fields[1])))
+					if site is None:
+						continue
+					key, strand = site
+					counts = parse_bases(fields[4] if len(fields) > 4 else "", fields[2])
+					if strand == "-":
+						counts = {COMPLEMENT[b]: n for b, n in counts.items()}
+					self.observations[key] = counts
+					continue
 				if sequence not in self.snp_positions:
 					self.unknown_sequences.add(sequence)
 					continue
@@ -148,13 +169,21 @@ class PileupReader(AlignmentReader):
 			assembly, from the base counts; every canSNP of the reference goes into the site
 			count file, also those the pileup has no line for'''
 		site_rows = []
+		source = self.source or self.reference
 		for key in sorted(self.snplist):
 			sequence, position = key
 			ancestral, derived, snp_id = self.snplist[key]
 			counts = self.observations.get(key, dict.fromkeys(BASES, 0))
 			label, state, base, depth, fraction = classify_counts(counts, ancestral, derived, self.min_depth, self.min_allele_fraction)
+			lifted = ""
+			if self.lift is not None:
+				lf = self.lift.get(snp_id)
+				if lf is None:
+					label = "not_lifted"
+				else:
+					lifted = "{c}:{p}{s}".format(c=lf.contig, p=lf.position, s=lf.strand)
 			site_rows.append([snp_id, self.reference, sequence, str(position), ancestral, derived] +
-					[str(counts[b]) for b in BASES] + [str(depth), "{0:.2f}".format(fraction), label])
+					[str(counts[b]) for b in BASES] + [str(depth), "{0:.2f}".format(fraction), label, source, lifted])
 			if label == "mixed":
 				self.mixed_sites.append(snp_id)
 			if depth == 0:
