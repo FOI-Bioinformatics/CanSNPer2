@@ -994,3 +994,29 @@ came from (`source`) and the lifted position (`lifted_position`, contig:position
 and the `Reads:` line names the local reference, its node, its share of the screened bases at
 the last screen, the number of screens and the number of conflicts.
 
+**Evaluation.** The nine *Brucella* genomes of the evaluation above whose 50x Illumina reads
+missed their assembly call against 16M (all outside the classical cluster) were typed again
+with `--local_references`; when a genome was itself a representative (five of them), it was
+taken out of the local references, so that the sample was not mapped to its own genome. The
+other four are members of a representative at 99 % average nucleotide identity or closer.
+
+| genome | assembly call | 16M only | with local references |
+|---|---|---|---|
+| GCA_039674445.1 | `BR.chromiisoli` | NA | `BR.chromiisoli` |
+| GCF_026256505.1 | `BR.intermedia.1.4` | NA | `BR.intermedia.1.4` |
+| GCA_031999685.1 | `BR.intermedia.1.1.1` | `BR.1.1.1.1.1.1` | `BR.intermedia.1.1.1` |
+| GCF_000182645.1 (held out) | `BR.intermedia.1.3.1` | NA | `BR.intermedia.1.3.1` |
+| GCF_008932555.1 | `BR.intermedia` | NA | `BR.intermedia` |
+| GCA_008932375.1 (held out) | `BR.haematophila` | `BR.1.1.1.1.1.2` | `BR.haematophila` |
+| GCF_003664555.1 (held out) | `BR.teleogrylli.1.1` | `BR.1.1.1.1.1.2` | `BR.teleogrylli` |
+| GCA_018798825.1 (held out) | `BR.sp018798825` | NA | `BR.sp018798825` |
+| GCF_003049685.1 (held out) | `BR.pituitosa.1.1.2` | NA | `BR.pituitosa.1.1.2` |
+
+Eight reached the assembly call and one stopped a node above it; none was called on another
+branch. The canSNPs with reads rose from 60-158 to 175-259 of 283. The counts of the first
+round chose the local reference in eight samples without a screen; one needed three screens.
+One sample (*B. pituitosa*) went first to a genome of another species and reached its own in
+a second round. The two refbio *B. anthropi* read sets (B_iv_02, B_iv_04) went from one node
+above `BR.anthropi` to `BR.anthropi.1.1.1.1`, the call of the draft assembly of B_iv_02, with
+one local round each.
+
