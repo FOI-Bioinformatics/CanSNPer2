@@ -36,7 +36,7 @@ def test_quality_thresholds_follow_the_platform_unless_given():
 
 def test_reader_thresholds_follow_the_platform_unless_given():
 	r = ReadMapper(platform="ont").reader()
-	assert isinstance(r, PileupReader) and (r.min_depth, r.min_allele_fraction) == (10, 0.7)
+	assert isinstance(r, PileupReader) and (r.min_depth, r.min_allele_fraction) == (5, 0.7)
 	r = ReadMapper(platform="ont", min_depth=3, min_allele_fraction=0.9).reader()
 	assert (r.min_depth, r.min_allele_fraction) == (3, 0.9)
 

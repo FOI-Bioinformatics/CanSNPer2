@@ -143,7 +143,7 @@ def test_long_reads_from_a_samplesheet(tmp_path):
 	obj = run(tmp_path, [], db=db, samplesheet=str(sheet))
 	assert obj.typed == {"lr": "B.3"}
 	settings = [l for l in comments(tmp_path / "out" / "samples" / "lr_snps.txt") if l.startswith("Typing settings:")]
-	assert "platform=ont min_depth=10 min_allele_fraction=0.7" in settings[0]
+	assert "platform=ont min_depth=5 min_allele_fraction=0.7" in settings[0]
 
 
 def test_alignments_are_kept_and_read_again(tmp_path):

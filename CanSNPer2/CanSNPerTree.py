@@ -158,7 +158,7 @@ def command():
 	read_options = parser.add_argument_group("Read typing options", "Used when the queries are sequencing reads: minimap2 maps them to each reference and samtools mpileup counts the bases at the canSNP positions. Thresholds not given take the defaults of --platform")
 	read_options.add_argument('--platform',		choices=sorted(PLATFORMS), default=DEFAULT_PLATFORM,	help="Sequencing platform of the reads: illumina (short reads, paired or single), ont or hifi (default illumina)")
 	read_options.add_argument('--samplesheet',	metavar='FILE', default=None,			help="Tab separated file with the header sample, reads1 and optionally reads2 and platform, one sample per row; instead of query arguments")
-	read_options.add_argument('--min_depth',		type=positive_int, default=None,		help="Reads needed at a canSNP for a call (default: illumina 5, ont 10, hifi 5)")
+	read_options.add_argument('--min_depth',		type=positive_int, default=None,		help="Reads needed at a canSNP for a call (default: illumina 5, ont 5, hifi 5)")
 	read_options.add_argument('--min_allele_fraction', type=fraction, default=None,		help="Fraction of the reads that must carry a base for the canSNP to be called as that base; below it the site is mixed and counts as no data (default: illumina 0.8, ont 0.7, hifi 0.8)")
 	read_options.add_argument('--min_mapq',		type=non_negative_int, default=None,	help="Minimum mapping quality of a read (default 20)")
 	read_options.add_argument('--min_baseq',		type=non_negative_int, default=None,	help="Minimum base quality (default: illumina 20, ont 10, hifi 20)")

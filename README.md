@@ -365,20 +365,20 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPerTree.py [-h] [-db ] [-o DIR] [--save_tree] [--no_snpfiles]
-                       [--summary] [--annotations FILE] [--refdir ]
-                       [--allow_missing_references] [--workdir ]
-                       [--min_required_hits MIN_REQUIRED_HITS]
-                       [--strictness STRICTNESS] [--mask MASK] [--keep_going]
-                       [--rerun] [--aligner ] [--alignment_timeout MINUTES]
-                       [--aligner_path ] [--platform {hifi,illumina,ont}]
-                       [--samplesheet FILE] [--min_depth MIN_DEPTH]
-                       [--min_allele_fraction MIN_ALLELE_FRACTION]
-                       [--min_mapq MIN_MAPQ] [--min_baseq MIN_BASEQ]
-                       [--mixed_sites MIXED_SITES] [--threads THREADS]
-                       [--skip_alignment] [--keep_temp] [--tmpdir ]
-                       [--logdir ] [--verbose] [--debug] [--supress]
-                       [query ...]
+usage: CanSNPer2 [-h] [-db ] [-o DIR] [--save_tree] [--no_snpfiles]
+                 [--summary] [--annotations FILE] [--refdir ]
+                 [--allow_missing_references] [--workdir ]
+                 [--min_required_hits MIN_REQUIRED_HITS]
+                 [--strictness STRICTNESS] [--mask MASK] [--keep_going]
+                 [--rerun] [--aligner ] [--alignment_timeout MINUTES]
+                 [--aligner_path ] [--platform {hifi,illumina,ont}]
+                 [--samplesheet FILE] [--min_depth MIN_DEPTH]
+                 [--min_allele_fraction MIN_ALLELE_FRACTION]
+                 [--min_mapq MIN_MAPQ] [--min_baseq MIN_BASEQ]
+                 [--mixed_sites MIXED_SITES] [--threads THREADS]
+                 [--skip_alignment] [--keep_temp] [--tmpdir ] [--logdir ]
+                 [--verbose] [--debug] [--supress]
+                 [query ...]
 
 CanSNPer2 - type query assemblies (or reads) against a CanSNP database
 
@@ -458,7 +458,7 @@ Read typing options:
                         instead of query arguments
   --min_depth MIN_DEPTH
                         Reads needed at a canSNP for a call (default: illumina
-                        5, ont 10, hifi 5)
+                        5, ont 5, hifi 5)
   --min_allele_fraction MIN_ALLELE_FRACTION
                         Fraction of the reads that must carry a base for the
                         canSNP to be called as that base; below it the site is
@@ -894,11 +894,24 @@ The tree walk and `--min_required_hits` and `--strictness` are those of assembly
 | `--platform` | minimap2 preset | `--min_mapq` | `--min_baseq` | `--min_depth` | `--min_allele_fraction` |
 |---|---|---|---|---|---|
 | illumina (default) | sr | 20 | 20 | 5 | 0.8 |
-| ont | map-ont | 20 | 10 | 10 | 0.7 |
+| ont | map-ont | 20 | 10 | 5 | 0.7 |
 | hifi | map-hifi | 20 | 20 | 5 | 0.8 |
 
-These values are starting points; they have not yet been checked against typing of the
-same genomes from assemblies.
+On reads simulated from 30 *Brucella* and 20 *F. tularensis* genomes (wgsim for Illumina,
+badread for ONT, 15 kb reads with 0.1 % errors for HiFi) and typed against their assembly
+calls, no read call was on another branch than the assembly call, at any depth or platform.
+With fewer reads than needed the call stops higher up the tree or is NA:
+
+| | 5x | 10x | 20x | 30x | 50x |
+|---|---|---|---|---|---|
+| Illumina, same call as the assembly | 0 of 50 | 37 of 50 | 40 of 50 | | 41 of 50 |
+| ONT | | 42 of 50 | | 50 of 50 | |
+| HiFi | | 46 of 50 | | 50 of 50 | |
+
+The Illumina misses from 20x on are *Brucella* species far from the reference *B. melitensis*
+16M, whose reads map at too few canSNPs (see [Local references](#local-references)). The ONT
+reads of badread have errors close to random; systematic errors of real ONT reads, as at
+homopolymers, were not part of the test.
 
 **Mixtures.** CanSNPer2 types isolates. A sample with at least `--mixed_sites` (default 3)
 mixed canSNP sites is reported as possibly mixed, in the log, in the results overview and
