@@ -185,8 +185,14 @@ class CanSNPer2(object):
 		self.refdir = os.path.join(self.workdir, self.refdir)
 
 		'''Fetch other key word arguments'''
-		'''the tree is written unless it is turned off, as --no_save_tree does (issue #78)'''
-		self.save_tree = kwargs.get("save_tree",True)
+		'''the per-sample tree page is off by default since the results overview (summary.html)
+			carries the tree of every sample; --save_tree writes them again on request'''
+		self.save_tree = kwargs.get("save_tree",False)
+		'''per-sample files (result tables, tree pages) go into a samples subfolder so that
+			summary.html is the one file that greets you in --outdir (the default --outdir is
+			itself called results, so the folder under it is not); the folder is created
+			lazily, a run whose samples all fail leaves no empty folder behind'''
+		self.results_dir = "{outdir}/samples".format(outdir=self.outdir)
 		'''tree annotations for the html views: a file path (load_annotations parses it) or
 			an already built list of {node, kind, rank, label} dicts. A file that cannot be read
 			must not leave the run directory made above behind.'''
@@ -661,17 +667,21 @@ class CanSNPer2(object):
 
 	'''Functions'''
 
-	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False, snp_info=None):
+	def create_tree(self,SNPS,name,called_snps,save_tree,min_required_hits,strictness=0.7, summary=False, snp_info=None, outdir=None):
 		'''This function colors the SNP tree of the database with the SNPS found in the query and
 			writes the self-contained html viewer of it (NewickTree.draw_tree)
 		'''
-		newickTree = NewickTree(self.database,name,self.outdir,min_required_hits=min_required_hits, strictness=strictness)
+		outdir = outdir or self.outdir
+		if save_tree and not os.path.isdir(outdir):
+			os.makedirs(outdir, exist_ok=True)
+		newickTree = NewickTree(self.database,name,outdir,min_required_hits=min_required_hits, strictness=strictness)
 		try:
 			final_snp = newickTree.draw_tree(SNPS,called_snps,save_tree,summary=summary,annotations=self.annotations,
 					snp_info=snp_info,run_info=self.run_info())
 		finally:
 			newickTree.close()
-		logger.info("{outdir}/{name}_tree.html".format(outdir =self.outdir, name=name))
+		if save_tree:
+			logger.info("{outdir}/{name}_tree.html".format(outdir=outdir, name=name))
 		return final_snp
 
 	def is_list_file(self,path):
@@ -928,6 +938,18 @@ class CanSNPer2(object):
 		'''the sample name of a query file: its file name without the last extension'''
 		return os.path.basename(path).rsplit(".",1)[0]
 
+	def sample_output(self, name, suffix):
+		'''path of a per-sample output inside the samples subfolder of --outdir; the folder
+			is created here, when the first file actually goes in'''
+		path = "{results}/{name}{suffix}".format(results=self.results_dir, name=name, suffix=suffix)
+		if not os.path.isdir(self.results_dir):
+			os.makedirs(self.results_dir, exist_ok=True)
+		return path
+
+	def sample_output_exists(self, name, suffix):
+		'''existence check without creating anything (reuse detection)'''
+		return os.path.exists("{results}/{name}{suffix}".format(results=self.results_dir, name=name, suffix=suffix))
+
 	def check_sample_names(self, queries):
 		'''Every result file, alignment and summary row is named after the sample, so two
 			different query files with the same file name (a/x.fasta and b/x.fasta) were typed as
@@ -1084,7 +1106,7 @@ class CanSNPer2(object):
 			for q in self.query:
 				name = self.sample_name(q)
 				if name in self.reused:
-					resultfile = "{outdir}/{name}_snps.txt".format(outdir=self.outdir,name=name)
+					resultfile = self.sample_output(name, "_snps.txt")
 					final_snp,snp_path = self.read_result_file(resultfile)
 					support = self.read_result_support(resultfile)
 				else:
@@ -1159,7 +1181,7 @@ class CanSNPer2(object):
 			self.check_start()
 			'''the aligner is checked only when a sample will be aligned: a run whose samples all have a
 				result from an earlier run (made again for a summary, for example) needs no aligner'''
-			if self.rerun or any(not os.path.exists(os.path.join(self.outdir, "{name}_snps.txt".format(name=self.sample_name(q)))) for q in self.query):
+			if self.rerun or any(not self.sample_output_exists(self.sample_name(q), "_snps.txt") for q in self.query):
 				self.check_aligner()
 
 			'''Main function of CanSNPer2
@@ -1187,7 +1209,7 @@ class CanSNPer2(object):
 					if not os.path.exists(q):
 						raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
 
-					outputfile = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
+					outputfile = self.sample_output(self.query_name, "_snps.txt")
 					self.query_sha256 = self.file_sha256(q)
 					if os.path.exists(outputfile) and not self.rerun:
 						'''a result is only used again when it was made from the same input: the
@@ -1256,13 +1278,13 @@ class CanSNPer2(object):
 					'''If file export is requested the result of each SNP position is written to the two
 						result files after the call; the rows of the called SNPs are collected here'''
 					if self.export:
-						outputfile = "{outdir}/{xmfa}_not_called.txt".format(outdir=self.outdir,xmfa=self.query_name)
-						outputfile2 = "{outdir}/{xmfa}_snps.txt".format(outdir=self.outdir,xmfa=self.query_name)
+						outputfile = self.sample_output(self.query_name, "_not_called.txt")
+						outputfile2 = self.sample_output(self.query_name, "_snps.txt")
 						self.csnpdict = {snp[0]: snp for snp in SNP_info if snp[0] in called_snps}
 
 					'''Color the tree with the states of the sample and call the final SNP'''
 					SNP = "NA" ## Default message if SNP cannot be confirmed
-					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness,snp_info=SNP_info)
+					tree_result = self.create_tree(SNPS,self.query_name,called_snps,self.save_tree,min_required_hits=self.min_required_hits,strictness=self.strictness,snp_info=SNP_info,outdir=self.results_dir)
 					if not isinstance(tree_result, tuple):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
 						tree_result = (False,"No SNP call was produced.",[],[])
 					final_snp,message,called,no_data_snps = tree_result

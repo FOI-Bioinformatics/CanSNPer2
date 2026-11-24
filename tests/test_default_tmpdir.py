@@ -42,7 +42,7 @@ def test_an_unwritable_default_folder_falls_back_to_the_output_folder(tmp_path):
 	finally:
 		locked.chmod(0o700)
 	assert result.returncode == 0, result.stdout + result.stderr
-	assert os.path.exists(tmp_path / "out" / "sample_snps.txt")
+	assert os.path.exists(tmp_path / "out" / "samples" / "sample_snps.txt")
 	assert "trying another location" in result.stderr
 
 

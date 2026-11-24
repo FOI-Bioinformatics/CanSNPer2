@@ -367,7 +367,7 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--no_save_tree] [--no_snpfiles]
+usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
                  [--summary] [--annotations FILE] [--refdir]
                  [--allow_missing_references] [--workdir] [--read_input]
                  [--min_required_hits MIN_REQUIRED_HITS]
@@ -390,10 +390,12 @@ Required arguments:
 
 Output options:
   -o DIR, --outdir DIR  Output directory
-  --no_save_tree        Do not write the tree of each sample as
-                        <sample>_tree.html (it is written by default)
-  --no_snpfiles         Do not write the result files (<sample>_snps.txt,
-                        <sample>_not_called.txt); the call is still printed
+  --save_tree           Also write a standalone tree page per sample as
+                        samples/<sample>_tree.html (the results overview
+                        already shows every sample's tree)
+  --no_snpfiles         Do not write the per-sample result files
+                        (samples/<sample>_snps.txt,
+                        samples/<sample>_not_called.txt); the call is still printed
   --summary             Output a summary file and tree with all called SNPs
                         not affected by no_snpfiles
   --annotations FILE    TSV file annotating tree nodes: <snp name>
@@ -496,7 +498,8 @@ sample, with `--keep_going`) with a message naming the file.
 ### Sample and sequence names
 
 A sample is named after its file name without the extension (`a/x.fasta` gives `x`), and
-its results are written as `<outdir>/x_snps.txt` and `<outdir>/x_not_called.txt`. Two
+its results are written as `<outdir>/samples/x_snps.txt` and
+`<outdir>/samples/x_not_called.txt`. Two
 different files with the same name in one run stop the run before anything is aligned;
 rename one or type them into separate `--outdir`. The same file given twice is typed once.
 
@@ -547,7 +550,9 @@ the path lists all called SNPs.
 
 ### Output files
 
-Each sample gives these files in `--outdir`:
+`summary.html` sits directly in `--outdir`, the one file to open; everything a run writes
+per sample goes into `--outdir/samples/`, created when the first sample needs it. Each
+sample gives these files there:
 
 - `x_snps.txt`: the table of called SNPs (a header row and one row per SNP), followed by
   `#` comment lines:
@@ -566,7 +571,7 @@ Each sample gives these files in `--outdir`:
 - `x_not_called.txt`: the same columns for the SNP positions that were not called, and for
   the positions without alignment data (`Target base` `N/A`), followed by the
   `# Query file:` and `# Typing settings:` lines.
-- `x_tree.html` (unless `--no_save_tree`): the tree of the database painted with the states of the
+- `x_tree.html` (only with `--save_tree`): the tree of the database painted with the states of the
   sample. The header names the sample, the scheme, the final SNP and its support, and the
   run (CanSNPer2 version, aligner, settings, database and its SHA-256, reference genomes,
   date). The SNP path is listed next to the tree, from the root to the final SNP, with the
@@ -594,9 +599,16 @@ Every run with queries writes `summary.html`, the results overview, and `--summa
   - `failed`: the alignment or the processing of the sample failed;
   - `reused`: the result was read from an earlier run (`--rerun` computes it again).
 
-  Samples that need a look are listed first. Selecting a sample paints the tree with its
-  states and shows its SNP path, the reasons for its status, links to its result files and
-  the labels that `--annotations` gives the final SNP. In the tree, derived SNPs are green,
+   Samples that need a look are listed first. The page opens on a support overview of the
+   whole run: every sample's SNP path drawn on the tree at once, the edge to a node and the
+   node itself growing with the number of paths running through it, `×N` counts at the names
+   and the final SNPs with their counts in the collapsible detail - where the genomes of the
+   run ended up. Two filter boxes narrow the table, by sample name and by any SNP in a
+   sample's SNP path (also a SNP without alignment data, e.g. `B.33`); the Overview button
+   returns to the joint view. Clicking a sample paints the tree with its
+   states and shows its SNP path, the reasons for its status, links to its result files in
+   `samples/` and the labels that `--annotations` gives the final SNP; the side sections
+   start collapsed and open by hand. In the tree, derived SNPs are green,
   ancestral SNPs grey, another base blue, a position without alignment data an open circle,
   and a SNP that was not tested (a reused result) a small open circle; the SNP path is drawn
   as a thick green line and an amber ring marks a SNP near an alignment edge. "Download

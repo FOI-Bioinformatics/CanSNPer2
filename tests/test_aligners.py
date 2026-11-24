@@ -146,12 +146,12 @@ def test_result_columns(tmp_path):
 		"Ancestral base", "Derived base", "Target base", "Edge flag"]
 	obj, db, query = toy_case(tmp_path, export=True, min_required_hits=1)
 	obj.run(database=db)
-	lines = open(os.path.join(obj.outdir, "sample_snps.txt")).read().splitlines()
+	lines = open(os.path.join(obj.results_dir, "sample_snps.txt")).read().splitlines()
 	assert lines[0].split("\t") == SNP_FILE_COLUMNS
 	row = lines[1].split("\t")
 	assert row[0] == "A.1" and row[2] == "chr" and row[3] == "3"
 	assert len(row) == len(SNP_FILE_COLUMNS)
-	not_called = open(os.path.join(obj.outdir, "sample_not_called.txt")).read().splitlines()
+	not_called = open(os.path.join(obj.results_dir, "sample_not_called.txt")).read().splitlines()
 	assert not_called[0].split("\t") == SNP_FILE_COLUMNS
 	assert not_called[1].split("\t")[:4] == ["A.2", "REF_A", "chr", "6"]
 

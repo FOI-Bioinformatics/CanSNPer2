@@ -323,9 +323,9 @@ def test_the_selected_sample_lists_its_snp_path_and_short_links(tmp_path):
 	out = run_page(dashboard(tmp_path), "paint(0);")
 	detail = out["html"]["detail"]
 	assert [n for n in re.findall(r'data-snp="([^"]+)"', detail)] == ["A.1", "B.1"]
-	assert re.search(r'<a href="clean_sample_snps.txt" title="clean_sample_snps.txt">called SNPs</a>', detail)
-	assert re.search(r'<a href="clean_sample_not_called.txt" title="clean_sample_not_called.txt">not called</a>', detail)
-	assert re.search(r'<a href="clean_sample_tree.html" title="clean_sample_tree.html">tree</a>', detail)
+	assert re.search(r'<a href="samples/clean_sample_snps.txt" title="samples/clean_sample_snps.txt">called SNPs</a>', detail)
+	assert re.search(r'<a href="samples/clean_sample_not_called.txt" title="samples/clean_sample_not_called.txt">not called</a>', detail)
+	assert re.search(r'<a href="samples/clean_sample_tree.html" title="samples/clean_sample_tree.html">tree</a>', detail)
 	assert "A.1;B.1" not in detail, "the path is a list, not a semicolon string"
 
 

@@ -35,7 +35,7 @@ def typed(tmp_path, called, states, **kwargs):
 
 def test_the_snps_file_is_a_table_followed_by_comment_lines(tmp_path):
 	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
-	path = os.path.join(obj.outdir, "x_snps.txt")
+	path = os.path.join(obj.results_dir, "x_snps.txt")
 	rows = table_rows(path)
 	assert rows[0] == SNP_FILE_COLUMNS
 	assert [row[0] for row in rows[1:]] == ["A.1", "B.1"]
@@ -52,7 +52,7 @@ def test_the_snps_file_is_a_table_followed_by_comment_lines(tmp_path):
 
 def test_the_snps_file_of_a_sample_without_a_call_keeps_its_header_row(tmp_path):
 	obj, q = typed(tmp_path, [], {"A.1": 2})
-	path = os.path.join(obj.outdir, "x_snps.txt")
+	path = os.path.join(obj.results_dir, "x_snps.txt")
 	assert table_rows(path) == [SNP_FILE_COLUMNS]
 	assert "# SNP path: NA" in comments(path)
 	assert "# Final SNP: NA" in comments(path)
@@ -60,7 +60,7 @@ def test_the_snps_file_of_a_sample_without_a_call_keeps_its_header_row(tmp_path)
 
 def test_the_not_called_file_is_a_table_followed_by_comment_lines(tmp_path):
 	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1, "C.1": 2})
-	path = os.path.join(obj.outdir, "x_not_called.txt")
+	path = os.path.join(obj.results_dir, "x_not_called.txt")
 	rows = table_rows(path)
 	assert rows[0] == SNP_FILE_COLUMNS
 	## B.2 is in no alignment, so it is listed as a position without data (fake_alignment gives
@@ -95,8 +95,8 @@ def test_both_forms_of_a_result_file_are_read(tmp_path, form):
 def test_a_result_of_an_earlier_run_is_used_again_in_both_forms(tmp_path, prefix):
 	q = write(tmp_path / "in" / "x.fasta")
 	obj, db = project(tmp_path, [q], keep_going=True)
-	os.makedirs(obj.outdir, exist_ok=True)
-	with open(os.path.join(obj.outdir, "x_snps.txt"), "w") as out:
+	os.makedirs(obj.results_dir, exist_ok=True)
+	with open(os.path.join(obj.results_dir, "x_snps.txt"), "w") as out:
 		out.write("\t".join(SNP_FILE_COLUMNS) + "\n")
 		for line in ("SNP path: A.1", "Final SNP: A.1 found/depth: 1/2",
 				"Query file: /elsewhere/x.fasta sha256:" + obj.file_sha256(q), obj.settings_line()):
@@ -131,18 +131,29 @@ def test_the_summary_gives_na_support_for_a_sample_without_a_call(tmp_path):
 	assert rows[1] == ["x", "NA", "NA", "NA"]
 
 
-# -- the tree is written by default, and a reused result says so (issue #78) --
+# -- the per-sample tree page is opt-in now, and every per-sample file sits in
+#    the samples subfolder of --outdir so that summary.html is the one file to find --
 
-def test_the_tree_of_a_sample_is_written_without_asking_for_it(tmp_path):
-	"""--save_tree used to be needed for the file most runs want."""
+def test_the_tree_page_is_left_out_by_default(tmp_path):
+	"""the results overview shows the tree of every sample, so the standalone pages
+		are back to being written on request (--save_tree)"""
 	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
-	assert os.path.exists(os.path.join(obj.outdir, "x_tree.html"))
+	assert not os.path.exists(os.path.join(obj.results_dir, "x_tree.html"))
 
 
-def test_no_save_tree_leaves_the_tree_out(tmp_path):
-	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, save_tree=False)
-	assert not os.path.exists(os.path.join(obj.outdir, "x_tree.html"))
-	assert os.path.exists(os.path.join(obj.outdir, "x_snps.txt")), "only the tree is left out"
+def test_save_tree_writes_the_tree_page_on_request(tmp_path):
+	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, save_tree=True)
+	assert os.path.exists(os.path.join(obj.results_dir, "x_tree.html"))
+	assert os.path.exists(os.path.join(obj.results_dir, "x_snps.txt")), "the tables are written either way"
+
+
+def test_per_sample_files_sit_in_a_samples_subfolder(tmp_path):
+	"""summary.html greets you in --outdir, its links lead into samples/; a run with no
+		sample output at all leaves no empty folder behind"""
+	obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
+	assert os.path.exists(os.path.join(obj.outdir, "samples", "x_snps.txt"))
+	assert os.path.exists(os.path.join(obj.outdir, "summary.html"))
+	assert not os.path.exists(os.path.join(obj.outdir, "x_snps.txt")), "nothing per sample in --outdir"
 
 
 def test_a_sample_whose_result_exists_prints_its_call_and_how_to_redo_it(tmp_path, capsys):
