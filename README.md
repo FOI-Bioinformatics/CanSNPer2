@@ -958,27 +958,33 @@ called at `BR.anthropi.1.1.1.1`.
 
 `--local_references` adds rounds against a genome of the scheme closer to the sample:
 
-1. The local reference is one of the representative genomes of the terminal nodes, from the
+1. A round is made only when it can change the call: when there is no call, or when a canSNP
+   on the path to the call or of a child of the call has no data (no reads, too few, or not
+   lifted). A terminal call with data on its whole path, or a call whose children all have
+   data, is settled, and no round is made. This is checked before every round.
+2. The local reference is one of the representative genomes of the terminal nodes, from the
    genomes file of the scheme (`CanSNPer2-database --genomes`). It is found by walking down
    the tree from the call of the first round (from the root without a call). At each node,
    the child subtrees that hold representatives are the options, less those whose own canSNP
    is ancestral. When the derived canSNPs of the first round lie in one of them, the walk
    goes there.
-2. Otherwise a subsample of the reads (`--screen_reads`, default 100,000 per file) is mapped
-   to one representative of each option at once, and the walk follows the one with the most
-   matched bases. The walk ends at a terminal node, whose representative is the local
-   reference. When two subtrees get similar shares of the screened bases (the second at least
-   20 % and at least half the first), a warning says so.
-3. The canSNP positions are lifted from the scheme reference to the local reference by
+3. Otherwise a subsample of the reads (`--screen_reads`, default 100,000 per file) is mapped
+   at once to up to three representatives of each option, from different terminal nodes, and
+   the walk follows the subtree of the genome with the most matched bases. When that genome
+   matches less than 10 % of the screened bases, the reads are not from the genomes below,
+   and the walk stops there. The walk ends at a terminal node, whose representative is the
+   local reference. When two subtrees get similar shares of the screened bases (the second at
+   least 20 % and at least half the first), a warning says so.
+4. The canSNP positions are lifted from the scheme reference to the local reference by
    aligning the two genomes with minimap2 (asm20, as assembly typing does); a canSNP is lifted
    only when the local genome has its ancestral or derived base there. The lift is cached in
    `<refdir>/local/lift/`. A local genome that carries the ancestral base at more of the
    lifted canSNPs on the path to its own node than the derived base is not used.
-4. The reads are mapped to the local reference and counted at the lifted positions. Per
+5. The reads are mapped to the local reference and counted at the lifted positions. Per
    canSNP, these counts are used when they reach `--min_depth`, otherwise those of the
    first round. When both reach it and give different bases, the canSNP is a `conflict` and
    counts as no data.
-5. This repeats from the new call while the chosen genome changes, at most `--local_rounds`
+6. This repeats from the new call while the chosen genome changes, at most `--local_rounds`
    times (default 2).
 
 The local genomes are read from `<refdir>/local/<accession>.fna`;

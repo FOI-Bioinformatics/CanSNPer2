@@ -109,6 +109,7 @@ def test_a_local_reference_reaches_the_leaf(tmp_path):
 	reads = [l for l in comments(out / "s_snps.txt") if l.startswith("Reads:")][0]
 	assert "local_reference=LX local_node=X.5" in reads and "conflicts=0" in reads
 	assert "screens=0" in reads, "the first round points to the X subtree, no screen is needed"
+	assert "local_rounds=1" in reads, "after one round the call is a leaf with data on its whole path"
 	settings = [l for l in comments(out / "s_snps.txt") if l.startswith("Typing settings:")][0]
 	assert "local_references=on" in settings
 	assert any(p.name.endswith(".lift.tsv") for p in (tmp_path / "refs" / "local" / "lift").iterdir()), "the lift is cached"
@@ -135,6 +136,8 @@ def test_a_sample_close_to_the_scheme_reference_keeps_its_call(tmp_path):
 	plain = run(tmp_path, files, db, "yplain", min_required_hits=1)
 	local = run(tmp_path, files, db, "ylocal", min_required_hits=1, local_references=True)
 	assert plain.typed == local.typed == {"y": "Y.1"}
+	reads = [l for l in comments(tmp_path / "ylocal" / "samples" / "y_snps.txt") if l.startswith("Reads:")][0]
+	assert "local_reference=none" in reads, "a terminal call with data on its path: nothing a local round could add"
 
 
 def test_a_local_genome_that_does_not_fit_its_node_is_not_used(tmp_path, caplog):

@@ -18,7 +18,7 @@ from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, write_s
 from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
 from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
 from CanSNPer2.modules.LiftOver import lift
-from CanSNPer2.modules.LocalReferences import candidates, descend, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
+from CanSNPer2.modules.LocalReferences import candidates, descend, open_canSNPs, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
 from CanSNPer2.modules.ParsePileup import PLATFORMS
 import subprocess
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
@@ -1059,6 +1059,12 @@ class CanSNPer2(object):
 		for round_number in range(1, self.local_rounds + 1):
 			states, _info, called = states_from_rows(site_rows)
 			call = self.provisional_call(states, called)
+			gaps = open_canSNPs(database, call, site_rows)
+			if not gaps:
+				'''the call is settled: every canSNP on its path and of its children has data, which
+					another genome does not change'''
+				logger.info("{s}: {call} has data on its path and at its children, no local round".format(s=sample.name, call=call))
+				break
 			found, missing = candidates(database, call, self.refdir)
 			if missing and not self.warned_missing_local:
 				logger.warning("{n} representative genome(s) of the scheme have no file in {folder} and are not used as local references; "
@@ -1077,8 +1083,8 @@ class CanSNPer2(object):
 				break
 			screened = [st for st in steps if st["how"] == "screen"]
 			share = screened[-1]["share"] if screened else 1.0
-			logger.info("{s}: local reference {g} ({n}), reached from {call} in {k} step(s), {m} by screen".format(
-					s=sample.name, g=local.genome, n=local.node, call=call, k=len(steps), m=len(screened)))
+			logger.info("{s}: local reference {g} ({n}), reached from {call} in {k} step(s), {m} by screen; canSNPs without data: {gaps}".format(
+					s=sample.name, g=local.genome, n=local.node, call=call, k=len(steps), m=len(screened), gaps=", ".join(gaps[:10])))
 			for st in screened:
 				if st["runner_up"] is not None and st["runner_up"] >= 0.2 and st["runner_up"] >= st["share"] / 2:
 					logger.warning("{s}: at {n} the screen gave {a:.0%} and {b:.0%} of the matched bases to two subtrees; the sample may hold more than one strain, or lie between them".format(

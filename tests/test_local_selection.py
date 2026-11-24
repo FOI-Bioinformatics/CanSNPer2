@@ -111,12 +111,12 @@ def test_counts_that_point_to_one_subtree_need_no_screen(tmp_path):
 	assert [s["how"] for s in steps] == ["counts", "counts"]
 
 
-def test_without_counts_one_representative_per_subtree_is_screened(tmp_path):
+def test_without_counts_the_representatives_of_each_subtree_are_screened(tmp_path):
 	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
 	stub = StubScreen("GB1")
 	chosen, steps = descend(db, "NA", refdir, rows(), stub)
 	assert chosen.genome == "GB1"
-	assert len(stub.calls) == 1 and len(stub.calls[0]) == 2 and "GB1" in stub.calls[0], "one genome of the A subtree, one of B"
+	assert stub.calls == [["GA2", "GA3", "GB1"]], "the representatives of both leaves of A, and of B"
 	assert steps[0]["how"] == "screen" and steps[0]["share"] == 0.7
 
 
@@ -157,3 +157,45 @@ def test_reads_that_map_to_none_of_the_genomes_stop_the_descent(tmp_path):
 	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
 	chosen, steps = descend(db, "NA", refdir, rows(), lambda genomes: [(g, 0.0, 0) for g in sorted(genomes)])
 	assert chosen is None
+
+
+# when a local round can still change something
+
+from CanSNPer2.modules.LocalReferences import open_canSNPs
+
+
+def test_a_terminal_call_with_data_on_its_whole_path_needs_no_local_round(tmp_path):
+	db, _ = scheme(tmp_path)
+	assert open_canSNPs(db, "A.2", rows(**{"R": "derived", "A.1": "derived", "A.2": "derived"})) == []
+
+
+def test_a_child_of_the_call_without_data_asks_for_a_local_round(tmp_path):
+	db, _ = scheme(tmp_path)
+	assert open_canSNPs(db, "A.1", rows(**{"R": "derived", "A.1": "derived", "A.2": "no_reads", "A.3": "ancestral"})) == ["A.2"]
+	assert open_canSNPs(db, "A.1", rows(**{"R": "derived", "A.1": "derived", "A.2": "ancestral", "A.3": "mixed"})) == [], \
+		"children with data (also a mixed one): the walk stopped for a reason another genome does not change"
+
+
+def test_a_gap_on_the_path_asks_for_a_local_round(tmp_path):
+	db, _ = scheme(tmp_path)
+	assert open_canSNPs(db, "A.2", rows(**{"R": "low_depth", "A.1": "derived", "A.2": "derived"})) == ["R"]
+
+
+def test_no_call_asks_for_a_local_round(tmp_path):
+	db, _ = scheme(tmp_path)
+	assert open_canSNPs(db, "NA", rows()) != []
+
+
+def test_reads_that_hardly_map_to_the_best_genome_stop_the_descent(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	def screen_fn(genomes):
+		return [(g, 0.5, 100, 0.02) for g in sorted(genomes)]
+	assert descend(db, "NA", refdir, rows(), screen_fn) == (None, [])
+
+
+def test_up_to_three_representatives_of_each_subtree_are_screened(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	stub = StubScreen("GA3", "GA3")
+	chosen, steps = descend(db, "NA", refdir, rows(), stub)
+	assert stub.calls[0] == ["GA2", "GA3", "GB1"], "both leaves of the A subtree stand for it"
+	assert chosen.genome == "GA3" and [s["node"] for s in steps] == ["A.1", "A.3"]

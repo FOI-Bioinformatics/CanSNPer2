@@ -155,7 +155,8 @@ def _head_reads(path, n, out):
 
 
 def screen(read_files, genomes, preset, n_reads, tmpdir, threads=2, minimap2="minimap2"):
-	'''[(genome, share, matched bases)] of the candidate genomes {name: fasta}, best first: the
+	'''[(genome, share, matched bases, fraction of the screened bases)] of the candidate genomes
+		{name: fasta}, best first: the
 		first n_reads reads of each read file are mapped to all genomes at once, and each genome
 		is scored by the matched bases of the primary alignments on it; share is its part of
 		the total. Mapping qualities are not used: between close candidates they are low by
@@ -170,6 +171,8 @@ def screen(read_files, genomes, preset, n_reads, tmpdir, threads=2, minimap2="mi
 	with open(reads, "w") as out:
 		for path in read_files:
 			_head_reads(path, n_reads, out)
+	with open(reads) as fin:
+		screened = sum(len(line.strip()) for i, line in enumerate(fin) if i % 4 == 1) or 1
 	run = subprocess.run([minimap2, "-x", preset, "-t", str(threads), "--secondary=no", combined, reads],
 			capture_output=True, text=True)
 	if run.returncode != 0:
@@ -182,7 +185,7 @@ def screen(read_files, genomes, preset, n_reads, tmpdir, threads=2, minimap2="mi
 	os.remove(combined)
 	os.remove(reads)
 	total = sum(score.values()) or 1
-	return sorted(((g, s / total, s) for g, s in score.items()), key=lambda t: -t[2])
+	return sorted(((g, s / total, s, s / screened) for g, s in score.items()), key=lambda t: -t[2])
 
 
 def node_path(database, node):
@@ -204,16 +207,23 @@ def node_path(database, node):
 	return path[::-1]
 
 
-def descend(database, call, refdir, site_rows, screen_fn):
+PER_SUBTREE = 3     ## representatives screened for each subtree, from different terminal nodes
+MIN_SCREENED = 0.1  ## fraction of the screened bases the best genome must match for the walk to go on
+
+
+def descend(database, call, refdir, site_rows, screen_fn, per_subtree=PER_SUBTREE, min_screened=MIN_SCREENED):
 	'''Choose the local reference by walking down the tree from call (the root without a call).
 		At each node, the child subtrees that hold representative genomes with a file are the
 		options; a subtree whose own canSNP is ancestral in site_rows is left out. When the
 		derived canSNPs of site_rows lie in exactly one of them, the walk goes there without a
-		screen; otherwise one representative of each subtree is screened (screen_fn: {genome:
-		fasta} -> [(genome, share, matched bases)], best first) and the walk follows the best.
-		It ends at a node without such subtrees, whose representative is chosen. Reads that
-		match none of the screened genomes end the walk without a choice when nothing was chosen
-		before. Returns (Candidate or None, steps), steps being {"node", "how", "share",
+		screen; otherwise up to per_subtree representatives of each subtree, of different
+		terminal nodes, are screened together (screen_fn: {genome: fasta} -> [(genome, share,
+		matched bases[, fraction of the screened bases])], best first) and the walk follows the
+		subtree of the best genome: the first representative of a subtree need not be its
+		closest. It ends at a node without such subtrees, whose representative is chosen.
+		When the best genome matches less than min_screened of the screened bases, the reads
+		are not from the genomes below this node (or not from this scheme): the walk ends
+		there, without a choice when nothing was chosen before. Returns (Candidate or None, steps), steps being {"node", "how", "share",
 		"runner_up"} for each step down.'''
 	conn = sqlite3.connect(str(database))
 	try:
@@ -260,14 +270,52 @@ def descend(database, call, refdir, site_rows, screen_fn):
 			steps.append({"node": names[node], "how": "counts", "share": None, "runner_up": None})
 			continue
 		pool = supported or options
-		first = {genomes_in(c)[0].genome: c for c in pool}
-		ranked = screen_fn({g: genomes_in(c)[0].path for g, c in first.items()})
-		if not ranked or ranked[0][2] == 0:
+		owner, paths = {}, {}
+		for c in pool:
+			taken = []
+			for cand in genomes_in(c):
+				if cand.node not in {t.node for t in taken}:
+					taken.append(cand)
+				if len(taken) == per_subtree:
+					break
+			for cand in taken:
+				owner[cand.genome] = c
+				paths[cand.genome] = cand.path
+		ranked = screen_fn(paths)
+		fraction = ranked[0][3] if ranked and len(ranked[0]) > 3 else 1.0
+		if not ranked or ranked[0][2] == 0 or fraction < min_screened:
 			if not steps:
 				return None, steps
 			break
-		node = first[ranked[0][0]]
+		node = owner[ranked[0][0]]
+		other = [r[1] for r in ranked if owner[r[0]] != node]
 		steps.append({"node": names[node], "how": "screen", "share": ranked[0][1],
-				"runner_up": ranked[1][1] if len(ranked) > 1 else None})
+				"runner_up": max(other) if other else None, "fraction": fraction})
 	found = reps.get(node) or genomes_in(node)
 	return (found[0] if found else None), steps
+
+
+HAS_DATA = ("derived", "ancestral", "other_base", "mixed", "conflict")
+
+
+def open_canSNPs(database, call, site_rows):
+	'''the canSNPs that a further round against a local reference could still give data for and
+		that matter for the call: those on the path from the root to the call, and those of the
+		children of the call, without data (no reads, too few, not lifted). A canSNP with data,
+		also a mixed one, stays as it is with another genome. [] when the call is settled; for no
+		call, ["NA"]'''
+	if call == "NA":
+		return ["NA"]
+	path = node_path(database, call)
+	if not path:
+		return ["NA"]
+	conn = sqlite3.connect(str(database))
+	try:
+		ids = {name: i for i, name in conn.execute("SELECT id, name FROM nodes")}
+		names = {i: name for name, i in ids.items()}
+		kids = [names[c] for (c,) in conn.execute("SELECT child FROM tree WHERE parent = ? AND parent != child", (ids[call],))]
+		snp_nodes = {name for (name,) in conn.execute("SELECT DISTINCT snp_id FROM snp_annotation")}
+	finally:
+		conn.close()
+	states = {row["Name"]: row["state"] for row in site_rows}
+	return [name for name in path + kids if name in snp_nodes and states.get(name) not in HAS_DATA]
