@@ -1504,7 +1504,7 @@ class CanSNPer2(object):
 						'''isolates are typed; reads that disagree at several canSNPs suggest a mixture'''
 						if severity == "clean":
 							severity = "review"
-						reasons.append("possibly mixed: at {k} canSNP sites no base reached the allele fraction: {ids}".format(k=len(mixed), ids=", ".join(mixed[:20])))
+						reasons.append("possibly mixed: at {k} canSNP sites no base reached the allele fraction: {ids}; a duplicated region of the sample (a copy the reference lacks) gives the same pattern, see the counts in the site count file".format(k=len(mixed), ids=", ".join(mixed[:20])))
 						logger.warning("{sample} is possibly mixed: at {k} canSNP sites no base reached the allele fraction ({ids})".format(sample=self.query_name, k=len(mixed), ids=", ".join(mixed[:20])))
 					self.add_sample_report(self.query_name,severity,SNP,";".join(called_path) if called_path else "NA",reasons,
 							states=SNPS,called=called_snps,edge=sorted(s for s in edge_flags if s in set(called_snps)),

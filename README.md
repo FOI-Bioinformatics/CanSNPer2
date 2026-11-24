@@ -915,8 +915,14 @@ homopolymers, were not part of the test.
 
 **Mixtures.** CanSNPer2 types isolates. A sample with at least `--mixed_sites` (default 3)
 mixed canSNP sites is reported as possibly mixed, in the log, in the results overview and
-in the `Reads:` line of its result file; the strains in it are not resolved. Mismapped reads
-from repeated regions can also make a site mixed.
+in the `Reads:` line of its result file; the strains in it are not resolved. The flag only
+asks for a review; it never changes the call. A canSNP in a region the sample has twice while
+the reference has it once is mixed too, as reads from the second copy map to the single copy
+of the reference: in the evaluation above, 1 of the 50 genomes (an *F. tularensis* draft with
+90-96 % copies of three canSNP regions on short contigs) was flagged with 3 to 5 mixed sites,
+the other 49 had at most 2. Mixtures of two genomes on different branches had 8 to 17 mixed
+sites at 50/50, 3 to 11 at 80/20 and 0 to 3 at 95/5; no mixture was called on another branch
+than its majority genome, the call stopped higher up or was that of the majority genome.
 
 **Output.** The result files have the columns of assembly typing, with `QuerySeq` `reads`
 and `QueryPosition` the read depth. `<sample>_snps.txt` has the extra comment line

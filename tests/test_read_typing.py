@@ -121,7 +121,7 @@ def test_an_even_mixture_is_flagged(tmp_path):
 	db, a, b = make_scheme(tmp_path)
 	obj = run(tmp_path, write_pair(tmp_path, "mix", [(a, 20, 3), (b, 20, 4)]), db=db)
 	report = obj.sample_reports["mix"]
-	assert any("possibly mixed" in reason for reason in report["reasons"])
+	assert any("possibly mixed" in reason and "duplicated region" in reason for reason in report["reasons"])
 	assert report["severity"] != "clean"
 	header = comments(tmp_path / "out" / "samples" / "mix_snps.txt")
 	assert any("mixed_sites=6" in line for line in header)
