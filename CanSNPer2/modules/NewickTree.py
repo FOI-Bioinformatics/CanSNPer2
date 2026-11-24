@@ -809,7 +809,12 @@ function finalLabels(s){
 		return ' <span class="pill" style="' + style + '" title="' + esc((a.rank ? a.rank + ": " : "") + a.label) + '">' + esc(a.label) + "</span>";
 	}).join("");
 }
-function fileLink(file, label){ return '<a href="' + encodeURIComponent(file) + '" title="' + esc(file) + '">' + esc(label) + "</a>"; }
+/*a per-sample file sits in the samples/ subfolder: encode each path segment on its own, so
+	the folder separator stays a separator in the href while a "/" inside a sample name is
+	still escaped and cannot jump out of the folder*/
+function fileLink(file, label){
+	return '<a href="' + file.split("/").map(encodeURIComponent).join("/") + '" title="' + esc(file) + '">' + esc(label) + "</a>";
+}
 var current = -1;
 function svgName(){ return "cansnper2_" + (current >= 0 ? samples[current].name : "results") + "_tree.svg"; }
 function paint(i){
