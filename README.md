@@ -39,11 +39,11 @@ Read input (not yet implemeted)
 
 ## The cansnper2 command (since 2.6.0)
 
-A single command with a verb for every job. It runs the same code as the four commands
-CanSNPer2, CanSNPer2-database, CanSNPer2-download and CanSNPer2-test, which keep working
-with their old arguments; the shared options have one spelling here, and new scripts
-should use `cansnper2`. `cansnper2 --version` prints the version, `--help` documents any
-verb.
+A single command with a verb for every job. Since 2.6.0 it is the only command that is
+installed: `CanSNPer2`, `CanSNPer2-database`, `CanSNPer2-download` and `CanSNPer2-test`
+are replaced by the verbs and their options. `cansnper2 --version` prints the version,
+`--help` documents any verb. If the old scripts of a previous installation are still in
+your PATH, remove them.
 
 ```sh
 cansnper2 type query.fna -d scheme.db          # type assemblies (was CanSNPer2)
@@ -81,6 +81,25 @@ and `--no-snp-files` the counterpart of the old `--no_snpfiles`. The rest are sp
 as before: `--outdir`, `--save-tree`, `--summary`, `--workdir`, `--strictness`,
 `--mask`, `--rerun`, `--aligner`, `--verbose`. `--read_input` (never implemented) and
 the hidden `--no_save_tree` are not offered by the verb.
+
+The sections of this guide below still show the old spelling while they are being
+migrated; they map to the verbs as follows, with underscores in option names replaced
+by hyphens:
+
+| old command | cansnper2 verb |
+| --- | --- |
+| `CanSNPer2 ...` | `cansnper2 type ...` |
+| `CanSNPer2-test` | `cansnper2 selftest` |
+| `CanSNPer2-database --create` | `cansnper2 db create` |
+| `CanSNPer2-database --import` | `cansnper2 db import` |
+| `CanSNPer2-database --export` | `cansnper2 db export` (`--export_format` is `--format`) |
+| `CanSNPer2-database --info` | `cansnper2 db info` |
+| `CanSNPer2-database --convert` | `cansnper2 db convert` |
+| `CanSNPer2-database --mod_file ...` | `cansnper2 db modify ...` |
+| `CanSNPer2-database --remove --parent` | `cansnper2 db remove --parent` |
+| `CanSNPer2-download --list_schemes` | `cansnper2 scheme list` |
+| `CanSNPer2-download --scheme NAME` | `cansnper2 scheme get NAME` |
+| `CanSNPer2-download --database DB` | `cansnper2 ref get -d DB` |
 
 ## User guide CanSNPer2 (for custom databases see below)
 
@@ -255,12 +274,16 @@ Logging and debug options:
   --debug            print debug info
   --supress          supress warnings
 
-available CanSNPer2 commands (installed together):
-  CanSNPer2            type query assemblies or reads against a CanSNP database
-  CanSNPer2-database   create, modify and export CanSNP databases
-  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
-  CanSNPer2-test       check the installation: imports and aligner programs in PATH
-Run any command with --help for its arguments; examples in README.md.
+CanSNPer2 since 2.6.0 is one command with a verb for every job:
+  cansnper2 type      type query assemblies against a CanSNP database
+  cansnper2 selftest  check the installation: imports and aligner programs
+  cansnper2 db        create, import, export, info, convert, modify, remove
+  cansnper2 scheme    list schemes of CanSNPer2-data, get builds their database
+  cansnper2 ref       get the reference genomes a database needs from NCBI
+The commands CanSNPer2, CanSNPer2-database, CanSNPer2-download and
+CanSNPer2-test are no longer installed in 2.6.0; the verbs above do the
+same jobs, with hyphenated spellings of the options.
+Run cansnper2 <command> --help for its arguments; examples in README.md.
 ```
 
 #### Export
@@ -363,12 +386,16 @@ Logging and debug options:
   --debug             Debug logging, and the traceback of an unexpected error
 
 Give a database with --database, or name a scheme with --scheme to fetch it from CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step.
-available CanSNPer2 commands (installed together):
-  CanSNPer2            type query assemblies or reads against a CanSNP database
-  CanSNPer2-database   create, modify and export CanSNP databases
-  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
-  CanSNPer2-test       check the installation: imports and aligner programs in PATH
-Run any command with --help for its arguments; examples in README.md.
+CanSNPer2 since 2.6.0 is one command with a verb for every job:
+  cansnper2 type      type query assemblies against a CanSNP database
+  cansnper2 selftest  check the installation: imports and aligner programs
+  cansnper2 db        create, import, export, info, convert, modify, remove
+  cansnper2 scheme    list schemes of CanSNPer2-data, get builds their database
+  cansnper2 ref       get the reference genomes a database needs from NCBI
+The commands CanSNPer2, CanSNPer2-database, CanSNPer2-download and
+CanSNPer2-test are no longer installed in 2.6.0; the verbs above do the
+same jobs, with hyphenated spellings of the options.
+Run cansnper2 <command> --help for its arguments; examples in README.md.
 ```
 Example structure of references.txt
 ```
@@ -496,12 +523,16 @@ Logging and debug options:
   --debug               Debug output
   --supress             Supress warnings
 
-available CanSNPer2 commands (installed together):
-  CanSNPer2            type query assemblies or reads against a CanSNP database
-  CanSNPer2-database   create, modify and export CanSNP databases
-  CanSNPer2-download   fetch the reference genomes a database needs from NCBI
-  CanSNPer2-test       check the installation: imports and aligner programs in PATH
-Run any command with --help for its arguments; examples in README.md.
+CanSNPer2 since 2.6.0 is one command with a verb for every job:
+  cansnper2 type      type query assemblies against a CanSNP database
+  cansnper2 selftest  check the installation: imports and aligner programs
+  cansnper2 db        create, import, export, info, convert, modify, remove
+  cansnper2 scheme    list schemes of CanSNPer2-data, get builds their database
+  cansnper2 ref       get the reference genomes a database needs from NCBI
+The commands CanSNPer2, CanSNPer2-database, CanSNPer2-download and
+CanSNPer2-test are no longer installed in 2.6.0; the verbs above do the
+same jobs, with hyphenated spellings of the options.
+Run cansnper2 <command> --help for its arguments; examples in README.md.
 ```
 
 ### Annotating the tree
