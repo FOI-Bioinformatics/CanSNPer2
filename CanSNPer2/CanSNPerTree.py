@@ -42,7 +42,7 @@ __status__ 		= "Production"
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER, ensure_directory
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
-from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
@@ -307,6 +307,13 @@ def run_command(args, parser):
 		if not args.keep_temp:
 			CanSNPer2_obj.cleanup()
 		exit(1)
+	'''warnings that asked to stay in the log (SNP positions without alignment data):
+		say that they are there and where, instead of filling the terminal with one
+		block per sample; --verbose shows them as they come'''
+	hidden = quiet_warning_count()
+	if hidden:
+		print("{n} warnings about the results are in the log {logpath}, run with --verbose to see them".format(
+			n=hidden, logpath=logpath))
 	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
 		the reason was already logged by run() (issue #191); a sample whose earlier result
 		was used again, made from the same input, counts as typed'''

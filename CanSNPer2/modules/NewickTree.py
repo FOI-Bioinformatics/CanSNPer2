@@ -1374,8 +1374,12 @@ class NewickTree(object):
 			were never compared at all (issue #27)'''
 		no_data_info = []
 		if no_data_nodes:
+			'''a per sample warning about positions that were never compared: it stays in the
+				log and the terminal gets one summary line with the count, unless the run is
+				verbose (issue #27 kept it visible, the console noise is what changed)'''
 			logger.warning("{n} SNP positions in the tree had no alignment data at all, no reference block covered them or --mask dropped them: {ids}".format(
-					n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])))
+					n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])),
+				extra={"quiet_console": True})
 			no_data_info = self.get_no_data_info(no_data_nodes)
 		if summary:
 			if save_tree:
