@@ -51,6 +51,12 @@ def command():
 		print("ERROR: no aligner was found in PATH; install progressiveMauve, minimap2 or MUMmer4 (nucmer and delta-filter)")
 		sys.exit(1)
 	print("usable aligners: {names}".format(names=", ".join(usable)))
+	'''read typing needs minimap2 and samtools; it is optional'''
+	missing = [program for program in ("minimap2", "samtools") if shutil.which(program) is None]
+	if missing:
+		print("read typing: not usable, {names} not found".format(names=" and ".join(missing)))
+	else:
+		print("read typing: usable (minimap2 and samtools)")
 
 
 def main():

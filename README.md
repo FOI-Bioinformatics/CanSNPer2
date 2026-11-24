@@ -1,8 +1,7 @@
 # CanSNPer2
 CanSNPer2: A toolkit for SNP-typing NGS data.
 
-Future planned implementations
-* Read input - Call SNPs directly from reads instead of an assembly
+CanSNPer2 types assemblies, or sequencing reads directly (see [Read typing](#read-typing)).
 
 Databases supplied can be found at https://github.com/FOI-Bioinformatics/CanSNPer2-data
 
@@ -33,9 +32,8 @@ python setup.py install
 * progressiveMauve (the default aligner, see [Aligners](#aligners))
 * minimap2 (optional, `--aligner minimap2`)
 
-Read input (not yet implemeted)
-* BWA
-* Minimap2
+Read typing
+* minimap2 and samtools (see [Read typing](#read-typing))
 
 ## User guide CanSNPer2 (for custom databases see below)
 1. Build a database from a scheme in [CanSNPer2-data](https://github.com/FOI-Bioinformatics/CanSNPer2-data) and download its reference genomes
@@ -367,15 +365,20 @@ T/N.1	T.1	A/M.1	M.1
 ```
 CanSNPer2 help
 ```
-usage: CanSNPer2 [-h] [-db] [-o DIR] [--save_tree] [--no_snpfiles]
-                 [--summary] [--annotations FILE] [--refdir]
-                 [--allow_missing_references] [--workdir] [--read_input]
-                 [--min_required_hits MIN_REQUIRED_HITS]
-                 [--strictness STRICTNESS] [--mask MASK] [--keep_going]
-                 [--rerun] [--aligner] [--alignment_timeout MINUTES]
-                 [--aligner_path] [--skip_alignment] [--keep_temp] [--tmpdir]
-                 [--logdir] [--verbose] [--debug] [--supress]
-                 [query ...]
+usage: CanSNPerTree.py [-h] [-db ] [-o DIR] [--save_tree] [--no_snpfiles]
+                       [--summary] [--annotations FILE] [--refdir ]
+                       [--allow_missing_references] [--workdir ]
+                       [--min_required_hits MIN_REQUIRED_HITS]
+                       [--strictness STRICTNESS] [--mask MASK] [--keep_going]
+                       [--rerun] [--aligner ] [--alignment_timeout MINUTES]
+                       [--aligner_path ] [--platform {hifi,illumina,ont}]
+                       [--samplesheet FILE] [--min_depth MIN_DEPTH]
+                       [--min_allele_fraction MIN_ALLELE_FRACTION]
+                       [--min_mapq MIN_MAPQ] [--min_baseq MIN_BASEQ]
+                       [--mixed_sites MIXED_SITES] [--threads THREADS]
+                       [--skip_alignment] [--keep_temp] [--tmpdir ]
+                       [--logdir ] [--verbose] [--debug] [--supress]
+                       [query ...]
 
 CanSNPer2 - type query assemblies (or reads) against a CanSNP database
 
@@ -383,19 +386,22 @@ options:
   -h, --help            show this help message and exit
 
 Required arguments:
-  query                 File(s) to align (fasta), or one list file with a file
-                        path per line (a file that does not start with '>'; a
-                        list must be the only query argument)
-  -db , --database      CanSNP database
+  query                 Assemblies (fasta) or sequencing reads (fastq, may be
+                        gzip-compressed) to type, or one list file with a file
+                        path per line (a list must be the only query
+                        argument). Paired-end read files are found by their
+                        names (_R1/_R2, _1/_2)
+  -db, --database       CanSNP database
 
 Output options:
-  -o DIR, --outdir DIR  Output directory
+  -o, --outdir DIR      Output directory
   --save_tree           Also write a standalone tree page per sample as
                         samples/<sample>_tree.html (the results overview
                         already shows every sample's tree)
   --no_snpfiles         Do not write the per-sample result files
                         (samples/<sample>_snps.txt,
-                        samples/<sample>_not_called.txt); the call is still printed
+                        samples/<sample>_not_called.txt); the call is still
+                        printed
   --summary             Output a summary file and tree with all called SNPs
                         not affected by no_snpfiles
   --annotations FILE    TSV file annotating tree nodes: <snp name>
@@ -413,7 +419,6 @@ Run options:
                         and their SNPs are not compared (default: stop with an
                         error)
   --workdir             Change workdir default (./)
-  --read_input          Select if input is reads not fasta
   --min_required_hits MIN_REQUIRED_HITS
                         Minimum number of derived SNPs on the path from the
                         root to the final SNP for a call (at least 1, default
@@ -440,6 +445,34 @@ Run options:
                         Do not align, read the alignments already in --tmpdir
                         (--skip_mauve is the old name)
   --keep_temp           keep temporary files
+
+Read typing options:
+  Used when the queries are sequencing reads: minimap2 maps them to each reference and samtools mpileup counts the bases at the canSNP positions. Thresholds not given take the defaults of --platform
+
+  --platform {hifi,illumina,ont}
+                        Sequencing platform of the reads: illumina (short
+                        reads, paired or single), ont or hifi (default
+                        illumina)
+  --samplesheet FILE    Tab separated file with the header sample, reads1 and
+                        optionally reads2 and platform, one sample per row;
+                        instead of query arguments
+  --min_depth MIN_DEPTH
+                        Reads needed at a canSNP for a call (default: illumina
+                        5, ont 10, hifi 5)
+  --min_allele_fraction MIN_ALLELE_FRACTION
+                        Fraction of the reads that must carry a base for the
+                        canSNP to be called as that base; below it the site is
+                        mixed and counts as no data (default: illumina 0.8,
+                        ont 0.7, hifi 0.8)
+  --min_mapq MIN_MAPQ   Minimum mapping quality of a read (default 20)
+  --min_baseq MIN_BASEQ
+                        Minimum base quality (default: illumina 20, ont 10,
+                        hifi 20)
+  --mixed_sites MIXED_SITES
+                        Mixed canSNP sites at which a sample is reported as
+                        possibly mixed (default 3)
+  --threads THREADS     Threads of minimap2 and samtools sort for each
+                        reference (default 4)
 
 Logging and debug options:
   --tmpdir              Specify tmp directory (default: CanSNPer2 in the
@@ -487,7 +520,8 @@ B.6	clade	marker	AMR feature (separated at the B.6 / B.12 split)	#c0392b
 
 ### Query input
 
-Queries are FASTA files (plain text; gzip-compressed files must be decompressed first). A
+Queries are FASTA files (plain text; gzip-compressed files must be decompressed first), or
+FASTQ files of sequencing reads, see [Read typing](#read-typing). A
 file is a query list instead when its first non-blank line does not start with `>`: the
 list holds one file path per line. This is decided by the content, not by the file name, so
 a FASTA file named `x.txt` is typed as a FASTA file. A query list must be the only query
@@ -815,3 +849,67 @@ to contribute directly, you have the following options:
 - contribute directly to the source code through the
   [github](https://github.com/FOI-Bioinformatics/CanSNPer2) repository. 'Pull requests' are
   especially welcome.
+
+## Read typing
+
+CanSNPer2 types sequencing reads without an assembly. Read files are recognised by their
+content (FASTQ, plain or gzip-compressed); a run types either reads or assemblies, not both.
+
+```
+CanSNPer2 --database brucella_genus.db --refdir references/ sample_R1_001.fastq.gz sample_R2_001.fastq.gz
+CanSNPer2 --database brucella_genus.db --refdir references/ --platform ont barcode05.fastq.gz
+CanSNPer2 --database brucella_genus.db --refdir references/ --samplesheet samples.tsv
+```
+
+**Samples.** Paired-end files are found by their names: `_R1`/`_R2` (with or without the
+Illumina `_001`) or `_1`/`_2`. The sample is named after the file without the mate part and
+the endings (`B_iv_01_M_S1_R1_001.fastq.gz` gives `B_iv_01_M_S1`). A file named as one mate
+whose other mate was not given stops the run. Reads of `--platform ont` or `hifi` are never
+paired. `--samplesheet` gives the samples explicitly instead of query arguments: a tab
+separated file with the header `sample`, `reads1` and optionally `reads2` and `platform`;
+relative paths are read from the folder of the sheet.
+
+**Mapping and counting.** For each reference of the database, the reads are mapped with
+`minimap2 -a -x <preset>`, sorted and indexed with samtools, and `samtools mpileup -a -B -A
+-d 0 -q <min_mapq> -Q <min_baseq>` lists the read bases at the canSNP positions only. Reads
+below the mapping quality and bases below the base quality are not counted; duplicate,
+secondary and QC-failed reads are left out (mpileup defaults), and a base covered by both
+reads of a pair is counted once.
+
+**The call of a canSNP** from its counts of A, C, G and T:
+
+| counts | state |
+|---|---|
+| no reads | no data |
+| fewer than `--min_depth` | no data (low depth) |
+| derived base at least `--min_allele_fraction` | derived |
+| ancestral base at least `--min_allele_fraction` | ancestral |
+| another base at least `--min_allele_fraction` | other base |
+| no base reaches `--min_allele_fraction` | no data (mixed) |
+
+The tree walk and `--min_required_hits` and `--strictness` are those of assembly typing.
+
+**Platform defaults**, which the options override:
+
+| `--platform` | minimap2 preset | `--min_mapq` | `--min_baseq` | `--min_depth` | `--min_allele_fraction` |
+|---|---|---|---|---|---|
+| illumina (default) | sr | 20 | 20 | 5 | 0.8 |
+| ont | map-ont | 20 | 10 | 10 | 0.7 |
+| hifi | map-hifi | 20 | 20 | 5 | 0.8 |
+
+These values are starting points; they have not yet been checked against typing of the
+same genomes from assemblies.
+
+**Mixtures.** CanSNPer2 types isolates. A sample with at least `--mixed_sites` (default 3)
+mixed canSNP sites is reported as possibly mixed, in the log, in the results overview and
+in the `Reads:` line of its result file; the strains in it are not resolved. Mismapped reads
+from repeated regions can also make a site mixed.
+
+**Output.** The result files have the columns of assembly typing, with `QuerySeq` `reads`
+and `QueryPosition` the read depth. `<sample>_snps.txt` has the extra comment line
+`Reads: platform=... files=... median_depth=... mixed_sites=...`, and the typing settings
+line names the read thresholds. `<sample>_site_counts.tsv` lists every canSNP with its counts
+of A, C, G and T, the depth, the fraction of the derived base and its state. `--keep_temp`
+keeps the sorted reads (`<reference>_<sample>.pileup.bam`) and the pileups, and
+`--skip_alignment --tmpdir` types from them again. `--mask` does not apply to reads.
+

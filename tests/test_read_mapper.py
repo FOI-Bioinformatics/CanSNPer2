@@ -60,3 +60,21 @@ def test_sites_bed(tmp_path):
 	path = tmp_path / "s.bed"
 	write_sites_bed(str(path), [("B.2", "chr", 20, "A", "G"), ("B.1", "chr", 5, "C", "T"), ("B.3", "plasmid", 1, "A", "C")])
 	assert path.read_text() == "chr\t4\t5\nchr\t19\t20\nplasmid\t0\t1\n"
+
+
+@pytest.mark.parametrize("programs, line", [
+	(["minimap2", "samtools"], "read typing: usable"),
+	(["minimap2"], "read typing: not usable, samtools not found"),
+	(["progressiveMauve"], "read typing: not usable, minimap2 and samtools not found"),
+])
+def test_selftest_reports_read_typing(tmp_path, programs, line):
+	import os, subprocess, sys
+	bin_dir = tmp_path / "bin"
+	bin_dir.mkdir()
+	for program in programs:
+		(bin_dir / program).write_text("#!/bin/sh\nexit 0\n")
+		(bin_dir / program).chmod(0o755)
+	env = dict(os.environ, PATH=str(bin_dir))
+	done = subprocess.run([sys.executable, "-m", "CanSNPer2.selftest"], capture_output=True, text=True, env=env)
+	assert line in done.stdout, done.stdout
+	assert done.returncode == 0, "read typing is optional, an aligner is enough"
