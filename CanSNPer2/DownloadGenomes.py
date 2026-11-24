@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 120 ## seconds per connection, urlretrieve had no timeout at all (issue #218)
 DOWNLOAD_DEADLINE = 60*60 ## seconds for the whole download of one genome; the timeout above is per read
+LOCAL_WORKERS = 6 ## local references fetched at the same time
+
+
+def assembly_from_listing(text, accession):
+	'''the assembly name of accession in the html listing of its NCBI folder
+		(genomes/all/GCA/000/007/125/ lists GCA_000007125.1_ASM712v1/), None when not listed'''
+	import re
+	match = re.search(r'href="{acc}_([^/"]+)/"'.format(acc=re.escape(accession)), text)
+	return match.group(1) if match else None
 
 
 def join_workers(processes, deadline):
@@ -290,6 +299,58 @@ class DownloadGenomes(object):
 		### symlink target is relative to the link location, so no chdir needed (issue #8)
 		os.symlink(target, link)
 
+	def run_local(self):
+		'''Fetch the representative genomes of the genomes table of the scheme into
+			<directory>/local/<accession>.fna, for read typing with --local_references. The NCBI
+			folder of a GCF accession is in the RefSeq tree, of a GCA accession in the GenBank
+			tree, whatever --source says; the assembly name is read from the folder listing.
+			Returns 0 when every genome was fetched.'''
+		from concurrent.futures import ThreadPoolExecutor
+		from CanSNPer2.modules.SchemeGenomes import read_genomes
+		database = getattr(self, "database_path", None)
+		genomes = [genome for genome, _node, role in read_genomes(database) if role == "representative"] if database else []
+		if not genomes:
+			logger.error("{db} holds no representative genomes (build it with CanSNPer2-database --genomes), "
+				"there are no local references to download".format(db=database))
+			return 1
+		directory = os.path.join(self.directory, "local")
+		os.makedirs(directory, exist_ok=True)
+		results = queue.Queue()
+		def fetch(accession):
+			source = "refseq" if accession.startswith("GCF_") else "genbank"
+			try:
+				n1, n2, n3 = textwrap.wrap(accession.split("_")[-1].split(".")[0], 3)
+				folder = "https://ftp.ncbi.nlm.nih.gov/genomes/all/{prefix}/{n1}/{n2}/{n3}/".format(prefix=accession[:3], n1=n1, n2=n2, n3=n3)
+				fd, listing = tempfile.mkstemp(suffix=".html")
+				os.close(fd)
+				try:
+					self.retrieve(folder, listing)
+					with open(listing, encoding="utf-8", errors="replace") as fin:
+						assembly = assembly_from_listing(fin.read(), accession)
+				finally:
+					os.remove(listing)
+			except Exception as e:
+				results.put((accession, False, "its NCBI folder could not be read: {e}".format(e=e)))
+				return
+			if not assembly:
+				results.put((accession, False, "no assembly folder for it in {folder}".format(folder=folder)))
+				return
+			self.download(accession, assembly, accession, source=source, directory=directory, results=results)
+		logger.info("Downloading {n} local reference genomes into {d}".format(n=len(genomes), d=directory))
+		with ThreadPoolExecutor(LOCAL_WORKERS) as pool:
+			list(pool.map(fetch, genomes))
+		reports = {}
+		while not results.empty():
+			accession, success, reason = results.get()
+			reports[accession] = (success, reason)
+		failed = ["{g}: {r}".format(g=g, r=reports.get(g, (False, "no report"))[1]) for g in genomes if not reports.get(g, (False,))[0]]
+		if failed:
+			logger.error("{n} of {m} local references could not be downloaded:".format(n=len(failed), m=len(genomes)))
+			for line in failed:
+				logger.error("  " + line)
+			return 1
+		return 0
+
 	def run(self):
 		'''Start download and collect what each worker actually managed to fetch (issue #218)'''
 		database = getattr(self, "database_path", None) or "the database"
@@ -375,6 +436,7 @@ def command():
 	downlopts = parser.add_argument_group('Download options')
 	downlopts.add_argument('-s', '--source', 			metavar='', default="genbank",	choices=["genbank","refseq"], 	help="Source for download (genbank/refseq)")
 	downlopts.add_argument('-o', '--outdir', 			metavar='', default="references",								help="reference genomes folder")
+	downlopts.add_argument('--local_references',	action='store_true',											help="Also fetch the representative genomes of the scheme into <outdir>/local, for read typing with CanSNPer2 --local_references")
 
 	debugopts = parser.add_argument_group('Logging and debug options')
 	debugopts.add_argument('--logs', metavar='', default='logs', 				help='Specify log directory')
@@ -467,6 +529,9 @@ def command():
 	DG = DownloadGenomes(args.database,args.source,args.outdir)
 	if DG.run():
 		logger.error("CanSNPer2-download did not fetch every reference, see the messages above")
+		exit(1)
+	if args.local_references and DG.run_local():
+		logger.error("CanSNPer2-download did not fetch every local reference, see the messages above")
 		exit(1)
 	print("Downloaded the reference genomes of {db} from {source} into {d}".format(db=args.database, source=args.source, d=args.outdir))
 
