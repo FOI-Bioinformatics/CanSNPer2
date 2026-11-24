@@ -15,7 +15,7 @@ SNP_ROWS = [("R", 1, "P", "REF1", "chrI", 10, "A", "G", "", "yes"), ("A.1", 1, "
 	("A.2", 1, "P", "REF1", "chrI", 30, "G", "A", "", "yes"), ("A.3", 1, "P", "REF1", "chrI", 35, "G", "A", "", "yes"),
 	("B.1", 1, "P", "REF1", "chrI", 40, "A", "C", "", "yes")]
 GENOMES = ("genome\tnode\trole\n" "GA2\tA.2\trepresentative\n" "GA2m\tA.2\tmember\n" "GA3\tA.3\trepresentative\n"
-	"GB1\tB.1\trepresentative\n" "GOUT\tR\toutgroup\n")
+	"GB1\tB.1\trepresentative\n" "GOUT\t\toutgroup\n")
 
 
 def scheme(tmp_path):

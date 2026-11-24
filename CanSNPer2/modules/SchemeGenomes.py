@@ -2,7 +2,9 @@
 The genomes of a scheme: which genome sits at which node of the tree, and in what role
 (<scheme>_genomes.txt of CanSNPer2-data, columns genome, node, role; further columns such as
 basis and source are not stored). The terminal nodes list their representative genomes and
-the members folded into them, and the outgroup sits at the root.
+the members folded into them; an outgroup was aligned with the scheme but sits at no node
+(its node is empty), as CanSNPer2-data validate.py requires. It is stored with the node id
+NO_NODE.
 
 The rows are kept in the genomes table, whose id is the node id; the role is a column added
 to it. Read typing with --local_references takes its candidate genomes from the
@@ -16,6 +18,7 @@ from CanSNPer2.modules.DatabaseConnection import SourceFileError, open_source
 
 GENOMES_COLUMNS = ("genome", "node", "role")
 ROLES = ("representative", "member", "outgroup")
+NO_NODE = -1  ## node id of a genome that sits at no node (an outgroup)
 
 
 def read_genomes_file(path):
@@ -31,8 +34,9 @@ def read_genomes_file(path):
 			if not line.strip():
 				continue
 			fields = [f.strip() for f in line.rstrip("\n\r").split("\t")]
-			if len(fields) < 3 or not all(fields[:3]):
-				raise SourceFileError("The genomes file {path} line {n} needs a genome, a node and a role: {line}".format(
+			fields += [""] * (3 - len(fields))
+			if not fields[0] or not fields[2]:
+				raise SourceFileError("The genomes file {path} line {n} needs a genome and a role: {line}".format(
 					path=path, n=number, line=line.strip()))
 			rows.append(tuple(fields[:3]))
 	return rows
@@ -43,7 +47,11 @@ def check_genomes(rows, nodes, path="the genomes file"):
 	problems = []
 	seen = set()
 	for genome, node, role in rows:
-		if node not in nodes:
+		if role == "outgroup" and node:
+			problems.append("{path}: genome {g} is an outgroup, which sits at no node, but is placed at {n}".format(path=path, g=genome, n=node))
+		elif role != "outgroup" and not node:
+			problems.append("{path}: genome {g} sits at no node; only an outgroup does".format(path=path, g=genome))
+		elif node and node not in nodes:
 			problems.append("{path}: genome {g} is placed at node {n}, which is not in the tree".format(path=path, g=genome, n=node))
 		if role not in ROLES:
 			problems.append("{path}: genome {g} has the role {r}, which is not one of {known}".format(
@@ -69,7 +77,7 @@ def load_genomes(conn, path):
 	if "role" not in columns:
 		conn.execute("ALTER TABLE genomes ADD COLUMN role TEXT")
 	conn.executemany("INSERT INTO genomes (id, genome, role) VALUES (?, ?, ?)",
-		[(node_ids[node], genome, role) for genome, node, role in rows])
+		[(node_ids[node] if node else NO_NODE, genome, role) for genome, node, role in rows])
 	conn.commit()
 	return len(rows)
 
@@ -86,7 +94,7 @@ def read_genomes(database):
 		if "role" not in columns:
 			return []
 		return [tuple(row) for row in conn.execute(
-			"SELECT g.genome, n.name, g.role FROM genomes g JOIN nodes n ON n.id = g.id ORDER BY g.rowid")]
+			"SELECT g.genome, coalesce(n.name, ''), g.role FROM genomes g LEFT JOIN nodes n ON n.id = g.id ORDER BY g.rowid")]
 	finally:
 		if conn is not database:
 			conn.close()
