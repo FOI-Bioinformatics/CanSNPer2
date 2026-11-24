@@ -202,3 +202,72 @@ def node_path(database, node):
 		path.append(names[i])
 		i = parent.get(i)
 	return path[::-1]
+
+
+def descend(database, call, refdir, site_rows, screen_fn):
+	'''Choose the local reference by walking down the tree from call (the root without a call).
+		At each node, the child subtrees that hold representative genomes with a file are the
+		options; a subtree whose own canSNP is ancestral in site_rows is left out. When the
+		derived canSNPs of site_rows lie in exactly one of them, the walk goes there without a
+		screen; otherwise one representative of each subtree is screened (screen_fn: {genome:
+		fasta} -> [(genome, share, matched bases)], best first) and the walk follows the best.
+		It ends at a node without such subtrees, whose representative is chosen. Reads that
+		match none of the screened genomes end the walk without a choice when nothing was chosen
+		before. Returns (Candidate or None, steps), steps being {"node", "how", "share",
+		"runner_up"} for each step down.'''
+	conn = sqlite3.connect(str(database))
+	try:
+		names = dict(conn.execute("SELECT id, name FROM nodes"))
+		children = {}
+		for parent, child in conn.execute("SELECT parent, child FROM tree WHERE parent != child"):
+			children.setdefault(parent, []).append(child)
+		reps = {}
+		ids = {name: i for i, name in names.items()}
+		for genome, node, role in read_genomes(conn):
+			path = local_path(refdir, genome)
+			if role == "representative" and node in ids and os.path.isfile(path):
+				reps.setdefault(ids[node], []).append(Candidate(genome, node, path))
+	finally:
+		conn.close()
+	states = {row["Name"]: row["state"] for row in site_rows}
+	below = {}
+	def subtree(i):
+		'''node ids of the subtree of i, i first, in depth-first order'''
+		if i not in below:
+			out = [i]
+			for c in children.get(i, []):
+				out.extend(subtree(c))
+			below[i] = out
+		return below[i]
+	def genomes_in(i):
+		return [c for n in subtree(i) for c in reps.get(n, [])]
+	if call in ids:
+		node = ids[call]
+	else:
+		has_parent = {c for kids in children.values() for c in kids}
+		roots = [i for i in names if i not in has_parent]
+		if not roots:
+			return None, []
+		node = roots[0]
+	steps = []
+	while True:
+		options = [c for c in children.get(node, []) if genomes_in(c) and states.get(names[c]) != "ancestral"]
+		if not options:
+			break
+		supported = [c for c in options if any(states.get(names[n]) == "derived" for n in subtree(c))]
+		if len(supported) == 1 or len(options) == 1:
+			node = supported[0] if len(supported) == 1 else options[0]
+			steps.append({"node": names[node], "how": "counts", "share": None, "runner_up": None})
+			continue
+		pool = supported or options
+		first = {genomes_in(c)[0].genome: c for c in pool}
+		ranked = screen_fn({g: genomes_in(c)[0].path for g, c in first.items()})
+		if not ranked or ranked[0][2] == 0:
+			if not steps:
+				return None, steps
+			break
+		node = first[ranked[0][0]]
+		steps.append({"node": names[node], "how": "screen", "share": ranked[0][1],
+				"runner_up": ranked[1][1] if len(ranked) > 1 else None})
+	found = reps.get(node) or genomes_in(node)
+	return (found[0] if found else None), steps

@@ -958,11 +958,17 @@ called at `BR.anthropi.1.1.1.1`.
 
 `--local_references` adds rounds against a genome of the scheme closer to the sample:
 
-1. From the call of the first round, the candidates are the representative genomes of the
-   terminal nodes below it (all of them without a call), from the genomes file of the scheme
-   (`CanSNPer2-database --genomes`).
-2. A subsample of the reads (`--screen_reads`, default 100,000 per file) is mapped to all
-   candidates at once, and the genome with the most matched bases is the local reference.
+1. The local reference is one of the representative genomes of the terminal nodes, from the
+   genomes file of the scheme (`CanSNPer2-database --genomes`). It is found by walking down
+   the tree from the call of the first round (from the root without a call). At each node,
+   the child subtrees that hold representatives are the options, less those whose own canSNP
+   is ancestral. When the derived canSNPs of the first round lie in one of them, the walk
+   goes there.
+2. Otherwise a subsample of the reads (`--screen_reads`, default 100,000 per file) is mapped
+   to one representative of each option at once, and the walk follows the one with the most
+   matched bases. The walk ends at a terminal node, whose representative is the local
+   reference. When two subtrees get similar shares of the screened bases (the second at least
+   20 % and at least half the first), a warning says so.
 3. The canSNP positions are lifted from the scheme reference to the local reference by
    aligning the two genomes with minimap2 (asm20, as assembly typing does); a canSNP is lifted
    only when the local genome has its ancestral or derived base there. The lift is cached in
@@ -979,7 +985,6 @@ The local genomes are read from `<refdir>/local/<accession>.fna`;
 `CanSNPer2-download --database <db> --outdir <refdir> --local_references` fetches the
 representatives of a scheme. The site count file gives for each canSNP the genome its counts
 came from (`source`) and the lifted position (`lifted_position`, contig:position and strand),
-and the `Reads:` line names the local reference, its node, its share of the screened bases and
-the number of conflicts. When the second genome of the screen has 20 % or more of the
-matched bases, a warning says that the sample may hold more than one strain.
+and the `Reads:` line names the local reference, its node, its share of the screened bases at
+the last screen, the number of screens and the number of conflicts.
 

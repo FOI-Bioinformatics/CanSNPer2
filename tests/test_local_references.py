@@ -108,6 +108,7 @@ def test_a_local_reference_reaches_the_leaf(tmp_path):
 	assert rows["X.5"]["lifted_position"].startswith("x2:")
 	reads = [l for l in comments(out / "s_snps.txt") if l.startswith("Reads:")][0]
 	assert "local_reference=LX local_node=X.5" in reads and "conflicts=0" in reads
+	assert "screens=0" in reads, "the first round points to the X subtree, no screen is needed"
 	settings = [l for l in comments(out / "s_snps.txt") if l.startswith("Typing settings:")][0]
 	assert "local_references=on" in settings
 	assert any(p.name.endswith(".lift.tsv") for p in (tmp_path / "refs" / "local" / "lift").iterdir()), "the lift is cached"

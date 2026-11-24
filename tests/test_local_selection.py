@@ -72,3 +72,88 @@ def test_screen_picks_the_genome_the_reads_come_from(tmp_path):
 		{name: str(tmp_path / (name + ".fna")) for name in genomes}, preset="sr", n_reads=2000, tmpdir=str(tmp_path))
 	assert ranked[0][0] == "G2"
 	assert ranked[0][1] > 0.8, "the share of the matched bases that went to G2"
+
+
+# the descent: from the call down the tree, one representative per child subtree screened only
+# where the counts of the first round cannot tell the subtrees apart
+
+from CanSNPer2.modules.LocalReferences import descend
+
+
+def rows(**states):
+	return [{"Name": name, "state": state} for name, state in states.items()]
+
+
+class StubScreen:
+	'''a screen that answers with fixed winners and records the genomes it was given'''
+	def __init__(self, *winners):
+		self.winners = list(winners)
+		self.calls = []
+
+	def __call__(self, genomes):
+		self.calls.append(sorted(genomes))
+		win = self.winners.pop(0)
+		return [(win, 0.7, 700)] + [(g, 0.3 / max(1, len(genomes) - 1), 100) for g in sorted(genomes) if g != win]
+
+
+def with_files(tmp_path, *names):
+	db, refdir = scheme(tmp_path)
+	for g in names:
+		(tmp_path / "refs" / "local" / (g + ".fna")).write_text(">c\nACGT\n")
+	return db, refdir
+
+
+def test_counts_that_point_to_one_subtree_need_no_screen(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	stub = StubScreen()
+	chosen, steps = descend(db, "NA", refdir, rows(**{"A.1": "derived", "A.2": "derived", "B.1": "no_reads"}), stub)
+	assert chosen.genome == "GA2" and stub.calls == []
+	assert [s["how"] for s in steps] == ["counts", "counts"]
+
+
+def test_without_counts_one_representative_per_subtree_is_screened(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	stub = StubScreen("GB1")
+	chosen, steps = descend(db, "NA", refdir, rows(), stub)
+	assert chosen.genome == "GB1"
+	assert len(stub.calls) == 1 and len(stub.calls[0]) == 2 and "GB1" in stub.calls[0], "one genome of the A subtree, one of B"
+	assert steps[0]["how"] == "screen" and steps[0]["share"] == 0.7
+
+
+def test_the_descent_screens_again_at_each_branching(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	stub = StubScreen("GA2", "GA3")
+	chosen, steps = descend(db, "NA", refdir, rows(), stub)
+	assert chosen.genome == "GA3"
+	assert stub.calls[1] == ["GA2", "GA3"], "below A.1: the representatives of A.2 and A.3"
+	assert [s["node"] for s in steps] == ["A.1", "A.3"]
+
+
+def test_a_subtree_whose_first_canSNP_is_ancestral_is_left_out(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	stub = StubScreen()
+	chosen, _ = descend(db, "NA", refdir, rows(**{"A.1": "ancestral"}), stub)
+	assert chosen.genome == "GB1" and stub.calls == []
+
+
+def test_the_descent_starts_at_the_call(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	stub = StubScreen("GA3")
+	chosen, _ = descend(db, "A.1", refdir, rows(), stub)
+	assert chosen.genome == "GA3" and stub.calls == [["GA2", "GA3"]]
+	chosen, _ = descend(db, "A.2", refdir, rows(), StubScreen())
+	assert chosen.genome == "GA2", "a terminal call: its own representative"
+
+
+def test_subtrees_without_genome_files_are_passed_over(tmp_path):
+	db, refdir = with_files(tmp_path, "GB1")
+	chosen, _ = descend(db, "NA", refdir, rows(), StubScreen())
+	assert chosen.genome == "GB1"
+	db2, refdir2 = with_files(tmp_path / "none")
+	assert descend(db2, "NA", refdir2, rows(), StubScreen()) == (None, [])
+
+
+def test_reads_that_map_to_none_of_the_genomes_stop_the_descent(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	chosen, steps = descend(db, "NA", refdir, rows(), lambda genomes: [(g, 0.0, 0) for g in sorted(genomes)])
+	assert chosen is None

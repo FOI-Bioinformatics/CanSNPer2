@@ -18,7 +18,7 @@ from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, write_s
 from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
 from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
 from CanSNPer2.modules.LiftOver import lift
-from CanSNPer2.modules.LocalReferences import candidates, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
+from CanSNPer2.modules.LocalReferences import candidates, descend, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
 from CanSNPer2.modules.ParsePileup import PLATFORMS
 import subprocess
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
@@ -1042,11 +1042,13 @@ class CanSNPer2(object):
 
 	def local_reference_rounds(self, q, site_rows, database):
 		'''Further rounds of a read sample against a local reference (LocalReferences): from the
-			call of the counts so far, the representatives below it are screened with a read
-			subsample, the canSNPs are lifted to the best one, the reads are mapped to it and the
-			counts merged. Repeats while the chosen genome changes, at most local_rounds times.
-			Returns the merged site rows and what was done, {"genome", "node", "share", "rounds"},
-			or None when no round was made.'''
+			call of the counts so far, the walk down the tree (descend) chooses a representative
+			genome, by the counts where they point to one subtree and by a screen of a read
+			subsample against one representative per subtree where they do not; the canSNPs are
+			lifted to it, the reads are mapped to it and the counts merged. Repeats while the
+			chosen genome changes, at most local_rounds times. Returns the merged site rows and
+			what was done, {"genome", "node", "share", "rounds", "screens"}, or None when no
+			round was made.'''
 		sample = self.read_samples[q]
 		mapper = self.aligner
 		done = None
@@ -1066,19 +1068,25 @@ class CanSNPer2(object):
 			if not found:
 				logger.info("{s}: no local reference below {call}".format(s=sample.name, call=call))
 				break
-			ranked = screen(sample.files, {c.genome: c.path for c in found}, preset=PLATFORMS[mapper.platform]["preset"],
-					n_reads=self.screen_reads, tmpdir=self.tmpdir, threads=mapper.threads, minimap2=mapper.executable())
-			best = ranked[0]
-			if best[2] == 0:
-				logger.info("{s}: no read of the screen mapped to the local references below {call}".format(s=sample.name, call=call))
+			def screen_fn(genomes):
+				return screen(sample.files, genomes, preset=PLATFORMS[mapper.platform]["preset"],
+						n_reads=self.screen_reads, tmpdir=self.tmpdir, threads=mapper.threads, minimap2=mapper.executable())
+			local, steps = descend(database, call, self.refdir, site_rows, screen_fn)
+			if local is None:
+				logger.info("{s}: the screened reads matched none of the local references below {call}".format(s=sample.name, call=call))
 				break
-			local = next(c for c in found if c.genome == best[0])
+			screened = [st for st in steps if st["how"] == "screen"]
+			share = screened[-1]["share"] if screened else 1.0
+			logger.info("{s}: local reference {g} ({n}), reached from {call} in {k} step(s), {m} by screen".format(
+					s=sample.name, g=local.genome, n=local.node, call=call, k=len(steps), m=len(screened)))
+			for st in screened:
+				if st["runner_up"] is not None and st["runner_up"] >= 0.2 and st["runner_up"] >= st["share"] / 2:
+					logger.warning("{s}: at {n} the screen gave {a:.0%} and {b:.0%} of the matched bases to two subtrees; the sample may hold more than one strain, or lie between them".format(
+							s=sample.name, n=st["node"], a=st["share"], b=st["runner_up"]))
 			if local.genome in chosen:
 				break
 			chosen.add(local.genome)
-			if len(ranked) > 1 and ranked[1][1] >= 0.2:
-				logger.warning("{s}: the screen gave {a} {pa:.0%} and {b} {pb:.0%} of the matched bases; the sample may hold more than one strain".format(
-						s=sample.name, a=ranked[0][0], pa=ranked[0][1], b=ranked[1][0], pb=ranked[1][1]))
+			best = (local.genome, share)
 			lifts = {}
 			for ref in self.get_references():
 				ref_name = ref.rsplit(".", 1)[0]
@@ -1105,7 +1113,8 @@ class CanSNPer2(object):
 				reader.run(output, reference=ref_name)
 				second.extend(read_site_counts(reader.counts_file))
 			site_rows = merge_counts(site_rows, second, mapper.setting("min_depth"))
-			done = {"genome": local.genome, "node": local.node, "share": best[1], "rounds": round_number}
+			done = {"genome": local.genome, "node": local.node, "share": best[1], "rounds": round_number,
+					"screens": done["screens"] + len(screened) if done else len(screened)}
 			logger.info("{s}: round {r} against the local reference {g} ({n}), {share:.0%} of the screened bases".format(
 					s=sample.name, r=round_number + 1, g=local.genome, n=local.node, share=best[1]))
 		return site_rows, done
@@ -1511,8 +1520,8 @@ class CanSNPer2(object):
 								d=statistics.median(depths) if depths else 0, m=len(mixed))
 						if self.local_references:
 							conflicts = sum(1 for row in site_rows if row["state"] == "conflict")
-							reads_line += (" local_reference={g} local_node={n} screen_share={s:.2f} local_rounds={r} conflicts={c}".format(
-									g=local_done["genome"], n=local_done["node"], s=local_done["share"], r=local_done["rounds"], c=conflicts)
+							reads_line += (" local_reference={g} local_node={n} screen_share={s:.2f} screens={k} local_rounds={r} conflicts={c}".format(
+									g=local_done["genome"], n=local_done["node"], s=local_done["share"], k=local_done["screens"], r=local_done["rounds"], c=conflicts)
 									if local_done else " local_reference=none")
 						if self.export:
 							with open(self.sample_output(self.query_name, "_site_counts.tsv"), "w") as counts_out:
