@@ -21,6 +21,7 @@ import sqlite3
 import tempfile
 
 from CanSNPer2.modules.DatabaseConnection import GENOME_SOURCE_COLUMNS
+from CanSNPer2.modules.SchemeGenomes import GENOMES_COLUMNS, read_genomes
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,7 @@ def export_source(database, outdir, name=None):
 			ORDER BY a.node_id, a.rank""").fetchall()
 	finally:
 		conn.close()
+	scheme_genomes = read_genomes(database)
 	without_genome = [row[0] for row in snps if row[3] is None]
 	if without_genome:
 		raise ExportError("{n} canSNP(s) point to a reference genome that is not in the snp_references table: "
@@ -162,11 +164,16 @@ def export_source(database, outdir, name=None):
 		for key in ("tree", "snp", "references")}
 	lines = lambda rows: "".join("\t".join(row) + "\n" for row in rows)
 	rows = [[text(value) for value in row[:-1]] + [typed_text(row[-1])] for row in snps]
-	write_outputs({
+	contents = {
 		files["tree"]: lines(paths),
 		files["snp"]: lines([CANSNP_COLUMNS] + rows),
 		files["references"]: lines([GENOME_SOURCE_COLUMNS] + [[text(value) for value in row] for row in references]),
-	})
+	}
+	if scheme_genomes:
+		'''the genomes file is written only for a database that holds genomes'''
+		files["genomes"] = os.path.join(outdir, "{name}_genomes.txt".format(name=name))
+		contents[files["genomes"]] = lines([GENOMES_COLUMNS] + scheme_genomes)
+	write_outputs(contents)
 	typed = sum(1 for row in snps if typed_text(row[-1]) == "yes")
 	logger.info("Exported {nodes} nodes, {snps} canSNPs ({typed} typed) and {refs} reference genomes to {outdir}".format(
 		nodes=len(paths), snps=len(snps), typed=typed, refs=len(references), outdir=outdir))

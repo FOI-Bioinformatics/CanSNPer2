@@ -3,6 +3,7 @@ logger = logging.getLogger(__name__)
 from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, CANSNP_SOURCE_COLUMNS, SNP_SOURCE_COLUMNS, TYPED_VALUES, annotation_columns, cansnp_row, SourceFileError, DatabaseWriteError, open_source
 from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names, split_row
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
+from CanSNPer2.modules.SchemeGenomes import load_genomes
 from importlib import import_module
 from datetime import date
 
@@ -109,6 +110,10 @@ class CanSNPDatabase(DatabaseFunctions):
 		if kwargs["annotation"]:
 			logger.info("Load annotation file!")
 			self.load_cansnp_annotation(kwargs["annotation"])
+		if kwargs.get("genomes"):
+			'''the genomes of the scheme and their nodes, checked against the tree just loaded'''
+			logger.info("Load genomes file!")
+			load_genomes(self.conn, kwargs["genomes"])
 		if kwargs["create"]:
 			'''a new database records the format, the CanSNPer2 version and the date it was built,
 				and what is known of the scheme: scheme_info is a dict of the keys of SchemeInfo'''

@@ -29,18 +29,19 @@ class DatabaseImportError(Exception):
 	'''the source files could not be imported into a current-format database'''
 
 
-def import_from_sources(tree, annotation, references, database, tmpdir="/tmp", verbose=False, scheme_info=None):
+def import_from_sources(tree, annotation, references, database, tmpdir="/tmp", verbose=False, scheme_info=None, genomes=None):
 	'''Build the database from the three source files and return a dict with the
 		row counts. The destination must not exist yet; the source files are never
 		changed. scheme_info: the known keys of the scheme_info table (scheme, status,
-		source); format, built_with and built are always written.'''
+		source); format, built_with and built are always written. genomes: the optional genomes
+		file (genome, node, role) of the scheme.'''
 	if os.path.exists(database):
 		raise DatabaseImportError("the destination database {0} already exists, choose a new name "
 			"or remove it first".format(database))
 	try:
 		CanSNPDatabase(database=database, create=True, source_type="CanSNPer",
 			tree=tree, annotation=annotation, references=references,
-			tmpdir=tmpdir, verbose=verbose, scheme_info=scheme_info)
+			tmpdir=tmpdir, verbose=verbose, scheme_info=scheme_info, genomes=genomes)
 	except Exception as e:
 		'''the loaders may refuse a source file (SourceFileError, InputError) or die on
 			a broken one; either way a started database must not stay behind'''
