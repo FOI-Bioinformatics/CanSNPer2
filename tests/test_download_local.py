@@ -77,3 +77,41 @@ def test_an_accession_without_a_listed_assembly_is_a_failure(tmp_path):
 	obj.retrieve = no_listing
 	assert obj.run_local() == 1
 	assert (tmp_path / "refs" / "local" / "GCA_000000011.1.fna").exists(), "the others are still fetched"
+
+
+# fetched while typing (CanSNPer2 --fetch_local)
+
+from CanSNPer2.DownloadGenomes import LocalFetcher
+
+
+def fetcher(tmp_path, listing=LISTING):
+	links = []
+	def retrieve(self, link, target, timeout=None):
+		links.append(link)
+		data = GENOME if link.endswith(".gz") else listing.encode()
+		with open(target, "wb") as out:
+			out.write(data)
+	fetch = LocalFetcher(str(tmp_path / "refs"))
+	fetch.retrieve = retrieve
+	return fetch, links
+
+
+def test_the_fetcher_downloads_the_genomes_asked_for(tmp_path, monkeypatch):
+	fetch, links = fetcher(tmp_path)
+	monkeypatch.setattr(DownloadGenomes, "retrieve", fetch.retrieve)
+	monkeypatch.setattr(DownloadGenomes, "rename_to_genbank", lambda self, link, path: None)
+	assert fetch(["GCA_000000011.1"]) == {"GCA_000000011.1"}
+	assert open(tmp_path / "refs" / "local" / "GCA_000000011.1.fna").read().startswith(">c1")
+	assert fetch.fetched == ["GCA_000000011.1"]
+	n = len(links)
+	assert fetch(["GCA_000000011.1"]) == {"GCA_000000011.1"} and len(links) == n, "a genome on disk is not fetched again"
+
+
+def test_a_genome_that_failed_is_not_tried_again_in_the_run(tmp_path, monkeypatch):
+	fetch, links = fetcher(tmp_path, listing="<html></html>")
+	monkeypatch.setattr(DownloadGenomes, "retrieve", fetch.retrieve)
+	assert fetch(["GCA_000000011.1"]) == set()
+	assert "GCA_000000011.1" in fetch.failed
+	n = len(links)
+	assert fetch(["GCA_000000011.1"]) == set() and len(links) == n
+	assert not (tmp_path / "refs" / "local" / "GCA_000000011.1.fna").exists()

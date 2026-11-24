@@ -376,9 +376,10 @@ usage: CanSNPer2 [-h] [-db ] [-o DIR] [--save_tree] [--no_snpfiles]
                  [--min_allele_fraction MIN_ALLELE_FRACTION]
                  [--min_mapq MIN_MAPQ] [--min_baseq MIN_BASEQ]
                  [--mixed_sites MIXED_SITES] [--local_references]
-                 [--local_rounds LOCAL_ROUNDS] [--screen_reads SCREEN_READS]
-                 [--threads THREADS] [--skip_alignment] [--keep_temp]
-                 [--tmpdir ] [--logdir ] [--verbose] [--debug] [--supress]
+                 [--local_rounds LOCAL_ROUNDS] [--fetch_local]
+                 [--screen_reads SCREEN_READS] [--threads THREADS]
+                 [--skip_alignment] [--keep_temp] [--tmpdir ] [--logdir ]
+                 [--verbose] [--debug] [--supress]
                  [query ...]
 
 CanSNPer2 - type query assemblies (or reads) against a CanSNP database
@@ -480,6 +481,10 @@ Read typing options:
   --local_rounds LOCAL_ROUNDS
                         With --local_references: at most this many rounds
                         against local references (default 2)
+  --fetch_local         With --local_references: download the representative
+                        genomes the choice of the local reference needs and
+                        that are not in <refdir>/local yet (from NCBI, while
+                        typing); by default typing never downloads
   --screen_reads SCREEN_READS
                         With --local_references: reads of each file mapped to
                         the candidate genomes to choose the local reference
@@ -989,10 +994,18 @@ called at `BR.anthropi.1.1.1.1`.
 
 The local genomes are read from `<refdir>/local/<accession>.fna`;
 `CanSNPer2-download --database <db> --outdir <refdir> --local_references` fetches the
-representatives of a scheme. The site count file gives for each canSNP the genome its counts
+representatives of a scheme (102 genomes, about 400 MB, for `brucella_genus`). Alternatively,
+`--fetch_local` downloads from NCBI during typing only the genomes that step 2 or 3 uses and that
+are not in the folder yet: the chosen genome when the counts decide, the screened genomes
+otherwise. A downloaded genome stays in the folder for later runs; a genome that cannot be
+fetched is left out, as a missing file is. Typing then depends on network access to NCBI, so the
+option is off by default; on compute nodes without it, fetch the genomes beforehand.
+
+The site count file gives for each canSNP the genome its counts
 came from (`source`) and the lifted position (`lifted_position`, contig:position and strand),
 and the `Reads:` line names the local reference, its node, its share of the screened bases at
-the last screen, the number of screens and the number of conflicts.
+the last screen, the number of screens and the number of conflicts; with `--fetch_local` it also
+gives the number of genomes fetched for the sample (`fetched=`).
 
 **Evaluation.** The nine *Brucella* genomes of the evaluation above whose 50x Illumina reads
 missed their assembly call against 16M (all outside the classical cluster) were typed again

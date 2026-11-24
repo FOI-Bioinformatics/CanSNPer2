@@ -199,3 +199,57 @@ def test_up_to_three_representatives_of_each_subtree_are_screened(tmp_path):
 	chosen, steps = descend(db, "NA", refdir, rows(), stub)
 	assert stub.calls[0] == ["GA2", "GA3", "GB1"], "both leaves of the A subtree stand for it"
 	assert chosen.genome == "GA3" and [s["node"] for s in steps] == ["A.1", "A.3"]
+
+
+# genomes fetched while typing (--fetch_local)
+
+class StubFetch:
+	'''writes the file of each genome asked for, except those listed as failing; records the calls'''
+	def __init__(self, local, failing=()):
+		self.local, self.failing, self.calls = local, set(failing), []
+
+	def __call__(self, genomes):
+		self.calls.append(sorted(genomes))
+		for g in genomes:
+			if g not in self.failing:
+				(self.local / (g + ".fna")).write_text(">c\nACGT\n")
+		return {g for g in genomes if g not in self.failing}
+
+
+def test_only_the_genomes_the_descent_uses_are_fetched(tmp_path):
+	db, refdir = with_files(tmp_path)
+	fetch = StubFetch(tmp_path / "refs" / "local")
+	chosen, steps = descend(db, "NA", refdir, rows(**{"A.1": "derived", "A.2": "derived"}), StubScreen(), fetch=fetch)
+	assert chosen.genome == "GA2" and [s["how"] for s in steps] == ["counts", "counts"]
+	assert fetch.calls == [["GA2"]], "the counts chose the path, so only the chosen genome is fetched"
+
+
+def test_the_screened_genomes_are_fetched_together(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2")
+	fetch = StubFetch(tmp_path / "refs" / "local")
+	stub = StubScreen("GB1")
+	chosen, _ = descend(db, "NA", refdir, rows(), stub, fetch=fetch)
+	assert chosen.genome == "GB1"
+	assert fetch.calls == [["GA3", "GB1"]], "one call for the genomes of the screen that have no file"
+	assert stub.calls == [["GA2", "GA3", "GB1"]]
+
+
+def test_a_genome_that_cannot_be_fetched_is_passed_over(tmp_path):
+	db, refdir = with_files(tmp_path)
+	fetch = StubFetch(tmp_path / "refs" / "local", failing=["GA3"])
+	stub = StubScreen("GB1")
+	chosen, _ = descend(db, "NA", refdir, rows(), stub, fetch=fetch)
+	assert chosen.genome == "GB1"
+	assert stub.calls == [["GA2", "GB1"]], "GA3 is left out of the screen"
+
+
+def test_without_any_fetched_genome_there_is_no_choice(tmp_path):
+	db, refdir = with_files(tmp_path)
+	fetch = StubFetch(tmp_path / "refs" / "local", failing=["GA2", "GA3", "GB1"])
+	assert descend(db, "NA", refdir, rows(), StubScreen(), fetch=fetch)[0] is None
+
+
+def test_without_fetch_missing_files_are_not_fetched(tmp_path):
+	db, refdir = with_files(tmp_path, "GB1")
+	chosen, _ = descend(db, "NA", refdir, rows(), StubScreen())
+	assert chosen.genome == "GB1"

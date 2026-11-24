@@ -165,6 +165,7 @@ def command():
 	read_options.add_argument('--mixed_sites',	type=positive_int, default=3,			help="Mixed canSNP sites at which a sample is reported as possibly mixed (default 3)")
 	read_options.add_argument('--local_references', action='store_true',				help="After the first round, map the reads again to the genome of the scheme closest to the sample (chosen among the representatives below the first call, see CanSNPer2-download --local_references) and read the canSNPs at their positions lifted to it")
 	read_options.add_argument('--local_rounds',	type=positive_int, default=2,			help="With --local_references: at most this many rounds against local references (default 2)")
+	read_options.add_argument('--fetch_local',	action='store_true',								help="With --local_references: download the representative genomes the choice of the local reference needs and that are not in <refdir>/local yet (from NCBI, while typing); by default typing never downloads")
 	read_options.add_argument('--screen_reads',	type=positive_int, default=100000,		help="With --local_references: reads of each file mapped to the candidate genomes to choose the local reference (default 100000)")
 	read_options.add_argument('--threads',		type=positive_int, default=4,			help="Threads of minimap2 and samtools sort for each reference (default 4)")
 
@@ -242,6 +243,8 @@ def command():
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
 	if args.tmpdir is not None and not args.tmpdir.strip():
 		parser.error("--tmpdir cannot be empty")
+	if args.fetch_local and not args.local_references:
+		parser.error("--fetch_local is used with --local_references")
 	if args.tmpdir is None:
 		'''no --tmpdir: use the first folder that can be written to'''
 		problems = []
@@ -308,7 +311,8 @@ def command():
 									threads=args.threads,
 									local_references=args.local_references,
 									local_rounds=args.local_rounds,
-									screen_reads=args.screen_reads
+									screen_reads=args.screen_reads,
+									fetch_local=args.fetch_local
 		)
 	except CanSNPer2Error as e:
 		logger.error(e.value) ## an unusable output, log or tmp folder is reported before anything is aligned

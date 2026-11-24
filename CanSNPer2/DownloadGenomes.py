@@ -12,6 +12,10 @@ from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 
 import argparse,os
+try:
+	import fcntl
+except ImportError: ## not on Windows; the lock between runs is then left out
+	fcntl = None
 import multiprocessing
 '''python 3.14 made forkserver the default start method on linux, where the worker target has
 	to be picklable and the bound self.download (with the whole DownloadGenomes state) is not,
@@ -299,6 +303,32 @@ class DownloadGenomes(object):
 		### symlink target is relative to the link location, so no chdir needed (issue #8)
 		os.symlink(target, link)
 
+	def fetch_local(self, accession, directory, results):
+		'''Fetch one genome by its accession alone into <directory>/<accession>.fna and put
+			(accession, ok, reason) on results. The NCBI folder of a GCF accession is in the RefSeq
+			tree, of a GCA accession in the GenBank tree; the assembly name is read from the folder
+			listing.'''
+		source = "refseq" if accession.startswith("GCF_") else "genbank"
+		folder = None
+		try:
+			n1, n2, n3 = textwrap.wrap(accession.split("_")[-1].split(".")[0], 3)
+			folder = "https://ftp.ncbi.nlm.nih.gov/genomes/all/{prefix}/{n1}/{n2}/{n3}/".format(prefix=accession[:3], n1=n1, n2=n2, n3=n3)
+			fd, listing = tempfile.mkstemp(suffix=".html")
+			os.close(fd)
+			try:
+				self.retrieve(folder, listing)
+				with open(listing, encoding="utf-8", errors="replace") as fin:
+					assembly = assembly_from_listing(fin.read(), accession)
+			finally:
+				os.remove(listing)
+		except Exception as e:
+			results.put((accession, False, "its NCBI folder could not be read: {e}".format(e=e)))
+			return
+		if not assembly:
+			results.put((accession, False, "no assembly folder for it in {folder}".format(folder=folder)))
+			return
+		self.download(accession, assembly, accession, source=source, directory=directory, results=results)
+
 	def run_local(self):
 		'''Fetch the representative genomes of the genomes table of the scheme into
 			<directory>/local/<accession>.fna, for read typing with --local_references. The NCBI
@@ -316,29 +346,9 @@ class DownloadGenomes(object):
 		directory = os.path.join(self.directory, "local")
 		os.makedirs(directory, exist_ok=True)
 		results = queue.Queue()
-		def fetch(accession):
-			source = "refseq" if accession.startswith("GCF_") else "genbank"
-			try:
-				n1, n2, n3 = textwrap.wrap(accession.split("_")[-1].split(".")[0], 3)
-				folder = "https://ftp.ncbi.nlm.nih.gov/genomes/all/{prefix}/{n1}/{n2}/{n3}/".format(prefix=accession[:3], n1=n1, n2=n2, n3=n3)
-				fd, listing = tempfile.mkstemp(suffix=".html")
-				os.close(fd)
-				try:
-					self.retrieve(folder, listing)
-					with open(listing, encoding="utf-8", errors="replace") as fin:
-						assembly = assembly_from_listing(fin.read(), accession)
-				finally:
-					os.remove(listing)
-			except Exception as e:
-				results.put((accession, False, "its NCBI folder could not be read: {e}".format(e=e)))
-				return
-			if not assembly:
-				results.put((accession, False, "no assembly folder for it in {folder}".format(folder=folder)))
-				return
-			self.download(accession, assembly, accession, source=source, directory=directory, results=results)
 		logger.info("Downloading {n} local reference genomes into {d}".format(n=len(genomes), d=directory))
 		with ThreadPoolExecutor(LOCAL_WORKERS) as pool:
-			list(pool.map(fetch, genomes))
+			list(pool.map(lambda accession: self.fetch_local(accession, directory, results), genomes))
 		reports = {}
 		while not results.empty():
 			accession, success, reason = results.get()
@@ -411,6 +421,61 @@ class DownloadGenomes(object):
 			return 1
 		logging.info("Done!")
 		return 0
+
+
+class LocalFetcher(object):
+	'''Fetches representative genomes into <refdir>/local while reads are typed (CanSNPer2
+		--fetch_local), only the ones the choice of the local reference needs. Called with a list
+		of accessions, it returns the set of them that have a file afterwards. A lock file per
+		genome keeps two runs that share the folder from writing the same genome; a genome that
+		could not be fetched is not tried again in the same run.'''
+	def __init__(self, refdir):
+		self.directory = os.path.join(refdir, "local")
+		self.failed = {}   ## accession: reason
+		self.fetched = []  ## accessions downloaded in this run, in order
+		self._downloader = None
+
+	def path(self, accession):
+		return os.path.join(self.directory, accession + ".fna")
+
+	def downloader(self):
+		if self._downloader is None:
+			self._downloader = DownloadGenomes(None, directory=self.directory)
+		return self._downloader
+
+	def fetch_one(self, accession):
+		results = queue.Queue()
+		lock_path = os.path.join(self.directory, ".{a}.lock".format(a=accession))
+		with open(lock_path, "w") as lock:
+			if fcntl is not None:
+				fcntl.flock(lock, fcntl.LOCK_EX)
+			try:
+				if os.path.isfile(self.path(accession)):
+					return accession, True, "", False
+				self.downloader().fetch_local(accession, self.directory, results)
+			finally:
+				if fcntl is not None:
+					fcntl.flock(lock, fcntl.LOCK_UN)
+		success, reason = False, "no report"
+		while not results.empty():
+			_acc, success, reason = results.get()
+		return accession, success and os.path.isfile(self.path(accession)), reason, True
+
+	def __call__(self, accessions):
+		from concurrent.futures import ThreadPoolExecutor
+		wanted = [a for a in dict.fromkeys(accessions) if a not in self.failed and not os.path.isfile(self.path(a))]
+		if wanted:
+			os.makedirs(self.directory, exist_ok=True)
+			logger.info("Fetching {n} local reference genome(s) into {d}: {g}".format(n=len(wanted), d=self.directory, g=", ".join(wanted)))
+			with ThreadPoolExecutor(min(LOCAL_WORKERS, len(wanted))) as pool:
+				for accession, success, reason, downloaded in pool.map(self.fetch_one, wanted):
+					if not success:
+						self.failed[accession] = reason
+						logger.warning("The local reference {a} could not be fetched and is not used: {r}".format(a=accession, r=reason))
+					elif downloaded:
+						self.fetched.append(accession)
+		return {a for a in accessions if os.path.isfile(self.path(a))}
+
 
 def command():
 	parser = argparse.ArgumentParser(

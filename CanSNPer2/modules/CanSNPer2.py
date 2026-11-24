@@ -18,6 +18,7 @@ from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, write_s
 from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
 from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
 from CanSNPer2.modules.LiftOver import lift
+from CanSNPer2.DownloadGenomes import LocalFetcher
 from CanSNPer2.modules.LocalReferences import candidates, descend, open_canSNPs, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
 from CanSNPer2.modules.ParsePileup import PLATFORMS
 import subprocess
@@ -160,6 +161,8 @@ class CanSNPer2(object):
 		self.local_rounds = int(kwargs.get("local_rounds") or 2)
 		self.screen_reads = int(kwargs.get("screen_reads") or 100000)
 		self.warned_missing_local = False
+		self.fetch_local = bool(kwargs.get("fetch_local", False))
+		self.sample_fetched = 0
 		mixed_sites = kwargs.get("mixed_sites")
 		self.mixed_sites = 3 if mixed_sites is None else int(mixed_sites)
 		'''how long one round of alignments (the query against all references, in parallel) may
@@ -207,6 +210,9 @@ class CanSNPer2(object):
 			logger.info("Temporary files of this run are written to {tmpdir}".format(tmpdir=self.tmpdir))
 
 		self.refdir = os.path.join(self.workdir, self.refdir)
+		'''--fetch_local: representative genomes without a file are downloaded while typing, only the
+			ones the choice of the local reference needs'''
+		self.local_fetcher = LocalFetcher(self.refdir) if self.local_references and self.fetch_local else None
 
 		'''Fetch other key word arguments'''
 		'''the per-sample tree page is off by default since the results overview (summary.html)
@@ -330,6 +336,15 @@ class CanSNPer2(object):
 				raise CanSNPer2Error("Read typing needs minimap2 and samtools; {m} was not found. Install both (for example "
 					"conda install -c bioconda minimap2 samtools) and make sure they are in PATH".format(
 					m=" or ".join(sorted({p for mapper in missing for p in (mapper.executable(), mapper.samtools) if not shutil.which(p)})) or "one of them"))
+			if self.local_fetcher is not None:
+				folder = self.local_fetcher.directory
+				try:
+					os.makedirs(folder, exist_ok=True)
+				except OSError as e:
+					raise CanSNPer2Error("--fetch_local cannot create {folder}: {e}".format(folder=folder, e=e.strerror or e))
+				if not os.access(folder, os.W_OK):
+					raise CanSNPer2Error("--fetch_local needs to write to {folder}, which is not writable; fetch the genomes "
+						"beforehand with CanSNPer2-download --local_references instead".format(folder=folder))
 			return
 		if self.aligner.available():
 			return
@@ -1053,6 +1068,8 @@ class CanSNPer2(object):
 		mapper = self.aligner
 		done = None
 		chosen = set()
+		fetcher = self.local_fetcher
+		fetched_before = len(fetcher.fetched) if fetcher is not None else 0
 		cache_dir = os.path.join(self.refdir, LOCAL_FOLDER, "lift")
 		if not os.access(os.path.join(self.refdir, LOCAL_FOLDER), os.W_OK):
 			cache_dir = os.path.join(self.tmpdir, "lift")
@@ -1066,18 +1083,18 @@ class CanSNPer2(object):
 				logger.info("{s}: {call} has data on its path and at its children, no local round".format(s=sample.name, call=call))
 				break
 			found, missing = candidates(database, call, self.refdir)
-			if missing and not self.warned_missing_local:
+			if missing and fetcher is None and not self.warned_missing_local:
 				logger.warning("{n} representative genome(s) of the scheme have no file in {folder} and are not used as local references; "
 					"fetch them with CanSNPer2-download --database {db} --outdir {refdir} --local_references".format(
 					n=len(missing), folder=os.path.join(self.refdir, LOCAL_FOLDER), db=self.database, refdir=self.refdir))
 				self.warned_missing_local = True
-			if not found:
+			if not found and not (fetcher is not None and missing):
 				logger.info("{s}: no local reference below {call}".format(s=sample.name, call=call))
 				break
 			def screen_fn(genomes):
 				return screen(sample.files, genomes, preset=PLATFORMS[mapper.platform]["preset"],
 						n_reads=self.screen_reads, tmpdir=self.tmpdir, threads=mapper.threads, minimap2=mapper.executable())
-			local, steps = descend(database, call, self.refdir, site_rows, screen_fn)
+			local, steps = descend(database, call, self.refdir, site_rows, screen_fn, fetch=fetcher)
 			if local is None:
 				logger.info("{s}: the screened reads matched none of the local references below {call}".format(s=sample.name, call=call))
 				break
@@ -1123,6 +1140,7 @@ class CanSNPer2(object):
 					"screens": done["screens"] + len(screened) if done else len(screened)}
 			logger.info("{s}: round {r} against the local reference {g} ({n}), {share:.0%} of the screened bases".format(
 					s=sample.name, r=round_number + 1, g=local.genome, n=local.node, share=best[1]))
+		self.sample_fetched = len(fetcher.fetched) - fetched_before if fetcher is not None else 0
 		return site_rows, done
 
 	def local_reference_fits(self, database, local, lifts):
@@ -1529,6 +1547,8 @@ class CanSNPer2(object):
 							reads_line += (" local_reference={g} local_node={n} screen_share={s:.2f} screens={k} local_rounds={r} conflicts={c}".format(
 									g=local_done["genome"], n=local_done["node"], s=local_done["share"], k=local_done["screens"], r=local_done["rounds"], c=conflicts)
 									if local_done else " local_reference=none")
+							if self.local_fetcher is not None:
+								reads_line += " fetched={f}".format(f=self.sample_fetched)
 						if self.export:
 							with open(self.sample_output(self.query_name, "_site_counts.tsv"), "w") as counts_out:
 								print("\t".join(SITE_COUNT_COLUMNS), file=counts_out)

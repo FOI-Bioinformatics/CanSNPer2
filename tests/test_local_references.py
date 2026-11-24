@@ -12,6 +12,7 @@ import helpers
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2
 from CanSNPer2.modules.ParsePileup import read_site_counts
 from CanSNPer2.modules.SchemeGenomes import load_genomes
+from CanSNPer2.DownloadGenomes import LocalFetcher
 
 pytestmark = pytest.mark.skipif(shutil.which("minimap2") is None or shutil.which("samtools") is None,
 	reason="minimap2 and samtools are needed for read typing")
@@ -147,3 +148,24 @@ def test_a_local_genome_that_does_not_fit_its_node_is_not_used(tmp_path, caplog)
 	obj = run(tmp_path, files, db, "wrong", local_references=True)
 	assert obj.typed == {"s": "X.3"}, "the first round stands"
 	assert "do not type it to its own node" in caplog.text
+
+
+def test_fetch_local_downloads_the_genomes_the_descent_needs(tmp_path, monkeypatch):
+	db, files = make_scheme(tmp_path)
+	local = tmp_path / "refs" / "local"
+	kept = {f.name: f.read_text() for f in local.iterdir()}
+	for f in local.iterdir():
+		f.unlink()
+	asked = []
+	def fake_call(self, accessions):
+		asked.append(sorted(accessions))
+		for a in accessions:
+			(local / (a + ".fna")).write_text(kept[a + ".fna"])
+			self.fetched.append(a)
+		return set(accessions)
+	monkeypatch.setattr(LocalFetcher, "__call__", fake_call)
+	obj = run(tmp_path, files, db, "fetch", local_references=True, fetch_local=True)
+	assert obj.typed == {"s": "X.5"}
+	assert asked == [["LX"]], "the counts point below X.3, so only LX is fetched"
+	reads = [l for l in comments(tmp_path / "fetch" / "samples" / "s_snps.txt") if l.startswith("Reads:")][0]
+	assert "local_reference=LX" in reads and "fetched=1" in reads
