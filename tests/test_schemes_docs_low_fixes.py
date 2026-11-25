@@ -96,7 +96,7 @@ def test_cli_reference_matches_the_help():
 # 31. install notes
 
 def test_install_md_matches_setup():
-	text = open(os.path.join(ROOT, "INSTALL.md")).read()
+	text = open(os.path.join(ROOT, "docs", "installation.md")).read()
 	for word in ("3.7", "[ETE3]", "pip install PyQt5", "[NumPy]"):
 		assert word not in text
 	assert "3.11" in text
