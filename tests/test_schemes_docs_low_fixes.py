@@ -41,7 +41,7 @@ def test_list_schemes_with_a_malformed_entry_gives_a_message(tmp_path):
 	data = data_with_toml(tmp_path, "sc = 1\n")
 	done = run("CanSNPer2.DownloadGenomes", "--list_schemes", "--data_dir", str(data), "--logs", str(tmp_path / "l"), cwd=tmp_path)
 	assert done.returncode == 1
-	assert "Traceback" not in done.stderr and "sc" in done.stdout and "schemes.toml" in done.stdout
+	assert "Traceback" not in done.stderr and "sc" in done.stderr and "schemes.toml" in done.stderr
 
 
 # 21. a bad scheme SNP file names the scheme

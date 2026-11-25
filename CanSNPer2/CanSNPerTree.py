@@ -198,7 +198,7 @@ def run_command(args, parser):
 	'''everything after parsing, given the parsed options: shared by CanSNPer2 and cansnper2 type;
 		reads are recognised by their content, so --read_input is accepted and does nothing'''
 	if not args.database:
-		print("A database is required: cansnper2 type query.fasta -d database.db")
+		print("A database is required: cansnper2 type query.fasta -d database.db", file=sys.stderr)
 		exit(1)
 	if not args.query and not args.samplesheet:
 		'''a run without queries used to warn, exit 0 and leave an empty run directory'''

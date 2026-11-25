@@ -527,6 +527,17 @@ def build_parser():
 	return parser
 
 
+def log_level(args):
+	'''the log level of the options: --debug, -v/--verbose, --quiet or the default WARNING.
+		--quiet (dest supress) had no effect here and -v printed debug output; the old
+		CanSNPer2-download parser has no --quiet and gives --verbose as DEBUG'''
+	if args.debug:
+		return logging.DEBUG
+	if args.verbose:
+		return args.verbose if isinstance(args.verbose, int) and args.verbose is not True else logging.DEBUG
+	return getattr(args, "supress", None) or logging.WARNING
+
+
 def run_command(args, parser):
 	'''everything after parsing, shared by CanSNPer2-download and the cansnper2 scheme/ref verbs'''
 	if not (args.database or args.scheme or args.list_schemes):
@@ -546,9 +557,7 @@ def run_command(args, parser):
 			return GitHubSchemeSource(ref=args.branch, repo=args.repo) ## default branch of that repository unless --branch is given
 		return GitHubSchemeSource(ref=args.branch or "master")
 
-	logval = logging.WARNING
-	if args.verbose or args.debug:
-		logval = logging.DEBUG
+	logval = log_level(args)
 
 	if args.list_schemes:
 		'''only prints the schemes, so no log file is written'''
@@ -558,7 +567,7 @@ def run_command(args, parser):
 			source = scheme_source()
 			schemes = source.list_schemes()
 		except SchemeError as e:
-			print(e)
+			print(e, file=sys.stderr) ## an error, not the listing a script reads from stdout
 			exit(1)
 		print("SNP schemes in {loc}:".format(loc=source.location()))
 		for name, status in schemes:

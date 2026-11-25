@@ -99,3 +99,17 @@ def test_log_files_are_named_after_the_verb(tmp_path):
 	open(first, "w").close()
 	second = get_logpath(str(tmp_path), "cansnper2-db-info", now=now)
 	assert ":" not in pathlib.Path(second).name and second != first
+
+
+def test_scheme_and_ref_verbs_take_the_shared_log_levels():
+	'''--quiet had no effect in scheme get and ref get, and -v printed debug output there'''
+	import logging
+	from CanSNPer2.DownloadGenomes import log_level
+	_parser, parsers = build_parsers()
+	for verb in ("scheme get", "ref get"):
+		extra = ["NAME"] if verb == "scheme get" else []
+		parse = lambda *options: parsers[verb].parse_args(extra + list(options))
+		assert log_level(parse()) == logging.WARNING, verb
+		assert log_level(parse("--quiet")) == logging.ERROR, verb
+		assert log_level(parse("-v")) == logging.INFO, verb
+		assert log_level(parse("--debug")) == logging.DEBUG, verb

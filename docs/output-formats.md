@@ -259,7 +259,11 @@ The log files are written to `--log-dir` (default `logs`, relative to `--workdir
 The other verbs name their log after the verb in the same way, in their own `--log-dir`
 (default `logs` in the current folder): `cansnper2-db-create-<date>.log` (and `db-import`,
 `db-export`, `db-info`, `db-convert`, `db-modify`, `db-remove`), `cansnper2-scheme-get-<date>.log`
-and `cansnper2-ref-get-<date>.log`.
+and `cansnper2-ref-get-<date>.log`. `-v`, `--debug` and `--quiet` set their level in the same way.
+`cansnper2 scheme list` writes no log, and `cansnper2 selftest` none either.
+
+Error messages are printed to standard error; results, listings and progress messages to
+standard output.
 `scheme list` and `selftest` write no log file.
 
 ## Temporary files
