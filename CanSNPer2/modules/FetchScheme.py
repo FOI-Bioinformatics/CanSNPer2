@@ -181,6 +181,7 @@ class SchemeSource(object):
 			"snp": entry.get("snp", "{folder}/{name}_snp.txt".format(folder=folder, name=name)),
 			"tree": entry.get("tree", "{folder}/{name}_tree.txt".format(folder=folder, name=name)),
 			"references": "{folder}/{name}_references.txt".format(folder=folder, name=name),
+			"genomes": entry.get("genomes", "{folder}/{name}_genomes.txt".format(folder=folder, name=name)),
 			"readme": entry.get("readme", "{folder}/README.md".format(folder=folder)),
 			"manifest": "{dir}/{name}.manifest.json".format(dir=database_dir, name=name),
 			"source_type": entry.get("source_type", "CanSNPer"),
@@ -244,6 +245,18 @@ class SchemeSource(object):
 			with open(local[role], "wb") as out:
 				out.write(data)
 			hashes[path] = sha256(data)
+		'''the genomes file (genome, node, role) is optional; when the scheme has one it is checked
+			against the manifest as the others are, and read typing with local references takes the
+			representative genomes from it'''
+		try:
+			data = self.raw(files["genomes"])
+		except NotFound:
+			data = None
+		if data is not None:
+			local["genomes"] = os.path.join(directory, os.path.basename(files["genomes"]))
+			with open(local["genomes"], "wb") as out:
+				out.write(data)
+			hashes[files["genomes"]] = sha256(data)
 		status = self.status(files["readme"])
 		self.verify(name, files["manifest"], hashes, status=status, allow_unverified=allow_unverified)
 		if status == "draft":
@@ -370,7 +383,7 @@ class GitHubSchemeSource(SchemeSource):
 
 	def list_hint(self):
 		repo = "" if self.repo == DATA_REPO else " --repo {repo}".format(repo=self.repo)
-		return "CanSNPer2-download --list_schemes{repo} --branch {ref}".format(repo=repo, ref=self.ref)
+		return "cansnper2 scheme list{repo} --branch {ref}".format(repo=repo, ref=self.ref)
 
 	def source_name(self):
 		return self.repo
@@ -421,10 +434,10 @@ class LocalSchemeSource(SchemeSource):
 		return "in {d}".format(d=self.directory)
 
 	def old_format_hint(self):
-		return "use CanSNPer2 2.2 for it, or convert its SNP file with CanSNPer2-database --convert"
+		return "use CanSNPer2 2.2 for it, or convert its SNP file with cansnper2 db convert"
 
 	def list_hint(self):
-		return "CanSNPer2-download --list_schemes --data_dir {d}".format(d=self.directory)
+		return "cansnper2 scheme list --data-dir {d}".format(d=self.directory)
 
 	def git(self, *arguments):
 		'''output of a git command in the directory, None when it is not a git checkout'''
@@ -509,7 +522,7 @@ def build_scheme(name, database, ref="master", overwrite=False, source=None, all
 				os.remove(partial) ## the database loader creates the file itself
 				CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["canSNPs"],
 								references=local["references"], source_type=provenance["source_type"], verbose=False,
-								scheme_info=scheme_info)
+								scheme_info=scheme_info, genomes=local.get("genomes"))
 			except (sqlite3.Error, OSError, DatabaseConnectionError) as e:
 				raise SchemeError("The database {db} could not be built from the scheme {name}: {e}".format(
 					db=database, name=name, e=name_scheme_files(str(e), local, name)))

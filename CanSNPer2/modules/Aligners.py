@@ -20,6 +20,7 @@ from CanSNPer2.modules.AlignmentReader import SEQUENCES_SUFFIX, write_sequence_t
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 from CanSNPer2.modules.ParsePAF import ParsePAF
 from CanSNPer2.modules.ParseDelta import ParseDelta
+from CanSNPer2.modules.ParsePileup import PileupReader, PLATFORMS, DEFAULT_PLATFORM
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,6 @@ class Minimap2(Aligner):
 		return ParsePAF(**kwargs)
 
 
-'''the aligners that can be selected, by name'''
 class Mummer4(Aligner):
 	'''MUMmer4 nucmer (Marcais et al. 2018) followed by delta-filter -1, writes delta. The
 		1-to-1 filter keeps, for every reference and query position, only the best alignment,
@@ -207,6 +207,84 @@ class Mummer4(Aligner):
 		return ParseDelta(**kwargs)
 
 
+def write_sites_bed(path, snps):
+	'''the canSNP positions of one reference as a BED file for samtools mpileup -l; snps are
+		(snp_id, sequence, position, ancestral, derived) with 1-based positions'''
+	with open(path, "w") as out:
+		for sequence, position in sorted({(row[1], int(row[2])) for row in snps}):
+			out.write("{seq}\t{start}\t{end}\n".format(seq=sequence, start=position - 1, end=position))
+
+
+class ReadMapper(Aligner):
+	'''Sequencing reads instead of an assembly: minimap2 maps the reads to the reference with
+		the preset of the platform, samtools sorts and indexes them and samtools mpileup lists
+		the read bases at the canSNP positions (the BED file <output>.sites.bed, written by
+		CanSNPer2 before the command runs). The pileup is the "alignment" PileupReader reads;
+		the sorted reads are kept next to it as <output>.bam.
+
+		mpileup is run with -B (no base alignment quality: it lowers base qualities next to
+		indels in a way that depends on the reference, and a canSNP is a single base), -A
+		(pairs that are not properly paired are counted: with a distant reference many pairs
+		are not), -d 0 (no depth limit) and -a (a line for every site, also without reads).
+		Reads below min_mapq and bases below min_baseq are left out; secondary, QC failed and
+		duplicate-flagged reads are left out by mpileup's defaults, and a base covered by both
+		reads of a pair is counted once.
+
+		The three programs run as one bash command with pipefail, so a failure of minimap2
+		inside the pipe fails the alignment instead of leaving an empty pileup.
+
+		Not one of the --aligner choices: CanSNPer2 uses it when the query files are reads.'''
+	name = "minimap2-reads"
+	program = "minimap2"
+	suffix = "pileup"
+	log_tag = "reads"
+	needs_sites = True
+
+	def __init__(self, path="", platform=DEFAULT_PLATFORM, threads=4, samtools="samtools",
+			min_mapq=None, min_baseq=None, min_depth=None, min_allele_fraction=None):
+		super(ReadMapper, self).__init__(path)
+		if platform not in PLATFORMS:
+			raise ValueError("Unknown platform {p}, choose one of: {known}".format(p=platform, known=", ".join(sorted(PLATFORMS))))
+		self.platform = platform
+		self.threads = int(threads)
+		self.samtools = samtools or "samtools"
+		self.given = {"min_mapq": min_mapq, "min_baseq": min_baseq, "min_depth": min_depth,
+				"min_allele_fraction": min_allele_fraction}
+
+	def setting(self, key):
+		'''a threshold: the one given, else the default of the platform'''
+		value = self.given.get(key)
+		return PLATFORMS[self.platform][key] if value is None else value
+
+	def settings(self):
+		'''the settings that change a call, for the settings line of the result files'''
+		return "platform={p} min_depth={d} min_allele_fraction={f} min_mapq={q} min_baseq={b}".format(
+				p=self.platform, d=self.setting("min_depth"), f=self.setting("min_allele_fraction"),
+				q=self.setting("min_mapq"), b=self.setting("min_baseq"))
+
+	def available(self):
+		return shutil.which(self.executable()) is not None and shutil.which(self.samtools) is not None
+
+	def command(self, reference_file, query_file, output):
+		'''query_file is the read file, or the two files of paired-end reads'''
+		reads = [query_file] if isinstance(query_file, str) else list(query_file)
+		bam = output + ".bam"
+		q = shlex.quote
+		t = str(self.threads)
+		mapping = " ".join(q(a) for a in [self.executable(), "-a", "-x", PLATFORMS[self.platform]["preset"], "-t", t, reference_file] + reads)
+		sort = " ".join(q(a) for a in [self.samtools, "sort", "-@", t, "-o", bam, "-"])
+		index = " ".join(q(a) for a in [self.samtools, "index", bam])
+		pileup = " ".join(q(a) for a in [self.samtools, "mpileup", "-l", output + ".sites.bed", "-a", "-B", "-A", "-d", "0",
+				"-q", str(self.setting("min_mapq")), "-Q", str(self.setting("min_baseq")), "-o", output, bam])
+		return ["bash", "-o", "pipefail", "-c", "{m} | {s} && {i} && {p}".format(m=mapping, s=sort, i=index, p=pileup)]
+
+	def reader(self, **kwargs):
+		kwargs.setdefault("min_depth", self.setting("min_depth"))
+		kwargs.setdefault("min_allele_fraction", self.setting("min_allele_fraction"))
+		return PileupReader(**kwargs)
+
+
+'''the aligners that can be selected, by name'''
 ALIGNERS = {aligner.name: aligner for aligner in (ProgressiveMauve, Minimap2, Mummer4)}
 DEFAULT_ALIGNER = ProgressiveMauve.name
 

@@ -50,12 +50,12 @@ TYPED_VALUES = {"yes": 1, "no": 0}
 ## of the reference fasta file, which depends on the order of those sequences; it is refused
 ## with this sentence instead of being read
 JOINED_FORMAT_HINT = ("It stores SNP positions along the joined reference sequences (the format before 2.3.0). "
-	"Convert it with CanSNPer2-database --convert, or download the current database with CanSNPer2-download --scheme.")
+	"Convert it with cansnper2 db convert, or fetch the current scheme with cansnper2 scheme get.")
 ## a database built before the canSNP file was the source holds one canSNP per node and no
 ## rank, score or typed column
 SNP_TABLE_HINT = ("Its snp_annotation table holds one canSNP per node, without the rank, score and typed "
-	"columns of the current format. Convert it with CanSNPer2-database --convert, or download the current "
-	"database with CanSNPer2-download --scheme.")
+	"columns of the current format. Convert it with cansnper2 db convert, or fetch the current "
+	"database with cansnper2 scheme get.")
 
 def annotation_columns(headers):
 	'''the columns required of an annotation source file, by the format its header gives:
@@ -152,7 +152,7 @@ def check_database(path, current_format=True):
 		current_format=False.
 	'''
 	if not os.path.exists(path):
-		raise ConnectionError("The database {path} does not exist, download it or create it with CanSNPer2-database --create".format(path=path))
+		raise ConnectionError("The database {path} does not exist, fetch it with cansnper2 scheme get or create it with cansnper2 db create".format(path=path))
 	if os.path.isdir(path):
 		raise ConnectionError("{path} is a directory, give the path of a CanSNP database file".format(path=path))
 	try:
@@ -165,7 +165,7 @@ def check_database(path, current_format=True):
 	except sqlite3.DatabaseError:
 		'''a file that is not an sqlite database (a text file, a source file given as --database)
 			ended the command with a traceback'''
-		raise ConnectionError("{path} is not an sqlite database, give a CanSNP database built with CanSNPer2-database --create or CanSNPer2-download --scheme".format(path=path))
+		raise ConnectionError("{path} is not an sqlite database, give a CanSNP database built with cansnper2 db create or cansnper2 scheme get".format(path=path))
 	finally:
 		conn.close()
 	missing = [table for table in CANSNP_TABLES if table not in tables]

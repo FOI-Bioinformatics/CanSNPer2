@@ -30,19 +30,51 @@ def get_logpath(logdir, tag, now=None):
 	return logpath
 
 
+class QuietWarnings(logging.Filter):
+	'''A warning can ask not to be repeated on the console with
+		extra={"quiet_console": True}: it always goes into the log file, the filter
+		holds it back from the terminal and counts it, so the command can end with
+		one line saying that there were warnings and where to read them. Run with
+		--verbose or --debug and the warnings show up as they always did; when
+		there is no log file, nothing may be hidden from the user.'''
+	def __init__(self, show_quiet):
+		super().__init__()
+		self.show_quiet = show_quiet
+		self.hidden = 0
+
+	def filter(self, record):
+		if getattr(record, "quiet_console", False) and not self.show_quiet:
+			self.hidden += 1
+			return False
+		return True
+
+
+console_filter = None
+
+
+def quiet_warning_count():
+	'''the warnings the console held back since the last setup_logging'''
+	return console_filter.hidden if console_filter is not None else 0
+
+
 def setup_logging(logdir, tag, level=logging.WARNING, now=None):
 	'''Log to the console and to the log file of this command, and return that path.
 		When the log folder cannot be made or written (a read-only working directory), one
 		warning is written to stderr, the command logs to stderr only and None is returned.'''
-	handlers = [logging.StreamHandler()]
+	global console_filter
+	console = logging.StreamHandler()
+	handlers = []
 	logpath = None
 	try:
 		logpath = get_logpath(logdir, tag, now=now)
-		handlers.insert(0, logging.FileHandler(logpath))
+		handlers.append(logging.FileHandler(logpath))
 	except OSError as e:
 		logpath = None
 		print("Warning: the log folder {logdir} cannot be used ({error}), logging to stderr only".format(
 			logdir=logdir, error=e.strerror or e), file=sys.stderr)
+	console_filter = QuietWarnings(show_quiet=(level <= logging.INFO or logpath is None))
+	console.addFilter(console_filter)
+	handlers.append(console)
 	logging.basicConfig(
 			level=level,
 			format="%(asctime)s %(module)s [%(levelname)-5.5s]  %(message)s",

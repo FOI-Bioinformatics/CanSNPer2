@@ -82,7 +82,7 @@ class RunMauve(object):
 		except OSError as e:
 			raise MauveError("The reference directory {refdir} could not be read: {err}".format(refdir=self.refdir,err=e))
 		if not refs:
-			raise MauveError("No reference genomes (.fna/.fa) were found in {refdir}, run CanSNPer2-download --outdir {refdir} first".format(refdir=self.refdir))
+			raise MauveError("No reference genomes (.fna/.fa) were found in {refdir}, run cansnper2 ref get -o {refdir} first".format(refdir=self.refdir))
 		return refs
 
 	def get_tempfiles(self):

@@ -86,9 +86,9 @@ def test_save_tree_and_no_snpfiles_help_describe_the_behaviour():
 
 def test_readme_help_block_matches_the_help():
 	readme = open(os.path.join(ROOT, "README.md")).read()
-	block = readme.split("CanSNPer2 help\n```\n")[1].split("\n```")[0]
-	help_text = run("CanSNPer2.CanSNPerTree", "--help", env=dict(ENV, COLUMNS="80")).stdout
-	for option in re.findall(r"^\s+(--[a-z_]+)", help_text, re.M):
+	block = readme.split("cansnper2 type --help\n```\n")[1].split("\n```")[0]
+	help_text = run("CanSNPer2.cli", "type", "--help", env=dict(ENV, COLUMNS="80")).stdout
+	for option in re.findall(r"^\s+(--[a-z][a-z-]*)", help_text, re.M):
 		assert option in block, option
 	assert "ETE3" not in block and "Don´t" not in block
 

@@ -48,10 +48,9 @@ supported_output = ["source", "newick", "tab"]
 import argparse
 
 
-def get_arguments():
-	'''The command used to parse its arguments and open its log file at import time, so
-		importing CanSNPer2.SNPDatabase consumed sys.argv and wrote a log file as a side
-		effect (issue #174)'''
+def build_parser():
+	'''the argument parser, split from parsing and running (2.6.0) so the cansnper2 verbs
+		can reuse the run; get_arguments keeps the old behaviour of this command'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-database - create, modify and export CanSNP databases',
 		epilog=COMMANDS_HELP,
@@ -67,6 +66,7 @@ def get_arguments():
 	create_database.add_argument('--references',   metavar='', default=False,                 	help="File containing all reference genomes listed")
 	create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
 														choices=supported_input, 				help="Select source file type")
+	create_database.add_argument('--genomes',      metavar='', default=None,                   help="with --create or --import: the genomes file of the scheme (genome, node, role), used by read typing with --local_references")
 	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
 	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="build a database from the source files written by --export (--tree --annotation --references), written to --database")
 	create_database.add_argument('--scheme_name',   metavar='',                                 help="with --create or --import: the name of the scheme, recorded in the database")
@@ -103,7 +103,14 @@ def get_arguments():
 																	default=logging.WARNING,	help="supress warnings")
 
 	parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
+	return parser
 
+
+def get_arguments():
+	'''The command used to parse its arguments and open its log file at import time, so
+		importing CanSNPer2.SNPDatabase consumed sys.argv and wrote a log file as a side
+		effect (issue #174)'''
+	parser = build_parser()
 	args = parser.parse_args()
 	if len(sys.argv)==1:
 		parser.print_help()
@@ -326,9 +333,8 @@ def modify(args, logger):
 	return 0
 
 
-def command():
-	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
-	args = get_arguments()
+def run_command(args):
+	'''everything after parsing, shared by CanSNPer2-database and the cansnper2 db verbs (2.6.0)'''
 	logger = get_logger(args)
 	logger.debug(args)
 	if not check_mode(args, logger):
@@ -370,7 +376,7 @@ def command():
 			exit(1)
 		try:
 			counts = import_from_sources(args.tree, args.annotation, args.references,
-				args.database, tmpdir=args.tmpdir, verbose=args.verbose, scheme_info=scheme_info)
+				args.database, tmpdir=args.tmpdir, verbose=args.verbose, scheme_info=scheme_info, genomes=args.genomes)
 		except DatabaseImportError as e:
 			logger.error(str(e))
 			exit(1)
@@ -443,8 +449,9 @@ def command():
 				logger.error("The database cannot be exported: {error}".format(error=e))
 				exit(1)
 			print("Exported to {files}".format(files=", ".join(files.values())))
-			print("Import back with: CanSNPer2-database --import --database <new.db> --tree {tree} "
-				"--annotation {snp} --references {references}".format(**files))
+			print("Import back with: cansnper2 db import -d <new.db> --tree {tree} "
+				"--cansnps {snp} --references {references}".format(**files)
+				+ (" --genomes {genomes}".format(**files) if "genomes" in files else ""))
 		exit()
 	if not args.create:
 		if not (args.mod_file or args.annotation or args.references):
@@ -492,6 +499,11 @@ def command():
 	else:
 		logger.error("No datafile supplied, nothing to process!")
 		exit(1)
+
+
+def command():
+	'''Modify the CanSNPer2 database, if it doesn´t exist (create is added create database from files)'''
+	run_command(get_arguments())
 
 
 def main():

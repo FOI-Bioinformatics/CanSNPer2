@@ -41,8 +41,9 @@ __status__ 		= "Production"
 
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER, ensure_directory
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
+from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
-from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
@@ -117,14 +118,24 @@ def minutes(value):
 	return number
 
 
-def command():
-	'''Initiate CanSNPer2 object'''
+def option_name(parser, dest):
+	'''the long option of dest as parser spells it: the shared run serves CanSNPer2 (--fetch_local)
+		and cansnper2 type (--fetch-local), and a message names the option the user can type'''
+	for action in parser._actions:
+		if action.dest == dest and action.option_strings:
+			return max(action.option_strings, key=len)
+	return "--" + dest
+
+
+def build_parser():
+	'''the argument parser of the command, split from running (2.6.0) so cansnper2 type can
+		reuse the run without repeating its checks'''
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2 - type query assemblies (or reads) against a CanSNP database',
 		epilog=COMMANDS_HELP,
 		formatter_class=argparse.RawDescriptionHelpFormatter)
 	required_arguments = parser.add_argument_group("Required arguments")
-	required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 		help="File(s) to align (fasta), or one list file with a file path per line (a file that does not start with '>'; a list must be the only query argument)")
+	required_arguments.add_argument('query', nargs=argparse.ZERO_OR_MORE, 	metavar='query', 		help="Assemblies (fasta) or sequencing reads (fastq, may be gzip-compressed) to type, or one list file with a file path per line (a list must be the only query argument). Paired-end read files are found by their names (_R1/_R2, _1/_2)")
 	required_arguments.add_argument('-db',  '--database', 	metavar='', 							help='CanSNP database')
 
 	output_options = parser.add_argument_group("Output options")
@@ -143,7 +154,8 @@ def command():
 	run_options.add_argument('--refdir', 			metavar='', default="references/",	help="Specify reference directory")
 	run_options.add_argument('--allow_missing_references', action='store_true',		help="Type even when reference genomes of the database have no <genome>.fna in --refdir; one warning names them, and their SNPs are not compared (default: stop with an error)")
 	run_options.add_argument('--workdir',			metavar='',	default="./",			help="Change workdir default (./)")
-	run_options.add_argument('--read_input', 		action='store_true', 				help="Select if input is reads not fasta")
+	'''reads are recognised by their content; --read_input is kept so that command lines that give it work'''
+	run_options.add_argument('--read_input', 		action='store_true', 				help=argparse.SUPPRESS)
 	run_options.add_argument('--min_required_hits', type=positive_int, default=3, 		help="Minimum number of derived SNPs on the path from the root to the final SNP for a call (at least 1, default 3)")
 	run_options.add_argument('--strictness', 		type=fraction, default=0.7,			help="Fraction of the SNPs on the path to the final SNP that must be called; SNPs without alignment data count against it, an ancestral SNP stops the path (0-1, default 0.7)")
 	run_options.add_argument('--mask',				type=non_negative_int, default=0,		help="Ignore SNPs closer than this many bases to the edge of an alignment (default 0, off)")
@@ -152,6 +164,20 @@ def command():
 	run_options.add_argument('--aligner',			metavar='', default=DEFAULT_ALIGNER, choices=sorted(ALIGNERS),	help="Program that aligns the query against each reference: {names} (default {default})".format(names=", ".join(sorted(ALIGNERS)),default=DEFAULT_ALIGNER))
 	run_options.add_argument('--alignment_timeout',	type=minutes, default=60,	metavar='MINUTES',	help="Stop the alignments of a query that take longer than this, in minutes (0 for no limit, default 60)")
 	run_options.add_argument('--aligner_path',		metavar='', default="",				help="The aligner program, or the folder that holds it (default: found in PATH)")
+
+	read_options = parser.add_argument_group("Read typing options", "Used when the queries are sequencing reads: minimap2 maps them to each reference and samtools mpileup counts the bases at the canSNP positions. Thresholds not given take the defaults of --platform")
+	read_options.add_argument('--platform',		choices=sorted(PLATFORMS), default=DEFAULT_PLATFORM,	help="Sequencing platform of the reads: illumina (short reads, paired or single), ont or hifi (default illumina)")
+	read_options.add_argument('--samplesheet',	metavar='FILE', default=None,			help="Tab separated file with the header sample, reads1 and optionally reads2 and platform, one sample per row; instead of query arguments")
+	read_options.add_argument('--min_depth',		type=positive_int, default=None,		help="Reads needed at a canSNP for a call (default: illumina 5, ont 5, hifi 5)")
+	read_options.add_argument('--min_allele_fraction', type=fraction, default=None,		help="Fraction of the reads that must carry a base for the canSNP to be called as that base; below it the site is mixed and counts as no data (default: illumina 0.8, ont 0.7, hifi 0.8)")
+	read_options.add_argument('--min_mapq',		type=non_negative_int, default=None,	help="Minimum mapping quality of a read (default 20)")
+	read_options.add_argument('--min_baseq',		type=non_negative_int, default=None,	help="Minimum base quality (default: illumina 20, ont 10, hifi 20)")
+	read_options.add_argument('--mixed_sites',	type=positive_int, default=3,			help="Mixed canSNP sites at which a sample is reported as possibly mixed (default 3)")
+	read_options.add_argument('--local_references', action='store_true',				help="After the first round, map the reads again to the genome of the scheme closest to the sample (chosen among the representatives below the first call, see CanSNPer2-download --local_references) and read the canSNPs at their positions lifted to it")
+	read_options.add_argument('--local_rounds',	type=positive_int, default=2,			help="With --local_references: at most this many rounds against local references (default 2)")
+	read_options.add_argument('--fetch_local',	action='store_true',								help="With --local_references: download the representative genomes the choice of the local reference needs and that are not in <refdir>/local yet (from NCBI, while typing); by default typing never downloads")
+	read_options.add_argument('--screen_reads',	type=positive_int, default=100000,		help="With --local_references: reads of each file mapped to the candidate genomes to choose the local reference (default 100000)")
+	read_options.add_argument('--threads',		type=positive_int, default=4,			help="Threads of minimap2 and samtools sort for each reference (default 4)")
 
 	'''Remove the two below when script is complete, possibly keep as hidden for debug'''
 	run_options.add_argument('--skip_alignment', '--skip_mauve', dest='skip_alignment',	action='store_true', 	help="Do not align, read the alignments already in --tmpdir (--skip_mauve is the old name)")
@@ -165,28 +191,18 @@ def command():
 	debugopts.add_argument('--debug',			action='store_const', const=logging.DEBUG,					help="Debug output")
 	debugopts.add_argument('--supress',	action='store_const', const=logging.ERROR,	default=logging.WARNING,	help="Supress warnings")
 	parser.add_argument("--version", action='store_true', help=argparse.SUPPRESS)
+	return parser
 
-	args = parser.parse_args()
-	if len(sys.argv)==1:
-		parser.print_help()
-		parser.exit()
-	'''
-		Setup logging and debug options
-	'''
-	if args.version:
-		print("CanSNPer2 - version {version}".format(version=__version__))
-		exit()
-	if args.read_input:
-		'''a flag that is not implemented must not leave with status 0: a script that passed
-		--read_input looked like it had typed something (issue #227)'''
-		print("Read input is not implemented in this version, fasta input is required.")
-		exit(1)
+
+def run_command(args, parser):
+	'''everything after parsing, given the parsed options: shared by CanSNPer2 and cansnper2 type;
+		reads are recognised by their content, so --read_input is accepted and does nothing'''
 	if not args.database:
-		print("A database is required: CanSNPer2 --database database.db query.fasta")
+		print("A database is required: cansnper2 type query.fasta -d database.db")
 		exit(1)
-	if not args.query:
+	if not args.query and not args.samplesheet:
 		'''a run without queries used to warn, exit 0 and leave an empty run directory'''
-		print("No query files were given: CanSNPer2 --database database.db query.fasta", file=sys.stderr)
+		print("No query files were given: cansnper2 type query.fasta -d database.db", file=sys.stderr)
 		exit(1)
 	'''fail with a clear message on a bad database path instead of creating an empty database'''
 	try:
@@ -232,6 +248,8 @@ def command():
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
 	if args.tmpdir is not None and not args.tmpdir.strip():
 		parser.error("--tmpdir cannot be empty")
+	if args.fetch_local and not args.local_references:
+		parser.error("{f} is used with {l}".format(f=option_name(parser, "fetch_local"), l=option_name(parser, "local_references")))
 	if args.tmpdir is None:
 		'''no --tmpdir: use the first folder that can be written to'''
 		problems = []
@@ -287,7 +305,19 @@ def command():
 									rerun=args.rerun,
 									summary=args.summary,
 									annotations=args.annotations,
-									strictness=args.strictness
+									strictness=args.strictness,
+									platform=args.platform,
+									samplesheet=args.samplesheet,
+									min_depth=args.min_depth,
+									min_allele_fraction=args.min_allele_fraction,
+									min_mapq=args.min_mapq,
+									min_baseq=args.min_baseq,
+									mixed_sites=args.mixed_sites,
+									threads=args.threads,
+									local_references=args.local_references,
+									local_rounds=args.local_rounds,
+									screen_reads=args.screen_reads,
+									fetch_local=args.fetch_local
 		)
 	except CanSNPer2Error as e:
 		logger.error(e.value) ## an unusable output, log or tmp folder is reported before anything is aligned
@@ -312,11 +342,31 @@ def command():
 		if not args.keep_temp:
 			CanSNPer2_obj.cleanup()
 		exit(1)
+	'''warnings that asked to stay in the log (SNP positions without alignment data):
+		say that they are there and where, instead of filling the terminal with one
+		block per sample; --verbose shows them as they come'''
+	hidden = quiet_warning_count()
+	if hidden:
+		print("{n} warnings about the results are in the log {logpath}, run with --verbose to see them".format(
+			n=hidden, logpath=logpath))
 	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
 		the reason was already logged by run() (issue #191); a sample whose earlier result
 		was used again, made from the same input, counts as typed'''
 	if not CanSNPer2_obj.typed and not CanSNPer2_obj.reused and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped):
 		exit(1)
+
+
+def command():
+	'''Initiate CanSNPer2 object'''
+	parser = build_parser()
+	args = parser.parse_args()
+	if len(sys.argv)==1:
+		parser.print_help()
+		parser.exit()
+	if args.version:
+		print("CanSNPer2 - version {version}".format(version=__version__))
+		exit()
+	run_command(args, parser)
 
 
 def main():

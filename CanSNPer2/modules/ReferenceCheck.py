@@ -109,7 +109,7 @@ def too_short(path, name, sequences, snps):
 		if length < last[sequence]:
 			return ("sequence {sequence} of reference {name} ({path}) has {length} bases, but the database places "
 					"SNPs on it up to position {last}: the file is truncated or is not the genome the database was "
-					"built on; delete it and run CanSNPer2-download again").format(
+					"built on; delete it and run cansnper2 ref get again").format(
 					sequence=sequence, name=name, path=path, length=length, last=last[sequence])
 	return None
 
@@ -142,7 +142,7 @@ def check_bases(path, name, sequences, snps):
 		return ("reference {name} ({path}) has neither the ancestral nor the derived base at {share} ({listed}): "
 				"the reference base at a SNP position must be one of them. The file is probably not the genome, "
 				"or not the version of its sequences, that the database was built on; delete it and run "
-				"CanSNPer2-download again").format(name=name, path=path, share=share, listed=listed)
+				"cansnper2 ref get again").format(name=name, path=path, share=share, listed=listed)
 	logger.warning("reference {name} has neither the ancestral nor the derived base at {share}: {listed}; the scheme may give a wrong base for these SNPs".format(
 			name=name, share=share, listed=listed))
 	return None

@@ -52,8 +52,5 @@ setup(
     packages=find_packages(exclude=['contrib', 'docs', 'test*']),
     #py_modules=['CanSNPer2.modules.ParseXMFA',"CanSNPer2.modules.DatabaseConnection","CanSNPer2.modules.CanSNPer2","CanSNPer2.modules.NewickTree"],
     entry_points={'console_scripts': [
-                    'CanSNPer2=CanSNPer2.CanSNPerTree:main',
-                    'CanSNPer2-database=CanSNPer2.SNPDatabase:main',
-                    'CanSNPer2-download=CanSNPer2.DownloadGenomes:main',
-					'CanSNPer2-test=CanSNPer2.selftest:main'
+                    'cansnper2=CanSNPer2.cli:main'
     ]})
