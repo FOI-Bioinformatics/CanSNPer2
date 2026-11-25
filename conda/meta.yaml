@@ -30,7 +30,7 @@ requirements:
     # the default has to be present, the others are optional (--aligner)
     - progressive-mauve          # verify the exact bioconda name at submission
   # optional aligners, mention in the summary instead of run_exports:
-  #   minimap2, mummer4
+  #   minimap2, mummer4; read typing needs minimap2 and samtools
 
 test:
   imports:
@@ -45,12 +45,13 @@ about:
   home: https://github.com/FOI-Bioinformatics/CanSNPer2
   license: BSD-3-Clause
   license_file: LICENSE
-  summary: SNP-typing of assembled bacterial genomes against curated CanSNP databases
+  summary: SNP-typing of bacterial genomes (assemblies or sequencing reads) against curated CanSNP databases
   description: |
     CanSNPer2 types a query assembly along a curated tree of canonical SNPs
     (CanSNPs): it aligns the query against the reference genomes of the
     database, reads the base at every SNP position and walks the tree to the
-    final SNP. One command with a verb for every job: cansnper2 type,
+    final SNP. Sequencing reads are mapped with minimap2 and counted with
+    samtools at the SNP positions instead. One command with a verb for every job: cansnper2 type,
     db create/import/export/info/convert/modify/remove, scheme list/get
     (databases from CanSNPer2-data) and ref get (reference genomes from NCBI).
   dev_url: https://github.com/FOI-Bioinformatics/CanSNPer2

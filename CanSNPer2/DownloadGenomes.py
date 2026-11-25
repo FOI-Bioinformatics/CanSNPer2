@@ -340,7 +340,7 @@ class DownloadGenomes(object):
 		database = getattr(self, "database_path", None)
 		genomes = [genome for genome, _node, role in read_genomes(database) if role == "representative"] if database else []
 		if not genomes:
-			logger.error("{db} holds no representative genomes (build it with CanSNPer2-database --genomes), "
+			logger.error("{db} holds no representative genomes (build it with cansnper2 db create --genomes, or get the scheme with cansnper2 scheme get), "
 				"there are no local references to download".format(db=database))
 			return 1
 		directory = os.path.join(self.directory, "local")
@@ -601,7 +601,7 @@ def run_command(args, parser):
 		logger.error("The references of the database were not all fetched, see the messages above")
 		exit(1)
 	if args.local_references and DG.run_local():
-		logger.error("CanSNPer2-download did not fetch every local reference, see the messages above")
+		logger.error("Not every local reference was fetched, see the messages above")
 		exit(1)
 	print("Downloaded the reference genomes of {db} from {source} into {d}".format(db=args.database, source=args.source, d=args.outdir))
 

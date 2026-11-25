@@ -341,10 +341,10 @@ class CanSNPer2(object):
 				try:
 					os.makedirs(folder, exist_ok=True)
 				except OSError as e:
-					raise CanSNPer2Error("--fetch_local cannot create {folder}: {e}".format(folder=folder, e=e.strerror or e))
+					raise CanSNPer2Error("--fetch-local cannot create {folder}: {e}".format(folder=folder, e=e.strerror or e))
 				if not os.access(folder, os.W_OK):
-					raise CanSNPer2Error("--fetch_local needs to write to {folder}, which is not writable; fetch the genomes "
-						"beforehand with CanSNPer2-download --local_references instead".format(folder=folder))
+					raise CanSNPer2Error("--fetch-local needs to write to {folder}, which is not writable; fetch the genomes "
+						"beforehand with cansnper2 ref get --local-references instead".format(folder=folder))
 			return
 		if self.aligner.available():
 			return
@@ -1086,7 +1086,7 @@ class CanSNPer2(object):
 			found, missing = candidates(database, call, self.refdir)
 			if missing and fetcher is None and not self.warned_missing_local:
 				logger.warning("{n} representative genome(s) of the scheme have no file in {folder} and are not used as local references; "
-					"fetch them with CanSNPer2-download --database {db} --outdir {refdir} --local_references".format(
+					"fetch them with cansnper2 ref get -d {db} -o {refdir} --local-references, or type with --fetch-local".format(
 					n=len(missing), folder=os.path.join(self.refdir, LOCAL_FOLDER), db=self.database, refdir=self.refdir))
 				self.warned_missing_local = True
 			if not found and not (fetcher is not None and missing):

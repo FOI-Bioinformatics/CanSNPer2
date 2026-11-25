@@ -118,6 +118,15 @@ def minutes(value):
 	return number
 
 
+def option_name(parser, dest):
+	'''the long option of dest as parser spells it: the shared run serves CanSNPer2 (--fetch_local)
+		and cansnper2 type (--fetch-local), and a message names the option the user can type'''
+	for action in parser._actions:
+		if action.dest == dest and action.option_strings:
+			return max(action.option_strings, key=len)
+	return "--" + dest
+
+
 def build_parser():
 	'''the argument parser of the command, split from running (2.6.0) so cansnper2 type can
 		reuse the run without repeating its checks'''
@@ -240,7 +249,7 @@ def run_command(args, parser):
 	if args.tmpdir is not None and not args.tmpdir.strip():
 		parser.error("--tmpdir cannot be empty")
 	if args.fetch_local and not args.local_references:
-		parser.error("--fetch_local is used with --local_references")
+		parser.error("{f} is used with {l}".format(f=option_name(parser, "fetch_local"), l=option_name(parser, "local_references")))
 	if args.tmpdir is None:
 		'''no --tmpdir: use the first folder that can be written to'''
 		problems = []

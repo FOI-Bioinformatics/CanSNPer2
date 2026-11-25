@@ -349,6 +349,13 @@ usage: cansnper2 type [-h] [-d DB] [-o DIR] [--save-tree] [--no-snp-files]
                       [--aligner {minimap2,mummer4,progressiveMauve}]
                       [--alignment-timeout MINUTES] [--aligner-path PATH]
                       [--skip-alignment] [--keep-temp] [--tmp-dir DIR]
+                      [--platform {hifi,illumina,ont}] [--samplesheet FILE]
+                      [--min-depth MIN_DEPTH]
+                      [--min-allele-fraction MIN_ALLELE_FRACTION]
+                      [--min-mapq MIN_MAPQ] [--min-baseq MIN_BASEQ]
+                      [--mixed-sites MIXED_SITES] [--threads THREADS]
+                      [--local-references] [--local-rounds LOCAL_ROUNDS]
+                      [--screen-reads SCREEN_READS] [--fetch-local]
                       [--log-dir DIR] [-v] [--debug] [--quiet]
                       [query ...]
 
@@ -358,8 +365,10 @@ options:
   -h, --help            show this help message and exit
 
 Required arguments:
-  query                 file(s) to align (fasta), or one list file with a file
-                        path per line (default: [])
+  query                 assemblies (fasta) or sequencing reads (fastq, may be
+                        gzipped) to type, or one list file with a file path
+                        per line; paired read files are found by their names
+                        (_R1/_R2, _1/_2) (default: [])
   -d, --database DB     CanSNP database (default: None)
 
 Output options:
@@ -411,6 +420,47 @@ Run options:
   --tmp-dir DIR         folder for temporary alignments (default: CanSNPer2 in
                         the system temporary folder, see TMPDIR) (default:
                         None)
+
+Read typing options:
+  used when the queries are sequencing reads; thresholds that are not given
+  take the defaults of --platform
+
+  --platform {hifi,illumina,ont}
+                        sequencing platform: illumina (short reads, paired or
+                        single), ont or hifi (default: illumina)
+  --samplesheet FILE    tab separated file with the header sample, reads1 and
+                        optionally reads2 and platform, one sample per row;
+                        instead of queries (default: None)
+  --min-depth MIN_DEPTH
+                        reads needed at a canSNP for a call (illumina, ont and
+                        hifi: 5) (default: None)
+  --min-allele-fraction MIN_ALLELE_FRACTION
+                        fraction of the reads that must carry a base for a
+                        call; below it the site is mixed (illumina 0.8, ont
+                        0.7, hifi 0.8) (default: None)
+  --min-mapq MIN_MAPQ   minimum mapping quality of a read (20) (default: None)
+  --min-baseq MIN_BASEQ
+                        minimum base quality (illumina 20, ont 10, hifi 20)
+                        (default: None)
+  --mixed-sites MIXED_SITES
+                        mixed canSNP sites at which a sample is reported as
+                        possibly mixed (default: 3)
+  --threads THREADS     threads of minimap2 and samtools sort for each
+                        reference (default: 4)
+  --local-references    map the reads again to the representative genome of
+                        the scheme closest to the sample and read the canSNPs
+                        at their lifted positions (genomes in <ref-dir>/local,
+                        see ref get --local-references) (default: False)
+  --local-rounds LOCAL_ROUNDS
+                        with --local-references: at most this many rounds
+                        (default: 2)
+  --screen-reads SCREEN_READS
+                        with --local-references: reads of each file mapped to
+                        the candidate genomes to choose the local reference
+                        (default: 100000)
+  --fetch-local         with --local-references: download from NCBI, while
+                        typing, the representative genomes the choice needs
+                        that are not in <ref-dir>/local yet (default: False)
 
 Logging options:
   --log-dir DIR         folder for the log files (default: logs/)
@@ -784,9 +834,9 @@ CanSNPer2 types sequencing reads without an assembly. Read files are recognised 
 content (FASTQ, plain or gzip-compressed); a run types either reads or assemblies, not both.
 
 ```
-CanSNPer2 --database brucella_genus.db --refdir references/ sample_R1_001.fastq.gz sample_R2_001.fastq.gz
-CanSNPer2 --database brucella_genus.db --refdir references/ --platform ont barcode05.fastq.gz
-CanSNPer2 --database brucella_genus.db --refdir references/ --samplesheet samples.tsv
+cansnper2 type -d brucella_genus.db --ref-dir references/ sample_R1_001.fastq.gz sample_R2_001.fastq.gz
+cansnper2 type -d brucella_genus.db --ref-dir references/ --platform ont barcode05.fastq.gz
+cansnper2 type -d brucella_genus.db --ref-dir references/ --samplesheet samples.tsv
 ```
 
 **Samples.** Paired-end files are found by their names: `_R1`/`_R2` (with or without the
@@ -809,17 +859,17 @@ reads of a pair is counted once.
 | counts | state |
 |---|---|
 | no reads | no data |
-| fewer than `--min_depth` | no data (low depth) |
-| derived base at least `--min_allele_fraction` | derived |
-| ancestral base at least `--min_allele_fraction` | ancestral |
-| another base at least `--min_allele_fraction` | other base |
-| no base reaches `--min_allele_fraction` | no data (mixed) |
+| fewer than `--min-depth` | no data (low depth) |
+| derived base at least `--min-allele-fraction` | derived |
+| ancestral base at least `--min-allele-fraction` | ancestral |
+| another base at least `--min-allele-fraction` | other base |
+| no base reaches `--min-allele-fraction` | no data (mixed) |
 
-The tree walk and `--min_required_hits` and `--strictness` are those of assembly typing.
+The tree walk and `--min-required-hits` and `--strictness` are those of assembly typing.
 
 **Platform defaults**, which the options override:
 
-| `--platform` | minimap2 preset | `--min_mapq` | `--min_baseq` | `--min_depth` | `--min_allele_fraction` |
+| `--platform` | minimap2 preset | `--min-mapq` | `--min-baseq` | `--min-depth` | `--min-allele-fraction` |
 |---|---|---|---|---|---|
 | illumina (default) | sr | 20 | 20 | 5 | 0.8 |
 | ont | map-ont | 20 | 10 | 5 | 0.7 |
@@ -841,7 +891,7 @@ The Illumina misses from 20x on are *Brucella* species far from the reference *B
 reads of badread have errors close to random; systematic errors of real ONT reads, as at
 homopolymers, were not part of the test.
 
-**Mixtures.** CanSNPer2 types isolates. A sample with at least `--mixed_sites` (default 3)
+**Mixtures.** CanSNPer2 types isolates. A sample with at least `--mixed-sites` (default 3)
 mixed canSNP sites is reported as possibly mixed, in the log, in the results overview and
 in the `Reads:` line of its result file; the strains in it are not resolved. The flag only
 asks for a review; it never changes the call. A canSNP in a region the sample has twice while
@@ -857,9 +907,9 @@ and `QueryPosition` the read depth. `<sample>_snps.txt` has the extra comment li
 `Reads: platform=... files=... sites_with_reads=... median_depth=... mixed_sites=...` (the median
 depth is over the canSNP sites that have reads), and the typing settings
 line names the read thresholds. `<sample>_site_counts.tsv` lists every canSNP with its counts
-of A, C, G and T, the depth, the fraction of the derived base and its state. `--keep_temp`
+of A, C, G and T, the depth, the fraction of the derived base and its state. `--keep-temp`
 keeps the sorted reads (`<reference>_<sample>.pileup.bam`) and the pileups, and
-`--skip_alignment --tmpdir` types from them again. `--mask` does not apply to reads.
+`--skip-alignment --tmp-dir` types from them again. `--mask` does not apply to reads.
 
 ### Local references
 
@@ -871,19 +921,19 @@ get no reads, and the call stops above them. Two *B. anthropi* read sets typed w
 and stopped one node above `BR.anthropi`; one of the draft assemblies of the same samples was
 called at `BR.anthropi.1.1.1.1`.
 
-`--local_references` adds rounds against a genome of the scheme closer to the sample:
+`--local-references` adds rounds against a genome of the scheme closer to the sample:
 
 1. A round is made only when it can change the call: when there is no call, or when a canSNP
    on the path to the call or of a child of the call has no data (no reads, too few, or not
    lifted). A terminal call with data on its whole path, or a call whose children all have
    data, is settled, and no round is made. This is checked before every round.
 2. The local reference is one of the representative genomes of the terminal nodes, from the
-   genomes file of the scheme (`CanSNPer2-database --genomes`). It is found by walking down
+   genomes file of the scheme (`cansnper2 db create --genomes`; `cansnper2 scheme get` loads it with the scheme). It is found by walking down
    the tree from the call of the first round (from the root without a call). At each node,
    the child subtrees that hold representatives are the options, less those whose own canSNP
    is ancestral. When the derived canSNPs of the first round lie in one of them, the walk
    goes there.
-3. Otherwise a subsample of the reads (`--screen_reads`, default 100,000 per file) is mapped
+3. Otherwise a subsample of the reads (`--screen-reads`, default 100,000 per file) is mapped
    at once to up to three representatives of each option, from different terminal nodes, and
    the walk follows the subtree of the genome with the most matched bases. When that genome
    matches less than 10 % of the screened bases, the reads are not from the genomes below,
@@ -899,16 +949,16 @@ called at `BR.anthropi.1.1.1.1`.
    `<refdir>/local/lift/`. A local genome that carries the ancestral base at more of the
    lifted canSNPs on the path to its own node than the derived base is not used.
 5. The reads are mapped to the local reference and counted at the lifted positions. Per
-   canSNP, these counts are used when they reach `--min_depth`, otherwise those of the
+   canSNP, these counts are used when they reach `--min-depth`, otherwise those of the
    first round. When both reach it and give different bases, the canSNP is a `conflict` and
    counts as no data.
-6. This repeats from the new call while the chosen genome changes, at most `--local_rounds`
+6. This repeats from the new call while the chosen genome changes, at most `--local-rounds`
    times (default 2).
 
 The local genomes are read from `<refdir>/local/<accession>.fna`;
-`CanSNPer2-download --database <db> --outdir <refdir> --local_references` fetches the
+`cansnper2 ref get -d <db> -o <refdir> --local-references` fetches the
 representatives of a scheme (221 genomes, about 860 MB, for `brucella_genus`). Alternatively,
-`--fetch_local` downloads from NCBI during typing only the genomes that step 2 or 3 uses and that
+`--fetch-local` downloads from NCBI during typing only the genomes that step 2 or 3 uses and that
 are not in the folder yet: the chosen genome when the counts decide, the screened genomes
 otherwise. A downloaded genome stays in the folder for later runs; a genome that cannot be
 fetched is left out, as a missing file is. Typing then depends on network access to NCBI, so the
@@ -917,12 +967,12 @@ option is off by default; on compute nodes without it, fetch the genomes beforeh
 The site count file gives for each canSNP the genome its counts
 came from (`source`) and the lifted position (`lifted_position`, contig:position and strand),
 and the `Reads:` line names the local reference, its node, its share of the screened bases at
-the last screen, the number of screens and the number of conflicts; with `--fetch_local` it also
+the last screen, the number of screens and the number of conflicts; with `--fetch-local` it also
 gives the number of genomes fetched for the sample (`fetched=`).
 
 **Evaluation.** The nine *Brucella* genomes of the evaluation above whose 50x Illumina reads
 missed their assembly call against 16M (all outside the classical cluster) were typed again
-with `--local_references`; when a genome was itself a representative (five of them), it was
+with `--local-references`; when a genome was itself a representative (five of them), it was
 taken out of the local references, so that the sample was not mapped to its own genome. The
 other four are members of a representative at 99 % average nucleotide identity or closer.
 

@@ -122,7 +122,7 @@ def test_without_local_genome_files_the_first_round_stands(tmp_path, caplog):
 		f.unlink()
 	obj = run(tmp_path, files, db, "nolocal", local_references=True)
 	assert obj.typed == {"s": "X.3"}
-	assert "CanSNPer2-download" in caplog.text and "--local_references" in caplog.text
+	assert "cansnper2 ref get" in caplog.text and "--local-references" in caplog.text
 	reads = [l for l in comments(tmp_path / "nolocal" / "samples" / "s_snps.txt") if l.startswith("Reads:")][0]
 	assert "local_reference=none" in reads
 

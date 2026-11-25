@@ -1,4 +1,4 @@
-"""CanSNPer2-download --local_references: the representative genomes of the genomes table of
+"""cansnper2 ref get --local-references (CanSNPer2-download --local_references): the representative genomes of the genomes table of
 a scheme are fetched into <outdir>/local/<accession>.fna. The genomes file names only the
 accession, so the assembly name of the NCBI path is read from the folder listing."""
 import gzip
