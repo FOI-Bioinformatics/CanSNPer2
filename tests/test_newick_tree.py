@@ -353,3 +353,39 @@ def test_a_reference_needs_no_file_for_an_untyped_canSNP_alone(tmp_path):
 	finally:
 		database.disconnect()
 	assert sorted(snp[2] for snp in snps["REF"]) == [10, 20, 30, 50]
+
+
+def make_fork_db(path):
+	'''root R.1 with two children A.2 and B.2, so two paths can end at the same depth'''
+	conn = sqlite3.connect(path)
+	conn.executescript(helpers.SNP_ANNOTATION_TABLE + helpers.REFERENCES_TABLE + """
+		CREATE TABLE nodes (id integer PRIMARY KEY, name text NOT NULL);
+		CREATE TABLE tree (parent integer, child integer, rank_i integer, unique (parent, child, rank_i));
+		INSERT INTO snp_references (id, genome, strain) VALUES (5, 'REF', 'ref strain');
+		INSERT INTO nodes (id, name) VALUES (1, 'R.1'), (2, 'A.2'), (3, 'B.2');
+		INSERT INTO tree (parent, child, rank_i) VALUES (1, 1, 1), (1, 2, 1), (1, 3, 1);
+	""")
+	for node_id, name in ((1, "R.1"), (2, "A.2"), (3, "B.2")):
+		conn.execute("INSERT INTO snp_annotation (node_id, snp_id, sequence, sequence_position, ancestral_base, derived_base,"
+			" reference, date, genome_i) VALUES (?, ?, 'chrI', ?, 'C', 'T', 'REF', '06/11/26', 5)", (node_id, name, node_id * 10))
+	conn.commit()
+	conn.close()
+
+
+def test_competing_paths_are_named_in_the_reason(tmp_path):
+	'''two confirmed paths at the same depth leave the sample NA; the reason in summary.html
+		named only the deepest derived SNP, as "not confirmed with enough hits", and the log
+		pointed to a tree file that is written only with --save-tree'''
+	db = str(tmp_path / "fork.db")
+	make_fork_db(db)
+	newick_tree = NewickTree(db, name="fork", outdir=str(tmp_path), min_required_hits=1, strictness=0.5)
+	snps = {"R.1": 1, "A.2": 1, "B.2": 1}
+	result, msg, _dlist, _no_data = newick_tree.draw_tree(snps, list(snps), save_tree=False)
+	assert result[2][0] is False
+	assert "A.2" in msg and "B.2" in msg and "compete" in msg
+	assert "fork_tree.html" not in msg and "summary.html" in msg
+	# a deepest derived SNP whose path is not confirmed is named with the reason
+	# (here the root R.1 is ancestral, which breaks the path of A.2)
+	newick_tree = NewickTree(db, name="fork", outdir=str(tmp_path), min_required_hits=1, strictness=0.5)
+	result, msg, _dlist, _no_data = newick_tree.draw_tree({"R.1": 2, "A.2": 1}, ["A.2"], save_tree=False)
+	assert result[2][0] is False and msg.startswith("A.2, the deepest derived SNP, was not confirmed")

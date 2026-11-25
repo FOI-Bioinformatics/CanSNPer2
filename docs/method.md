@@ -287,8 +287,9 @@ Rule 4 applies only when the chain has more than one canSNP.
    depth are collected; the check stops at the first confirmed node that is shallower.
 4. If exactly one node is confirmed at that depth, it is the final SNP. Its support is
    called / canSNPs on its chain.
-5. If two or more nodes are confirmed at the same depth, none is chosen: the sample is `NA`, a
-   warning names the competing paths, and the call status is `not called`.
+5. If two or more nodes are confirmed at the same depth, none is chosen: the sample is `NA`, the
+   reason (in the log and in `summary.html`) names the competing paths, and the call status is
+   `not called`.
 6. If no node is confirmed, the sample is `NA`.
 
 The SNP path of a called sample is the chain of the final SNP restricted to its derived

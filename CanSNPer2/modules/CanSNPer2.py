@@ -1649,7 +1649,7 @@ class CanSNPer2(object):
 					if SNP != "NA":
 						self.typed[self.query_name] = SNP
 					else:
-						self.not_typed[self.query_name] = message if not final_snp else "{snp} was not confirmed with enough hits".format(snp=final_snp[1])
+						self.not_typed[self.query_name] = message ## names the competing paths, or the unconfirmed SNP and why
 					'''the dashboard row for this sample: severity and the reasons a call needs a
 						manual look (positions on the path with no alignment data, SNPs flagged at an
 						alignment edge, a competing unconfirmed path); states/called let the embedded
@@ -1662,7 +1662,7 @@ class CanSNPer2(object):
 					reasons = []
 					if SNP == "NA":
 						severity = "not called"
-						reasons.append(message if not final_snp else "{snp} was not confirmed with enough hits".format(snp=final_snp[1]))
+						reasons.append(message)
 					if path_missing:
 						if severity == "clean":
 							severity = "review"
