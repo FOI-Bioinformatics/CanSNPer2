@@ -291,7 +291,7 @@ usage: cansnper2 ref get [-h] [-d DB] [-s {genbank,refseq}] [-o DIR]
                          [--quiet]
 
 Download the reference genomes a database names from NCBI into a folder, as
-<genome>.fna. Genomes already in the folder are kept.
+<genome>.fna.
 
 options:
   -h, --help            show this help message and exit
@@ -506,8 +506,9 @@ usage: cansnper2 db modify [-h] [-d DB] [--mod-file FILE] [--parent NODE]
                            [--replace] [--cansnps FILE] [--references FILE]
                            [--log-dir DIR] [-v] [--debug] [--quiet]
 
-Change an existing database: add or replace part of the tree (--mod-file), add
-or change canSNP annotations (--cansnps) or reference genomes (--references).
+Change an existing database: add or replace part of the tree (--mod-file), or
+add canSNPs (--cansnps) or reference genomes (--references). canSNPs and
+reference genomes that the database already has are refused, not changed.
 
 options:
   -h, --help         show this help message and exit
@@ -517,8 +518,8 @@ options:
                      file
   --replace          replace the subtree below --parent with the tree of
                      --mod-file
-  --cansnps FILE     canSNP source file with changes to the canSNP annotations
-  --references FILE  file with reference genomes to add or update
+  --cansnps FILE     canSNP file with canSNPs to add
+  --references FILE  reference genomes file with genomes to add
 
 Logging options:
   --log-dir DIR      folder for the log files (default: logs)

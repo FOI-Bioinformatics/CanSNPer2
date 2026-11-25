@@ -367,8 +367,9 @@ def add_db_subparsers(subparsers):
 	modify = db_sub.add_parser('modify',
 		help="change the tree, canSNPs or reference genomes of a database",
 		description="Change an existing database: add or replace part of the tree "
-			"(--mod-file), add or change canSNP annotations (--cansnps) or "
-			"reference genomes (--references).",
+			"(--mod-file), or add canSNPs (--cansnps) or reference genomes "
+			"(--references). canSNPs and reference genomes that the database "
+			"already has are refused, not changed.",
 		epilog=examples("cansnper2 db modify -d scheme.db --mod-file new_branch.txt --parent B.Br.001",
 			"cansnper2 db modify -d scheme.db --mod-file subtree.txt \\",
 			"    --parent B.Br.001 --replace",
@@ -382,9 +383,9 @@ def add_db_subparsers(subparsers):
 	modify.add_argument('--replace', action='store_true',
 		help="replace the subtree below --parent with the tree of --mod-file")
 	modify.add_argument('--cansnps', dest='annotation', metavar='FILE',
-		help="canSNP source file with changes to the canSNP annotations")
+		help="canSNP file with canSNPs to add")
 	modify.add_argument('--references', metavar='FILE',
-		help="file with reference genomes to add or update")
+		help="reference genomes file with genomes to add")
 	add_logging_options(modify, logs_dest='logs', logs_default='logs')
 	parsers['db modify'] = modify
 
@@ -464,7 +465,7 @@ def add_ref_subparsers(subparsers):
 	get = ref_sub.add_parser('get',
 		help="download the reference genomes of a database",
 		description="Download the reference genomes a database names from NCBI "
-			"into a folder, as <genome>.fna. Genomes already in the folder are kept.",
+			"into a folder, as <genome>.fna.",
 		epilog=examples("cansnper2 ref get -d francisella_tularensis.db",
 			"cansnper2 ref get -d scheme.db -s refseq -o references/"),
 		formatter_class=HelpFormatter)
