@@ -997,7 +997,7 @@ called at `BR.anthropi.1.1.1.1`.
 
 The local genomes are read from `<refdir>/local/<accession>.fna`;
 `CanSNPer2-download --database <db> --outdir <refdir> --local_references` fetches the
-representatives of a scheme (102 genomes, about 400 MB, for `brucella_genus`). Alternatively,
+representatives of a scheme (221 genomes, about 860 MB, for `brucella_genus`). Alternatively,
 `--fetch_local` downloads from NCBI during typing only the genomes that step 2 or 3 uses and that
 are not in the folder yet: the chosen genome when the counts decide, the screened genomes
 otherwise. A downloaded genome stays in the folder for later runs; a genome that cannot be
