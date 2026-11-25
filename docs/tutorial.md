@@ -160,7 +160,7 @@ B.97	FSC200	CP003862.1	1282065	CP000608.1	1352237	G	A	A
 # SNP path: T/N.1;T.1;A/M.1;A.1;A.II.1;A.II.2;A.II.6
 # Final SNP: A.II.6 found/depth: 7/7
 # Query file: .../genomes/WY96-3418.fna sha256:2978cb107c98a0d8f893abf8bd786dde5da7af8d3e2f8475857e289c4c646dd8
-# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0
+# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0 aligner=minimap2
 ```
 
 Line by line:
@@ -184,8 +184,7 @@ Line by line:
 - `# Typing settings`: the SHA-256 of the database and the settings that affect the call. A
   later run into the same output folder reuses this result when the input, the database and
   these settings are the same, and stops with a message when they differ; `--rerun` types the
-  sample again. The aligner is not part of this comparison (see
-  [output-formats.md](output-formats.md#results-from-an-earlier-run)).
+  sample again (see [output-formats.md](output-formats.md#results-from-an-earlier-run)).
 
 `WY96-3418_not_called.txt` has the same columns for the other canSNPs of the scheme: those where
 the sample carries the ancestral or another base, and those without data. All columns are

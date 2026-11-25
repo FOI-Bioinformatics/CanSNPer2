@@ -30,19 +30,19 @@ conda list
 ## Typing settings line
 
 The `# Typing settings:` line of each `<sample>_snps.txt` identifies the database by the sha256 of
-the file, and lists `min_required_hits`, `strictness` and `mask`. For read samples it adds the
-platform and the read thresholds that were used (`min_depth`, `min_allele_fraction`, `min_mapq`,
+the file, and lists `min_required_hits`, `strictness` and `mask`. For assemblies it adds the
+aligner; for read samples it adds the platform and the read thresholds that were used (`min_depth`, `min_allele_fraction`, `min_mapq`,
 `min_baseq`), and with `--local-references` the number of local rounds.
 
 ```text
 # Query file: /data/project/genomes/GCA_000807905.1.fasta sha256:57f4df3e9755607532bcf142ebdd9c2cbb4b06ddbe296fe19473887531f76849
-# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0
+# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0 aligner=minimap2
 ```
 
 CanSNPer2 compares these two lines when it finds a result file from an earlier run in the
 output folder, and uses the earlier result only when both match (see
-[output-formats.md](output-formats.md#results-from-an-earlier-run)). The aligner is not recorded
-in these lines and is not compared: type with each aligner into its own `--outdir`.
+[output-formats.md](output-formats.md#results-from-an-earlier-run)). The version of the aligner
+is not recorded.
 
 The sha256 of the database can be computed with `sha256sum` (or `shasum -a 256` on macOS) and
 compared with this line. It identifies one database file. Two databases built from the same scheme

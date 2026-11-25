@@ -107,7 +107,7 @@ B.136	FSC200	CP003862.1	350028	JUJV01000122.1	8867	C	T	T
 # SNP path: T/N.1;T.1;B.1;B.2;B.3;B.5;B.6;B.7;B.133;B.81;B.136
 # Final SNP: B.136 found/depth: 11/11
 # Query file: /data/project/genomes/GCA_000807905.1.fasta sha256:57f4df3e9755607532bcf142ebdd9c2cbb4b06ddbe296fe19473887531f76849
-# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0
+# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0 aligner=minimap2
 ```
 
 Excerpt of `samples/GCA_000807905.1_not_called.txt`, with an ancestral canSNP, an ancestral
@@ -121,13 +121,13 @@ B.85	OSU18	CP000437.1	946694	JUJV01000118.1	11780	G	T	G	edge
 ...
 B.36	OSU18	CP000437.1	557870	N/A	N/A	G	T	N/A	
 # Query file: /data/project/genomes/GCA_000807905.1.fasta sha256:57f4df3e9755607532bcf142ebdd9c2cbb4b06ddbe296fe19473887531f76849
-# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0
+# Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0 aligner=minimap2
 ```
 
 ### Typing settings line
 
 The `# Typing settings:` line holds `database sha256:<sha256>`, `min_required_hits`, `strictness`
-and `mask`. For read samples it adds `platform`, `min_depth`, `min_allele_fraction`, `min_mapq`
+and `mask`. For assemblies it adds `aligner`; for read samples it adds `platform`, `min_depth`, `min_allele_fraction`, `min_mapq`
 and `min_baseq` (the values used, whether given or taken from the platform defaults), and with
 `--local-references` also `local_references=on` and `local_rounds`.
 
@@ -299,7 +299,7 @@ and shown as `reused` in `summary.html`. The earlier file is used only when its 
 sha256 and its `# Typing settings:` line match the current run; otherwise the run stops and asks
 for `--rerun` or another `--outdir`. `--rerun` types all samples again and replaces their files.
 
-The aligner is not part of this comparison, because the `# Typing settings:` line does not
-record it. A run with another `--aligner` into the same output folder therefore reuses the
-results of the earlier aligner without a message other than `(from an earlier run, ...)`. To
-compare aligners, type into a separate `--outdir` for each, or give `--rerun`.
+For assemblies the aligner is part of the `# Typing settings:` line, so a run with another
+`--aligner` into the same output folder stops instead of reusing the result. A result file
+written before 2.6.0, which does not record the aligner, stops the run in the same way.
+To compare aligners, type into a separate `--outdir` for each.

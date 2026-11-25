@@ -1283,6 +1283,10 @@ class CanSNPer2(object):
 			self._database_sha256 = self.file_sha256(self.database)
 		line = "Typing settings: database sha256:{sha} min_required_hits={hits} strictness={strict} mask={mask}".format(
 			sha=self._database_sha256, hits=self.min_required_hits, strict=self.strictness, mask=self.mask)
+		if not isinstance(self.aligner, ReadMapper):
+			'''the aligner changes the alignments and so the call: a result made with another
+				aligner was reused without a word (minimap2 became the default in 2.6.0)'''
+			line += " aligner={name}".format(name=self.aligner.name)
 		if isinstance(self.aligner, ReadMapper):
 			'''read thresholds change the call as much as the others'''
 			line += " " + self.aligner.settings()

@@ -14,7 +14,7 @@ import pytest
 
 import helpers
 from CanSNPer2.DownloadGenomes import DownloadGenomes
-from CanSNPer2.modules.Aligners import ProgressiveMauve
+from CanSNPer2.modules.Aligners import Minimap2, ProgressiveMauve
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, sequence_names
 
@@ -22,6 +22,11 @@ from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, s
 class InstalledMauve(ProgressiveMauve):
 	'''the run now stops up front when the aligner is not installed; these tests are about what
 		happens after that check, so the program is reported as found'''
+	def available(self):
+		return True
+
+
+class InstalledMinimap2(Minimap2):
 	def available(self):
 		return True
 
@@ -197,6 +202,14 @@ def test_an_earlier_result_is_used_only_with_the_same_database_and_settings(tmp_
 	obj, db = project(tmp_path, [q], keep_going=True, min_required_hits=2)
 	result_file(obj, "x", source + same.replace("min_required_hits=2", "min_required_hits=3"))
 	obj.run(database=db)
+	assert "different database or settings" in obj.not_typed["x"]
+	# another aligner: refused as well, the alignments differ (minimap2 is the default
+	# since 2.6.0, so a result from an earlier progressiveMauve run must not pass as current)
+	assert "aligner=progressiveMauve" in same
+	obj, db = project(tmp_path, [q], keep_going=True, aligner=InstalledMinimap2())
+	result_file(obj, "x", source + same)
+	obj.run(database=db)
+	assert "x" not in obj.reused
 	assert "different database or settings" in obj.not_typed["x"]
 	# --rerun replaces it
 	obj, db = project(tmp_path, [q], keep_going=True, rerun=True)
