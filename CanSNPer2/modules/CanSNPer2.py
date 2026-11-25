@@ -19,7 +19,7 @@ from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SI
 from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
 from CanSNPer2.modules.LiftOver import lift
 from CanSNPer2.DownloadGenomes import LocalFetcher
-from CanSNPer2.modules.LocalReferences import candidates, descend, open_canSNPs, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
+from CanSNPer2.modules.LocalReferences import unsettled_splits, candidates, descend, open_canSNPs, screen, merge_counts, states_from_rows, node_path, LOCAL_FOLDER
 from CanSNPer2.modules.ParsePileup import PLATFORMS
 import subprocess
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
@@ -1070,6 +1070,7 @@ class CanSNPer2(object):
 		chosen = set()
 		fetcher = self.local_fetcher
 		fetched_before = len(fetcher.fetched) if fetcher is not None else 0
+		screens_made = []
 		cache_dir = os.path.join(self.refdir, LOCAL_FOLDER, "lift")
 		if not os.access(os.path.join(self.refdir, LOCAL_FOLDER), os.W_OK):
 			cache_dir = os.path.join(self.tmpdir, "lift")
@@ -1102,10 +1103,7 @@ class CanSNPer2(object):
 			share = screened[-1]["share"] if screened else 1.0
 			logger.info("{s}: local reference {g} ({n}), reached from {call} in {k} step(s), {m} by screen; canSNPs without data: {gaps}".format(
 					s=sample.name, g=local.genome, n=local.node, call=call, k=len(steps), m=len(screened), gaps=", ".join(gaps[:10])))
-			for st in screened:
-				if st["runner_up"] is not None and st["runner_up"] >= 0.2 and st["runner_up"] >= st["share"] / 2:
-					logger.warning("{s}: at {n} the screen gave {a:.0%} and {b:.0%} of the matched bases to two subtrees; the sample may hold more than one strain, or lie between them".format(
-							s=sample.name, n=st["node"], a=st["share"], b=st["runner_up"]))
+			screens_made.extend(screened)
 			if local.genome in chosen:
 				break
 			chosen.add(local.genome)
@@ -1141,7 +1139,21 @@ class CanSNPer2(object):
 			logger.info("{s}: round {r} against the local reference {g} ({n}), {share:.0%} of the screened bases".format(
 					s=sample.name, r=round_number + 1, g=local.genome, n=local.node, share=best[1]))
 		self.sample_fetched = len(fetcher.fetched) - fetched_before if fetcher is not None else 0
+		for st in unsettled_splits(screens_made, site_rows):
+			'''judged on the final counts: a close screen between sibling genomes whose canSNPs then
+				separate them (chosen derived, other ancestral) is expected and not reported'''
+			logger.warning("{s}: the screen gave {a:.0%} and {b:.0%} of the matched bases to {n} and {o}, and the counts at "
+				"their canSNPs do not separate them ({n}: {sn}, {o}: {so}); the sample may hold more than one strain, or lie between them".format(
+				s=sample.name, n=st["node"], o=st["runner_up_node"], a=st["share"], b=st["runner_up"],
+				sn=self._state_of(site_rows, st["node"]), so=self._state_of(site_rows, st["runner_up_node"])))
 		return site_rows, done
+
+	@staticmethod
+	def _state_of(site_rows, name):
+		for row in site_rows:
+			if row["Name"] == name:
+				return row["state"]
+		return "no canSNP"
 
 	def local_reference_fits(self, database, local, lifts):
 		'''True when the local genome carries the derived base at more of the lifted canSNPs on the

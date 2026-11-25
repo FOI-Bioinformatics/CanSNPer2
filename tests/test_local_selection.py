@@ -253,3 +253,42 @@ def test_without_fetch_missing_files_are_not_fetched(tmp_path):
 	db, refdir = with_files(tmp_path, "GB1")
 	chosen, _ = descend(db, "NA", refdir, rows(), StubScreen())
 	assert chosen.genome == "GB1"
+
+
+# a close screen between two subtrees is reported only when the counts do not settle it
+
+from CanSNPer2.modules.LocalReferences import unsettled_splits
+
+
+def test_the_screen_step_names_the_runner_up_subtree(tmp_path):
+	db, refdir = with_files(tmp_path, "GA2", "GA3", "GB1")
+	_chosen, steps = descend(db, "A.1", refdir, rows(), StubScreen("GA3"))
+	assert steps[0]["node"] == "A.3" and steps[0]["runner_up_node"] == "A.2"
+
+
+def close(node="A.3", other="A.2", share=0.55, runner_up=0.45):
+	return {"node": node, "how": "screen", "share": share, "runner_up": runner_up, "runner_up_node": other}
+
+
+def test_a_close_split_that_the_counts_confirm_is_not_reported():
+	assert unsettled_splits([close()], rows(**{"A.3": "derived", "A.2": "ancestral"})) == []
+
+
+def test_a_close_split_without_counts_at_the_two_canSNPs_is_reported():
+	assert unsettled_splits([close()], rows(**{"A.3": "derived", "A.2": "no_reads"})) == [close()]
+	assert unsettled_splits([close()], rows(**{"A.3": "low_depth", "A.2": "ancestral"})) == [close()]
+
+
+def test_a_close_split_that_the_counts_settle_the_other_way_is_not_reported():
+	assert unsettled_splits([close()], rows(**{"A.3": "ancestral", "A.2": "derived"})) == [], \
+		"the counts place the sample in the second subtree: one strain, not two"
+
+
+def test_a_close_split_with_both_canSNPs_derived_is_reported():
+	assert unsettled_splits([close()], rows(**{"A.3": "derived", "A.2": "derived"})) == [close()]
+
+
+def test_a_clear_screen_or_a_step_by_counts_is_not_reported():
+	clear = close(share=0.9, runner_up=0.1)
+	counts = {"node": "A.3", "how": "counts", "share": None, "runner_up": None, "runner_up_node": None}
+	assert unsettled_splits([clear, counts], rows()) == []

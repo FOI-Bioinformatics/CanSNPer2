@@ -224,7 +224,8 @@ def descend(database, call, refdir, site_rows, screen_fn, per_subtree=PER_SUBTRE
 		When the best genome matches less than min_screened of the screened bases, the reads
 		are not from the genomes below this node (or not from this scheme): the walk ends
 		there, without a choice when nothing was chosen before. Returns (Candidate or None, steps), steps being {"node", "how", "share",
-		"runner_up"} for each step down.
+		"runner_up", "runner_up_node"} for each step down; runner_up is the best share of the
+		genomes of the other subtrees, runner_up_node the subtree it went to.
 		fetch: None, or a function that downloads the files of a list of genomes and returns the
 		set of genomes it fetched (--fetch_local). With it, representatives without a file count
 		as options too, and only the genomes the walk screens or chooses are fetched; a genome
@@ -280,7 +281,7 @@ def descend(database, call, refdir, site_rows, screen_fn, per_subtree=PER_SUBTRE
 		supported = [c for c in options if any(states.get(names[n]) == "derived" for n in subtree(c))]
 		if len(supported) == 1 or len(options) == 1:
 			node = supported[0] if len(supported) == 1 else options[0]
-			steps.append({"node": names[node], "how": "counts", "share": None, "runner_up": None})
+			steps.append({"node": names[node], "how": "counts", "share": None, "runner_up": None, "runner_up_node": None})
 			continue
 		pool = supported or options
 		while True:
@@ -308,13 +309,40 @@ def descend(database, call, refdir, site_rows, screen_fn, per_subtree=PER_SUBTRE
 				return None, steps
 			break
 		node = owner[ranked[0][0]]
-		other = [r[1] for r in ranked if owner[r[0]] != node]
+		other = [(r[1], owner[r[0]]) for r in ranked if owner[r[0]] != node]
+		second = max(other, key=lambda o: o[0]) if other else None
 		steps.append({"node": names[node], "how": "screen", "share": ranked[0][1],
-				"runner_up": max(other) if other else None, "fraction": fraction})
+				"runner_up": second[0] if second else None, "runner_up_node": names[second[1]] if second else None,
+				"fraction": fraction})
 	for cand in [c for c in reps.get(node, []) if c.genome not in failed] or genomes_in(node):
 		if ensure([cand]):
 			return cand, steps
 	return None, steps
+
+
+CLOSE_SECOND = 0.2  ## a screen is close when the second subtree has at least this share
+CLOSE_RATIO = 0.5   ## and at least this fraction of the share of the first
+
+
+def unsettled_splits(steps, site_rows):
+	'''The screen steps of a descent where the second subtree came close to the first (a share of
+		at least CLOSE_SECOND and at least CLOSE_RATIO of the first) and the counts do not settle
+		the choice: the canSNPs of the two subtrees are not one derived and the other ancestral
+		(either way round; when the counts place the sample in the second subtree, the call
+		follows the counts). Sibling genomes share most of their sequence, so a close screen alone
+		is expected between them; it suggests more than one strain only when the counts at the two
+		canSNPs do not separate them.'''
+	states = {row["Name"]: row["state"] for row in site_rows}
+	out = []
+	for st in steps:
+		if st.get("how") != "screen" or st.get("runner_up") is None:
+			continue
+		if st["runner_up"] < CLOSE_SECOND or st["runner_up"] < st["share"] * CLOSE_RATIO:
+			continue
+		if {states.get(st["node"]), states.get(st.get("runner_up_node"))} == {"derived", "ancestral"}:
+			continue
+		out.append(st)
+	return out
 
 
 HAS_DATA = ("derived", "ancestral", "other_base", "mixed", "conflict")

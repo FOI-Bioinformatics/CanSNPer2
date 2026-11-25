@@ -979,7 +979,10 @@ called at `BR.anthropi.1.1.1.1`.
    matches less than 10 % of the screened bases, the reads are not from the genomes below,
    and the walk stops there. The walk ends at a terminal node, whose representative is the
    local reference. When two subtrees get similar shares of the screened bases (the second at
-   least 20 % and at least half the first), a warning says so.
+   least 20 % and at least half the first), a warning says so, unless the final counts
+   separate the two: the canSNP of one subtree derived and that of the other ancestral.
+   Sibling genomes share most of their sequence, so a close screen alone is expected between
+   them.
 4. The canSNP positions are lifted from the scheme reference to the local reference by
    aligning the two genomes with minimap2 (asm20, as assembly typing does); a canSNP is lifted
    only when the local genome has its ancestral or derived base there. The lift is cached in
