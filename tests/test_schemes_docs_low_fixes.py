@@ -84,9 +84,9 @@ def test_save_tree_and_no_snpfiles_help_describe_the_behaviour():
 	assert "Don´t save" not in text
 
 
-def test_readme_help_block_matches_the_help():
-	readme = open(os.path.join(ROOT, "README.md")).read()
-	block = readme.split("cansnper2 type --help\n```\n")[1].split("\n```")[0]
+def test_cli_reference_matches_the_help():
+	reference = open(os.path.join(ROOT, "docs", "cli.md")).read()
+	block = reference.split("## cansnper2 type\n\n```text\n")[1].split("\n```")[0]
 	help_text = run("CanSNPer2.cli", "type", "--help", env=dict(ENV, COLUMNS="80")).stdout
 	for option in re.findall(r"^\s+(--[a-z][a-z-]*)", help_text, re.M):
 		assert option in block, option

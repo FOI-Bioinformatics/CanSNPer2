@@ -131,14 +131,14 @@ def add_type_subparser(subparsers):
 	run.add_argument('--workdir', metavar='DIR',
 		help="directory that relative paths of the output, log and temporary "
 			"folders are resolved against")
-	run.add_argument('--min-required-hits', dest='min_required_hits',
+	run.add_argument('--min-required-hits', dest='min_required_hits', metavar='N',
 		type=typing_command.positive_int,
 		help="minimum number of derived canSNPs on the path from the root to a "
 			"node for that node to be called")
-	run.add_argument('--strictness', type=typing_command.fraction,
+	run.add_argument('--strictness', metavar='FRACTION', type=typing_command.fraction,
 		help="minimum fraction of the canSNPs on that path that must be derived; "
 			"the others may lack data (0-1)")
-	run.add_argument('--mask', type=typing_command.non_negative_int,
+	run.add_argument('--mask', metavar='BASES', type=typing_command.non_negative_int,
 		help="assemblies only: ignore canSNPs closer than this many bases to the "
 			"edge of an alignment block")
 	run.add_argument('--keep-going', dest='keep_going', action='store_true',
@@ -193,37 +193,37 @@ def add_read_options(parser):
 		help="tab-separated file with the header columns sample, reads1 and "
 			"optionally reads2 and platform, one sample per row; replaces the "
 			"query arguments")
-	reads.add_argument('--min-depth', dest='min_depth',
+	reads.add_argument('--min-depth', dest='min_depth', metavar='N',
 		type=typing_command.positive_int, default=None,
 		help="minimum number of reads covering a canSNP position for its state "
 			"to be read (default: 5 for all platforms)")
-	reads.add_argument('--min-allele-fraction', dest='min_allele_fraction',
+	reads.add_argument('--min-allele-fraction', dest='min_allele_fraction', metavar='FRACTION',
 		type=typing_command.fraction, default=None,
 		help="minimum fraction of the reads that must carry one base for the "
 			"site to take that state; below it the site is reported as mixed "
 			"(default: illumina 0.8, ont 0.7, hifi 0.8)")
-	reads.add_argument('--min-mapq', dest='min_mapq',
+	reads.add_argument('--min-mapq', dest='min_mapq', metavar='Q',
 		type=typing_command.non_negative_int, default=None,
 		help="minimum mapping quality of a read (default: 20 for all platforms)")
-	reads.add_argument('--min-baseq', dest='min_baseq',
+	reads.add_argument('--min-baseq', dest='min_baseq', metavar='Q',
 		type=typing_command.non_negative_int, default=None,
 		help="minimum base quality (default: illumina 20, ont 10, hifi 20)")
-	reads.add_argument('--mixed-sites', dest='mixed_sites',
+	reads.add_argument('--mixed-sites', dest='mixed_sites', metavar='N',
 		type=typing_command.positive_int, default=3,
 		help="number of mixed canSNP sites from which a sample is flagged as "
 			"possibly mixed")
-	reads.add_argument('--threads', type=typing_command.positive_int, default=4,
+	reads.add_argument('--threads', metavar='N', type=typing_command.positive_int, default=4,
 		help="threads for minimap2 and samtools sort, per reference")
 	reads.add_argument('--local-references', dest='local_references',
 		action='store_true',
 		help="map the reads again to the representative genome of the scheme "
 			"closest to the sample and read the canSNPs at their positions in that "
 			"genome (genomes in <ref-dir>/local; see ref get --local-references)")
-	reads.add_argument('--local-rounds', dest='local_rounds',
+	reads.add_argument('--local-rounds', dest='local_rounds', metavar='N',
 		type=typing_command.positive_int, default=2,
 		help="with --local-references: maximum number of rounds of choosing a "
 			"closer representative genome")
-	reads.add_argument('--screen-reads', dest='screen_reads',
+	reads.add_argument('--screen-reads', dest='screen_reads', metavar='N',
 		type=typing_command.positive_int, default=100000,
 		help="with --local-references: number of reads per file that are mapped "
 			"to the candidate genomes to choose the local reference")
