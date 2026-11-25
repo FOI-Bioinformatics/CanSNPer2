@@ -258,16 +258,17 @@ def add_scheme_info_options(parser):
 		help="where the scheme files came from, e.g. a repository and commit")
 
 
-def add_source_file_options(parser):
+def add_source_file_options(parser, required):
 	'''the three source files of db create and db import; --annotation becomes
-		--cansnps because the 2.4.0 file it reads lists canSNPs'''
+		--cansnps because the 2.4.0 file it reads lists canSNPs. db import needs all
+		three, db create builds a database from any of them'''
+	needed = "; required" if required else ""
 	parser.add_argument('--tree', metavar='FILE',
-		help="tree file of the scheme (<name>_tree.txt); required")
+		help="tree file of the scheme (<name>_tree.txt)" + needed)
 	parser.add_argument('--cansnps', dest='annotation', metavar='FILE',
-		help="canSNP file of the scheme (<name>_canSNPs.txt); required")
+		help="canSNP file of the scheme (<name>_canSNPs.txt)" + needed)
 	parser.add_argument('--references', metavar='FILE',
-		help="reference genomes file of the scheme (<name>_references.txt); "
-			"required")
+		help="reference genomes file of the scheme (<name>_references.txt)" + needed)
 	parser.add_argument('--genomes', metavar='FILE',
 		help="genomes file of the scheme (<name>_genomes.txt: genome, node, role); "
 			"optional, used by read typing with --local-references")
@@ -282,15 +283,16 @@ def add_db_subparsers(subparsers):
 
 	create = db_sub.add_parser('create', help="build a database from the files of a scheme",
 		description="Build a database from the tree, canSNP and reference genome "
-			"files of a scheme. The files are checked first; the database is "
-			"written only when they pass.",
+			"files of a scheme; a database can also be started from only some of "
+			"them and completed with db modify. The files are checked first; the "
+			"database is written only when they pass.",
 		epilog=examples("cansnper2 db create -d my_scheme.db --tree my_tree.txt \\",
 			"    --cansnps my_canSNPs.txt --references my_references.txt \\",
 			"    --scheme-name my_scheme --scheme-status draft"),
 		formatter_class=HelpFormatter)
 	create.add_argument('-d', '--database', metavar='DB',
 		help="the new database to write")
-	add_source_file_options(create)
+	add_source_file_options(create, required=False)
 	add_scheme_info_options(create)
 	add_logging_options(create, logs_dest='logs', logs_default='logs')
 	parsers['db create'] = create
@@ -305,7 +307,7 @@ def add_db_subparsers(subparsers):
 		formatter_class=HelpFormatter)
 	imp.add_argument('-d', '--database', metavar='DB',
 		help="the new database to write")
-	add_source_file_options(imp)
+	add_source_file_options(imp, required=True)
 	add_scheme_info_options(imp)
 	add_logging_options(imp, logs_dest='logs', logs_default='logs')
 	parsers['db import'] = imp
@@ -367,7 +369,7 @@ def add_db_subparsers(subparsers):
 		description="Change an existing database: add or replace part of the tree "
 			"(--mod-file), add or change canSNP annotations (--cansnps) or "
 			"reference genomes (--references).",
-		epilog=examples("cansnper2 db modify -d scheme.db --mod-file new_branch.txt",
+		epilog=examples("cansnper2 db modify -d scheme.db --mod-file new_branch.txt --parent B.Br.001",
 			"cansnper2 db modify -d scheme.db --mod-file subtree.txt \\",
 			"    --parent B.Br.001 --replace",
 			"cansnper2 db modify -d scheme.db --cansnps added_canSNPs.txt"),
@@ -376,7 +378,7 @@ def add_db_subparsers(subparsers):
 	modify.add_argument('--mod-file', dest='mod_file', metavar='FILE',
 		help="file with the tree modifications")
 	modify.add_argument('--parent', metavar='NODE',
-		help="node at which the tree is changed")
+		help="node at which the tree is changed; required with --mod-file")
 	modify.add_argument('--replace', action='store_true',
 		help="replace the subtree below --parent with the tree of --mod-file")
 	modify.add_argument('--cansnps', dest='annotation', metavar='FILE',

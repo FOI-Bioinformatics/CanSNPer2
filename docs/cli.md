@@ -326,17 +326,18 @@ usage: cansnper2 db create [-h] [-d DB] [--tree FILE] [--cansnps FILE]
                            [--scheme-source SRC] [--log-dir DIR] [-v]
                            [--debug] [--quiet]
 
-Build a database from the tree, canSNP and reference genome files of a scheme.
-The files are checked first; the database is written only when they pass.
+Build a database from the tree, canSNP and reference genome files of a scheme;
+a database can also be started from only some of them and completed with db
+modify. The files are checked first; the database is written only when they
+pass.
 
 options:
   -h, --help            show this help message and exit
   -d, --database DB     the new database to write
-  --tree FILE           tree file of the scheme (<name>_tree.txt); required
-  --cansnps FILE        canSNP file of the scheme (<name>_canSNPs.txt);
-                        required
+  --tree FILE           tree file of the scheme (<name>_tree.txt)
+  --cansnps FILE        canSNP file of the scheme (<name>_canSNPs.txt)
   --references FILE     reference genomes file of the scheme
-                        (<name>_references.txt); required
+                        (<name>_references.txt)
   --genomes FILE        genomes file of the scheme (<name>_genomes.txt:
                         genome, node, role); optional, used by read typing
                         with --local-references
@@ -512,7 +513,8 @@ options:
   -h, --help         show this help message and exit
   -d, --database DB  the database
   --mod-file FILE    file with the tree modifications
-  --parent NODE      node at which the tree is changed
+  --parent NODE      node at which the tree is changed; required with --mod-
+                     file
   --replace          replace the subtree below --parent with the tree of
                      --mod-file
   --cansnps FILE     canSNP source file with changes to the canSNP annotations
@@ -526,7 +528,7 @@ Logging options:
   --quiet            print errors only, not warnings
 
 examples:
-  cansnper2 db modify -d scheme.db --mod-file new_branch.txt
+  cansnper2 db modify -d scheme.db --mod-file new_branch.txt --parent B.Br.001
   cansnper2 db modify -d scheme.db --mod-file subtree.txt \
       --parent B.Br.001 --replace
   cansnper2 db modify -d scheme.db --cansnps added_canSNPs.txt
