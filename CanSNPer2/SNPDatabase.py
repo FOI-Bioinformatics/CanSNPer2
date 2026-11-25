@@ -450,7 +450,8 @@ def run_command(args):
 				exit(1)
 			print("Exported to {files}".format(files=", ".join(files.values())))
 			print("Import back with: cansnper2 db import -d <new.db> --tree {tree} "
-				"--cansnps {snp} --references {references}".format(**files))
+				"--cansnps {snp} --references {references}".format(**files)
+				+ (" --genomes {genomes}".format(**files) if "genomes" in files else ""))
 		exit()
 	if not args.create:
 		if not (args.mod_file or args.annotation or args.references):
