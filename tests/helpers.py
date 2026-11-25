@@ -137,3 +137,33 @@ def write_sources(folder, snp_rows, tree=None, references=None, name="scheme", h
 		with open(files[key], "w") as out:
 			out.write(text)
 	return files
+
+
+def _revcomp(seq):
+	return seq.translate(str.maketrans("ACGT", "TGCA"))[::-1]
+
+
+def simulate_reads(genome, depth, seed=1, length=100, insert=300, paired=True, error_rate=0.0):
+	'''error-free (or uniformly erroneous) reads of a genome sequence, as FASTQ records;
+		returns (reads1, reads2) for paired-end reads (reads2 is None for single-end). Both
+		strands are sampled; a pair spans insert bases, the second read on the other strand.'''
+	import random
+	rng = random.Random(seed)
+	span = insert if paired else length
+	n = max(1, int(depth * len(genome) / (length * (2 if paired else 1))))
+	def noisy(seq):
+		if not error_rate:
+			return seq
+		return "".join(rng.choice("ACGT".replace(b, "")) if rng.random() < error_rate else b for b in seq)
+	r1, r2 = [], []
+	for i in range(n):
+		start = rng.randint(0, len(genome) - span)
+		fragment = genome[start:start + span]
+		if rng.random() < 0.5:
+			fragment = _revcomp(fragment)
+		first = noisy(fragment[:length])
+		r1.append("@s{s}r{i}/1\n{seq}\n+\n{q}\n".format(s=seed, i=i, seq=first, q="I" * len(first)))
+		if paired:
+			second = noisy(_revcomp(fragment)[:length])
+			r2.append("@s{s}r{i}/2\n{seq}\n+\n{q}\n".format(s=seed, i=i, seq=second, q="I" * len(second)))
+	return "".join(r1), ("".join(r2) if paired else None)

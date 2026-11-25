@@ -75,4 +75,8 @@ Used with `--aligner minimap2`.
 [MUMmer4](https://github.com/mummer4/mummer)  
 Used with `--aligner mummer4`; it needs both `nucmer` and `delta-filter`.
 
+Typing sequencing reads instead of assemblies needs
+[minimap2](https://github.com/lh3/minimap2) and [samtools](https://www.htslib.org/)
+(1.10 or later) in PATH, for example `conda install -c bioconda minimap2 samtools`.
+
 `cansnper2 selftest` reports which of these programs are found in PATH.

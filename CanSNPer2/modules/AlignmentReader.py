@@ -125,7 +125,7 @@ class AlignmentReader(object):
 			return []
 		return positions[bisect_left(positions,start):bisect_right(positions,end)]
 
-	def observe(self, sequence, position, base, block_offset, block_length, query_name="-", query_pos="N/A"):
+	def observe(self, sequence, position, base, block_offset, block_length, query_name="-", query_pos="N/A", query_strand="+"):
 		'''Record the query base found at a SNP position of the reference.
 
 			sequence      reference sequence of the SNP
@@ -139,6 +139,9 @@ class AlignmentReader(object):
 			              the distance to both edges, for --mask and the edge flag
 			query_name    query sequence (contig) the base comes from
 			query_pos     position of the base in that query sequence, "N/A" for a gap
+			query_strand  "-" when the query runs on the other strand of the reference (the base is
+			              then the complement of the query base); used by the lift-over to a local
+			              reference
 		'''
 		if self.mask and (block_offset <= self.mask or block_length - block_offset < self.mask):
 			'''the flanking mask: a SNP this close to either edge of the alignment is not
@@ -161,7 +164,8 @@ class AlignmentReader(object):
 				previous["base"] = "N"
 			previous["edge"] = previous["edge"] or edge
 			return
-		self.observations[key] = {"base": base, "edge": edge, "query_name": query_name or "-", "query_pos": str(query_pos)}
+		self.observations[key] = {"base": base, "edge": edge, "query_name": query_name or "-", "query_pos": str(query_pos),
+				"query_strand": query_strand}
 
 	def classify(self, base, ancestral, derived):
 		'''state of a SNP from the query base'''
