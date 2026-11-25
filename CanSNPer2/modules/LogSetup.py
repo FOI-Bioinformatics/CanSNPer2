@@ -4,10 +4,10 @@ import sys
 from datetime import datetime
 
 '''
-One place for the log file naming that the three commands used to copy paste (issue #217).
-Every command passes its own tag, so CanSNPer2-database and CanSNPer2-download can no
-longer append to each other's log file, and a name that is already taken steps through
--HH:MM and then .2, .3 ... so two runs inside the same minute get separate files.
+One place for the log file naming of the commands (issue #217). Every verb passes its own
+tag (cansnper2-type, cansnper2-db-info, cansnper2-scheme-get, ...), so two verbs never append
+to each other's log file, and a name that is already taken steps through -HHMM and then
+.2, .3 ... so two runs inside the same minute get separate files.
 '''
 
 
