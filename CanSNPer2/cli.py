@@ -17,6 +17,7 @@ import logging
 from CanSNPer2 import __version__
 from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
+from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
 
 import CanSNPer2.CanSNPerTree as typing_command
 import CanSNPer2.SNPDatabase as database_command
@@ -61,7 +62,9 @@ def add_type_subparser(subparsers):
 		formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 	required = parser.add_argument_group("Required arguments")
 	required.add_argument('query', nargs=argparse.ZERO_OR_MORE, metavar='query',
-		help="file(s) to align (fasta), or one list file with a file path per line")
+		help="assemblies (fasta) or sequencing reads (fastq, may be gzipped) to "
+			"type, or one list file with a file path per line; paired read files "
+			"are found by their names (_R1/_R2, _1/_2)")
 	required.add_argument('-d', '--database', metavar='DB',
 		help="CanSNP database")
 
@@ -119,6 +122,7 @@ def add_type_subparser(subparsers):
 		help="folder for temporary alignments (default: CanSNPer2 in the "
 			"system temporary folder, see TMPDIR)")
 
+	add_read_options(parser)
 	add_logging_options(parser, logs_dest='logdir', logs_default='logs/')
 	'''the internal options the new interface does not offer keep their old
 		defaults: --read_input and the hidden --no_save_tree were dropped,
@@ -133,6 +137,56 @@ def add_type_subparser(subparsers):
 	return parser
 
 
+def add_read_options(parser):
+	'''read typing and local references: the queries are sequencing reads, which
+		minimap2 maps to each reference and samtools mpileup counts at the canSNPs'''
+	reads = parser.add_argument_group("Read typing options",
+		"used when the queries are sequencing reads; thresholds that are not "
+		"given take the defaults of --platform")
+	reads.add_argument('--platform', choices=sorted(PLATFORMS),
+		default=DEFAULT_PLATFORM,
+		help="sequencing platform: illumina (short reads, paired or single), "
+			"ont or hifi")
+	reads.add_argument('--samplesheet', metavar='FILE', default=None,
+		help="tab separated file with the header sample, reads1 and optionally "
+			"reads2 and platform, one sample per row; instead of queries")
+	reads.add_argument('--min-depth', dest='min_depth',
+		type=typing_command.positive_int, default=None,
+		help="reads needed at a canSNP for a call (illumina, ont and hifi: 5)")
+	reads.add_argument('--min-allele-fraction', dest='min_allele_fraction',
+		type=typing_command.fraction, default=None,
+		help="fraction of the reads that must carry a base for a call; below it "
+			"the site is mixed (illumina 0.8, ont 0.7, hifi 0.8)")
+	reads.add_argument('--min-mapq', dest='min_mapq',
+		type=typing_command.non_negative_int, default=None,
+		help="minimum mapping quality of a read (20)")
+	reads.add_argument('--min-baseq', dest='min_baseq',
+		type=typing_command.non_negative_int, default=None,
+		help="minimum base quality (illumina 20, ont 10, hifi 20)")
+	reads.add_argument('--mixed-sites', dest='mixed_sites',
+		type=typing_command.positive_int, default=3,
+		help="mixed canSNP sites at which a sample is reported as possibly mixed")
+	reads.add_argument('--threads', type=typing_command.positive_int, default=4,
+		help="threads of minimap2 and samtools sort for each reference")
+	reads.add_argument('--local-references', dest='local_references',
+		action='store_true',
+		help="map the reads again to the representative genome of the scheme "
+			"closest to the sample and read the canSNPs at their lifted "
+			"positions (genomes in <ref-dir>/local, see ref get "
+			"--local-references)")
+	reads.add_argument('--local-rounds', dest='local_rounds',
+		type=typing_command.positive_int, default=2,
+		help="with --local-references: at most this many rounds")
+	reads.add_argument('--screen-reads', dest='screen_reads',
+		type=typing_command.positive_int, default=100000,
+		help="with --local-references: reads of each file mapped to the "
+			"candidate genomes to choose the local reference")
+	reads.add_argument('--fetch-local', dest='fetch_local', action='store_true',
+		help="with --local-references: download from NCBI, while typing, the "
+			"representative genomes the choice needs that are not in "
+			"<ref-dir>/local yet")
+
+
 def database_defaults(parser, **mode):
 	'''every internal option of the database command with its default, and the
 		one mode of this verb set to True'''
@@ -142,7 +196,7 @@ def database_defaults(parser, **mode):
 		scheme_source=None, info=False, convert=False, refdir=None,
 		mod_file=None, parent=None, remove=False, replace=False,
 		export=False, export_format=None, outdir=None, tmpdir="/tmp",
-		version=False)
+		version=False, genomes=None)
 	settings.update(mode)
 	parser.set_defaults(**settings)
 
@@ -166,6 +220,9 @@ def add_source_file_options(parser):
 		help="canSNP source file (<name>_canSNPs.txt)")
 	parser.add_argument('--references', metavar='FILE',
 		help="file listing all reference genomes")
+	parser.add_argument('--genomes', metavar='FILE',
+		help="genomes file of the scheme (genome, node, role), whose "
+			"representatives read typing with --local-references uses")
 
 
 def add_db_subparsers(subparsers):
@@ -296,6 +353,7 @@ def add_scheme_subparsers(subparsers):
 		action='store_true',
 		help="build a verified scheme although its files cannot be checked "
 			"against a manifest")
+	add_local_references_option(get)
 	add_logging_options(get, logs_dest='logs', logs_default='logs')
 	download_defaults(get)
 	parsers['scheme get'] = get
@@ -315,9 +373,17 @@ def add_ref_subparsers(subparsers):
 		help="source for the downloads")
 	get.add_argument('-o', '--outdir', metavar='DIR',
 		help="folder for the reference genomes")
+	add_local_references_option(get)
 	add_logging_options(get, logs_dest='logs', logs_default='logs')
 	download_defaults(get)
 	return {'ref get': get}
+
+
+def add_local_references_option(parser):
+	parser.add_argument('--local-references', dest='local_references',
+		action='store_true',
+		help="also fetch the representative genomes of the scheme into "
+			"<references folder>/local, for cansnper2 type --local-references")
 
 
 def download_defaults(parser, **mode):
@@ -326,7 +392,7 @@ def download_defaults(parser, **mode):
 	settings = dict(database=None, scheme=None, branch=None, repo=None,
 		data_dir=None, list_schemes=False, overwrite=False,
 		no_references=False, allow_unverified=False, source="genbank",
-		outdir="references", verbose=None, debug=None)
+		outdir="references", verbose=None, debug=None, local_references=False)
 	settings.update(mode)
 	parser.set_defaults(**settings)
 

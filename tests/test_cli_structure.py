@@ -177,3 +177,83 @@ def test_import_is_the_same_as_the_old_import(tmp_path, scheme):
 	new_info = run_cli("db", "info", "-d", str(tmp_path / "new.db"),
 		"--log-dir", str(tmp_path / "logs_new"), cwd=tmp_path)
 	assert old_info.stdout == new_info.stdout
+
+
+# read typing and local references through the verbs
+
+import shutil
+import sqlite3
+
+READ_OPTIONS = ["--platform", "--samplesheet", "--min-depth", "--min-allele-fraction", "--min-mapq",
+	"--min-baseq", "--mixed-sites", "--threads", "--local-references", "--local-rounds",
+	"--screen-reads", "--fetch-local"]
+GENOMES = "genome\tnode\trole\nGCA_000000002.1\tA.2\trepresentative\nGCA_000000003.1\tB.1\trepresentative\n"
+
+
+def test_type_offers_the_read_options(tmp_path):
+	r = run_cli("type", "--help", cwd=tmp_path)
+	for option in READ_OPTIONS:
+		assert option in r.stdout, "cansnper2 type --help does not offer " + option
+
+
+def test_db_create_and_import_load_a_genomes_file(tmp_path, scheme):
+	_, files = scheme
+	(tmp_path / "g.txt").write_text(GENOMES)
+	for verb in ("create", "import"):
+		db = str(tmp_path / (verb + ".db"))
+		r = run_cli("db", verb, "-d", db, "--tree", files["tree"], "--cansnps", files["snp"],
+			"--references", files["references"], "--genomes", str(tmp_path / "g.txt"),
+			"--log-dir", str(tmp_path / "logs"), cwd=tmp_path)
+		assert r.returncode == 0, r.stderr
+		rows = set(sqlite3.connect(db).execute("SELECT genome, role FROM genomes"))
+		assert rows == {("GCA_000000002.1", "representative"), ("GCA_000000003.1", "representative")}
+
+
+def test_ref_get_and_scheme_get_offer_local_references(tmp_path):
+	for verb in (["ref", "get"], ["scheme", "get"]):
+		r = run_cli(*(verb + ["--help"]), cwd=tmp_path)
+		assert "--local-references" in r.stdout, " ".join(verb)
+
+
+def test_fetch_local_needs_local_references(tmp_path, scheme):
+	db, _ = scheme
+	(tmp_path / "r_R1.fq").write_text("@r/1\nACGT\n+\nIIII\n")
+	r = run_cli("type", "-d", db, "--fetch-local", str(tmp_path / "r_R1.fq"),
+		"--log-dir", str(tmp_path / "logs"), cwd=tmp_path)
+	assert r.returncode == 2 and "--local-references" in r.stderr
+
+
+@pytest.mark.skipif(shutil.which("minimap2") is None or shutil.which("samtools") is None,
+	reason="minimap2 and samtools are needed for read typing")
+def test_type_reads_is_the_same_as_the_old_command(tmp_path):
+	'''reads of a genome typed with cansnper2 type give the call and the site counts of
+		the old command'''
+	rng = __import__("random").Random(3)
+	ref = [rng.choice("ACGT") for _ in range(6000)]
+	sites = {"R": 1000, "A.1": 2000, "A.2": 3000, "B.1": 4000}
+	sample = list(ref)
+	rows = []
+	for node, pos in sites.items():
+		derived = "ACGT"[("ACGT".index(ref[pos - 1]) + 1) % 4]
+		if node != "B.1":
+			sample[pos - 1] = derived
+		## node rank reference genome sequence sequence_position derived_base ancestral_base score typed
+		rows.append("{n}\t1\tP\tREF1\tCP000001.1\t{p}\t{d}\t{a}\t\tyes".format(n=node, p=pos, d=derived, a=ref[pos - 1]))
+	files = helpers.write_sources(tmp_path / "src", rows, tree=TREE)
+	db = str(tmp_path / "reads.db")
+	CanSNPDatabase(database=db, create=True, tree=files["tree"], annotation=files["snp"],
+		references=files["references"], source_type="CanSNPer", verbose=False)
+	(tmp_path / "refs").mkdir()
+	(tmp_path / "refs" / "REF1.fna").write_text(">CP000001.1\n" + "".join(ref) + "\n")
+	r1, r2 = helpers.simulate_reads("".join(sample), 30, seed=5)
+	(tmp_path / "s_R1.fq").write_text(r1)
+	(tmp_path / "s_R2.fq").write_text(r2)
+	reads = [str(tmp_path / "s_R1.fq"), str(tmp_path / "s_R2.fq")]
+	old = run_old("CanSNPer2.CanSNPerTree", "-db", db, "--refdir", "refs", "-o", "old", "--min_required_hits", "1",
+		"--logdir", "logs_old", *reads, cwd=tmp_path)
+	new = run_cli("type", "-d", db, "--ref-dir", "refs", "-o", "new", "--min-required-hits", "1",
+		"--log-dir", "logs_new", *reads, cwd=tmp_path)
+	assert old.returncode == new.returncode == 0, new.stderr
+	assert "A.2" in new.stdout and old.stdout.splitlines()[-1] == new.stdout.splitlines()[-1]
+	strip = lambda p: [l for l in open(p) if not l.startswith("#")]
+	assert strip(tmp_path / "old" / "samples" / "s_site_counts.tsv") == strip(tmp_path / "new" / "samples" / "s_site_counts.tsv")

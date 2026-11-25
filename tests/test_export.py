@@ -182,3 +182,18 @@ def test_the_command_line_export(tmp_path, export_format):
 	assert result.returncode == 0, result.stderr
 	assert sorted(os.listdir(out)) == ["scheme_canSNPs.txt", "scheme_references.txt", "scheme_tree.txt"]
 	assert "Import back with: cansnper2 db import" in result.stdout
+
+
+def test_the_import_hint_names_the_genomes_file_when_one_is_written(tmp_path):
+	from CanSNPer2.modules.SchemeGenomes import load_genomes
+	db = source_db(tmp_path)
+	conn = sqlite3.connect(db)
+	node = conn.execute("SELECT name FROM nodes ORDER BY id DESC LIMIT 1").fetchone()[0]
+	(tmp_path / "g.txt").write_text("genome\tnode\trole\nGCA_000000002.1\t{n}\trepresentative\n".format(n=node))
+	load_genomes(conn, str(tmp_path / "g.txt"))
+	conn.close()
+	out = tmp_path / "with_genomes"
+	result = subprocess.run([sys.executable, "-m", "CanSNPer2.SNPDatabase", "--database", db, "--export",
+		"-o", str(out), "--logs", str(tmp_path / "logs")], capture_output=True, text=True, cwd=str(tmp_path))
+	assert result.returncode == 0, result.stderr
+	assert "--genomes " + str(out / "scheme_genomes.txt") in result.stdout
