@@ -11,7 +11,7 @@ required tasks. It is also written in a modular form with separate
 classes for each task which allows future extentions such as a sequence read
 input option planned during 2020.
 
-Requires an aligner, by default progressiveMauve
+Requires an aligner, by default minimap2
 
 This program is free software: you can redistribute and/or modify
 the code under the terms of the GNU General Public License as published by

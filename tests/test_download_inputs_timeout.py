@@ -150,12 +150,12 @@ def test_alignments_that_never_return_are_stopped(tmp_path):
 	logs.mkdir()
 	slow = [sys.executable, "-c", "import time; time.sleep(60)", "ref_REF.fna", "query_q.fna"]
 	fast = [sys.executable, "-c", "pass", "ref_OTHER.fna", "query_q.fna"]
-	obj = CanSNPer2([], workdir=str(tmp_path), alignment_timeout=0.02)   ## 1.2 seconds
+	obj = CanSNPer2([], workdir=str(tmp_path), alignment_timeout=0.02, aligner="progressiveMauve")   ## 1.2 seconds
 	start = time.time()
 	with pytest.raises(AlignmentError, match="1 progressiveMauve processes did not run correctly"):
 		obj.run_alignments([slow, fast], [str(logs / "a.log"), str(logs / "b.log")])
 	assert time.time() - start < 20
-	obj = CanSNPer2([], workdir=str(tmp_path), alignment_timeout=0.02, keep_going=True)
+	obj = CanSNPer2([], workdir=str(tmp_path), alignment_timeout=0.02, keep_going=True, aligner="progressiveMauve")
 	assert obj.run_alignments([slow], [str(logs / "c.log")]) == 1
 
 

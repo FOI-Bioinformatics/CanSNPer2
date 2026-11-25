@@ -123,7 +123,7 @@ Run options:
   --rerun               type queries again although their result file exists
   --aligner {minimap2,mummer4,progressiveMauve}
                         program that aligns an assembly to each reference
-                        genome (default: progressiveMauve)
+                        genome (default: minimap2)
   --alignment-timeout MINUTES
                         stop an alignment that runs longer than this; 0 for no
                         limit (default: 60)

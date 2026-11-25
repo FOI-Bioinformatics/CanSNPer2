@@ -1442,7 +1442,7 @@ class CanSNPer2(object):
 				self.check_aligner()
 
 			'''Main function of CanSNPer2
-					1. Align sequences with the selected aligner (progressiveMauve by default)
+					1. Align sequences with the selected aligner (minimap2 by default)
 					2. Read the alignments and find SNPs
 					3. Create a tree visualising SNPs found in sequence
 					3b. If requested create a list with SNPs and their status
