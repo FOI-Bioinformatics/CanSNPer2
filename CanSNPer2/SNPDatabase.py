@@ -67,6 +67,7 @@ def get_arguments():
 	create_database.add_argument('--references',   metavar='', default=False,                 	help="File containing all reference genomes listed")
 	create_database.add_argument('--source_type',  metavar='', default="CanSNPer",
 														choices=supported_input, 				help="Select source file type")
+	create_database.add_argument('--genomes',      metavar='', default=None,                   help="with --create or --import: the genomes file of the scheme (genome, node, role), used by read typing with --local_references")
 	create_database.add_argument('--create',             action='store_true',                   help="Create new database!")
 	create_database.add_argument('--import',     dest='do_import', action='store_true',         help="build a database from the source files written by --export (--tree --annotation --references), written to --database")
 	create_database.add_argument('--scheme_name',   metavar='',                                 help="with --create or --import: the name of the scheme, recorded in the database")
@@ -370,7 +371,7 @@ def command():
 			exit(1)
 		try:
 			counts = import_from_sources(args.tree, args.annotation, args.references,
-				args.database, tmpdir=args.tmpdir, verbose=args.verbose, scheme_info=scheme_info)
+				args.database, tmpdir=args.tmpdir, verbose=args.verbose, scheme_info=scheme_info, genomes=args.genomes)
 		except DatabaseImportError as e:
 			logger.error(str(e))
 			exit(1)
