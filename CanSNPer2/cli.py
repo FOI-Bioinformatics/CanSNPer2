@@ -40,7 +40,8 @@ class HelpFormatter(argparse.HelpFormatter):
 		text = action.help or ""
 		if "default" in text or not action.option_strings or action.nargs == 0:
 			return text
-		if action.default in (None, "", [], False, argparse.SUPPRESS):
+		## a 0 default is shown; 0 == False, so False is tested by identity
+		if action.default is None or action.default is False or action.default in ("", [], argparse.SUPPRESS):
 			return text
 		return text + " (default: %(default)s)"
 
@@ -120,7 +121,7 @@ def add_type_subparser(subparsers):
 			"samples")
 	output.add_argument('--node-labels', dest='annotations', metavar='FILE',
 		help="tab-separated file of labels for tree nodes in the HTML pages: "
-			"<snp name>, <node|clade>, <rank>, <label>[, <color>]")
+			"node name, kind (node or clade), rank, label[, color]")
 
 	run = parser.add_argument_group("Run options")
 	run.add_argument('--ref-dir', dest='refdir', metavar='DIR',
@@ -291,7 +292,7 @@ def add_db_subparsers(subparsers):
 			"    --scheme-name my_scheme --scheme-status draft"),
 		formatter_class=HelpFormatter)
 	create.add_argument('-d', '--database', metavar='DB',
-		help="the new database to write")
+		help="the new database to write; required")
 	add_source_file_options(create, required=False)
 	add_scheme_info_options(create)
 	add_logging_options(create, logs_dest='logs', logs_default='logs')
@@ -306,7 +307,7 @@ def add_db_subparsers(subparsers):
 			"    --references export/scheme_references.txt"),
 		formatter_class=HelpFormatter)
 	imp.add_argument('-d', '--database', metavar='DB',
-		help="the new database to write")
+		help="the new database to write; required")
 	add_source_file_options(imp, required=True)
 	add_scheme_info_options(imp)
 	add_logging_options(imp, logs_dest='logs', logs_default='logs')
@@ -319,7 +320,7 @@ def add_db_subparsers(subparsers):
 			"canSNPs and reference genomes.",
 		epilog=examples("cansnper2 db info -d francisella_tularensis.db"),
 		formatter_class=HelpFormatter)
-	info.add_argument('-d', '--database', metavar='DB', help="the database")
+	info.add_argument('-d', '--database', metavar='DB', help="the database; required")
 	add_logging_options(info, logs_dest='logs', logs_default='logs')
 	parsers['db info'] = info
 
@@ -330,7 +331,7 @@ def add_db_subparsers(subparsers):
 		epilog=examples("cansnper2 db export -d scheme.db -o export/",
 			"cansnper2 db export -d scheme.db --format newick > scheme.nwk"),
 		formatter_class=HelpFormatter)
-	export.add_argument('-d', '--database', metavar='DB', help="the database")
+	export.add_argument('-d', '--database', metavar='DB', help="the database; required")
 	export.add_argument('--format', dest='export_format',
 		choices=database_command.supported_output,
 		help="source: the tree, canSNP, reference genome and (when the database "
@@ -349,7 +350,7 @@ def add_db_subparsers(subparsers):
 			"concatenated genomes; their positions are moved to the reference "
 			"sequences, which needs the reference files (--ref-dir).",
 		epilog=examples("cansnper2 db convert -d old.db --ref-dir references/ -o converted/",
-			"cansnper2 db convert --cansnps old_canSNPs.txt --ref-dir references/ \\",
+			"cansnper2 db convert --cansnps old_snp.txt --ref-dir references/ \\",
 			"    -o converted/"),
 		formatter_class=HelpFormatter)
 	convert.add_argument('-d', '--database', metavar='DB',
@@ -375,7 +376,7 @@ def add_db_subparsers(subparsers):
 			"    --parent B.Br.001 --replace",
 			"cansnper2 db modify -d scheme.db --cansnps added_canSNPs.txt"),
 		formatter_class=HelpFormatter)
-	modify.add_argument('-d', '--database', metavar='DB', help="the database")
+	modify.add_argument('-d', '--database', metavar='DB', help="the database; required")
 	modify.add_argument('--mod-file', dest='mod_file', metavar='FILE',
 		help="file with the tree modifications")
 	modify.add_argument('--parent', metavar='NODE',
@@ -394,7 +395,7 @@ def add_db_subparsers(subparsers):
 		description="Remove a node and every node below it from a database.",
 		epilog=examples("cansnper2 db remove -d scheme.db --parent B.Br.001"),
 		formatter_class=HelpFormatter)
-	remove.add_argument('-d', '--database', metavar='DB', help="the database")
+	remove.add_argument('-d', '--database', metavar='DB', help="the database; required")
 	remove.add_argument('--parent', metavar='NODE',
 		help="root of the branch to remove; required")
 	add_logging_options(remove, logs_dest='logs', logs_default='logs')
@@ -435,7 +436,7 @@ def add_scheme_subparsers(subparsers):
 			"and download its reference genomes from NCBI GenBank into ./references. "
 			"Use ref get to download to another folder or from RefSeq.",
 		epilog=examples("cansnper2 scheme get francisella_tularensis",
-			"cansnper2 scheme get brucella_genus --branch dev --allow-unverified"),
+			"cansnper2 scheme get brucella_genus --branch dev"),
 		formatter_class=HelpFormatter)
 	get.add_argument('scheme', metavar='NAME', help="name of the scheme (see scheme list)")
 	get.add_argument('-d', '--database', metavar='DB',
@@ -450,7 +451,7 @@ def add_scheme_subparsers(subparsers):
 		action='store_true',
 		help="build a verified scheme although its files cannot be checked "
 			"against the checksums of its manifest")
-	add_local_references_option(get)
+	add_local_references_option(get, "references")
 	add_logging_options(get, logs_dest='logs', logs_default='logs')
 	download_defaults(get)
 	parsers['scheme get'] = get
@@ -475,17 +476,17 @@ def add_ref_subparsers(subparsers):
 		help="NCBI assembly database to download from")
 	get.add_argument('-o', '--outdir', metavar='DIR',
 		help="folder for the reference genomes")
-	add_local_references_option(get)
+	add_local_references_option(get, "<outdir>")
 	add_logging_options(get, logs_dest='logs', logs_default='logs')
 	download_defaults(get)
 	return {'ref get': get}
 
 
-def add_local_references_option(parser):
+def add_local_references_option(parser, folder):
 	parser.add_argument('--local-references', dest='local_references',
 		action='store_true',
 		help="also download the representative genomes of the scheme into "
-			"<references folder>/local, for cansnper2 type --local-references")
+			"{folder}/local, for cansnper2 type --local-references".format(folder=folder))
 
 
 def download_defaults(parser, **mode):

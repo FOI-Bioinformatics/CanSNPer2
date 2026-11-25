@@ -98,8 +98,8 @@ Output options:
   --summary             also write snps_summary.txt and a tree with the final
                         SNPs of all samples
   --node-labels FILE    tab-separated file of labels for tree nodes in the
-                        HTML pages: <snp name>, <node|clade>, <rank>,
-                        <label>[, <color>]
+                        HTML pages: node name, kind (node or clade), rank,
+                        label[, color]
 
 Run options:
   --ref-dir DIR         folder with the reference genomes of the database
@@ -117,7 +117,7 @@ Run options:
                         be derived; the others may lack data (0-1) (default:
                         0.7)
   --mask BASES          assemblies only: ignore canSNPs closer than this many
-                        bases to the edge of an alignment block
+                        bases to the edge of an alignment block (default: 0)
   --keep-going          continue with the other queries when one cannot be
                         typed
   --rerun               type queries again although their result file exists
@@ -257,8 +257,8 @@ options:
   --allow-unverified  build a verified scheme although its files cannot be
                       checked against the checksums of its manifest
   --local-references  also download the representative genomes of the scheme
-                      into <references folder>/local, for cansnper2 type
-                      --local-references
+                      into references/local, for cansnper2 type --local-
+                      references
 
 Scheme source options:
   --repo OWNER/NAME   GitHub repository laid out as CanSNPer2-data (default:
@@ -280,7 +280,7 @@ Logging options:
 
 examples:
   cansnper2 scheme get francisella_tularensis
-  cansnper2 scheme get brucella_genus --branch dev --allow-unverified
+  cansnper2 scheme get brucella_genus --branch dev
 ```
 
 ## cansnper2 ref get
@@ -302,8 +302,8 @@ options:
                         genbank)
   -o, --outdir DIR      folder for the reference genomes (default: references)
   --local-references    also download the representative genomes of the scheme
-                        into <references folder>/local, for cansnper2 type
-                        --local-references
+                        into <outdir>/local, for cansnper2 type --local-
+                        references
 
 Logging options:
   --log-dir DIR         folder for the log files (default: logs)
@@ -333,7 +333,7 @@ pass.
 
 options:
   -h, --help            show this help message and exit
-  -d, --database DB     the new database to write
+  -d, --database DB     the new database to write; required
   --tree FILE           tree file of the scheme (<name>_tree.txt)
   --cansnps FILE        canSNP file of the scheme (<name>_canSNPs.txt)
   --references FILE     reference genomes file of the scheme
@@ -377,7 +377,7 @@ options as db create.
 
 options:
   -h, --help            show this help message and exit
-  -d, --database DB     the new database to write
+  -d, --database DB     the new database to write; required
   --tree FILE           tree file of the scheme (<name>_tree.txt); required
   --cansnps FILE        canSNP file of the scheme (<name>_canSNPs.txt);
                         required
@@ -419,7 +419,7 @@ tree in Newick format.
 
 options:
   -h, --help            show this help message and exit
-  -d, --database DB     the database
+  -d, --database DB     the database; required
   --format {source,newick,tab}
                         source: the tree, canSNP, reference genome and (when
                         the database has them) genomes files that db import
@@ -453,7 +453,7 @@ reference genomes.
 
 options:
   -h, --help         show this help message and exit
-  -d, --database DB  the database
+  -d, --database DB  the database; required
 
 Logging options:
   --log-dir DIR      folder for the log files (default: logs)
@@ -495,7 +495,7 @@ Logging options:
 
 examples:
   cansnper2 db convert -d old.db --ref-dir references/ -o converted/
-  cansnper2 db convert --cansnps old_canSNPs.txt --ref-dir references/ \
+  cansnper2 db convert --cansnps old_snp.txt --ref-dir references/ \
       -o converted/
 ```
 
@@ -512,7 +512,7 @@ reference genomes that the database already has are refused, not changed.
 
 options:
   -h, --help         show this help message and exit
-  -d, --database DB  the database
+  -d, --database DB  the database; required
   --mod-file FILE    file with the tree modifications
   --parent NODE      node at which the tree is changed; required with --mod-
                      file
@@ -545,7 +545,7 @@ Remove a node and every node below it from a database.
 
 options:
   -h, --help         show this help message and exit
-  -d, --database DB  the database
+  -d, --database DB  the database; required
   --parent NODE      root of the branch to remove; required
 
 Logging options:

@@ -9,7 +9,7 @@ NO_NODE.
 The rows are kept in the genomes table, whose id is the node id; the role is a column added
 to it. Read typing with --local_references takes its candidate genomes from the
 representatives. A database without the table, without the role column or without rows
-holds no genomes, which is the case for every database built before 2.5.0.
+holds no genomes, which is the case for every database built before 2.6.0.
 '''
 
 import sqlite3

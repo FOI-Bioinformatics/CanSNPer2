@@ -1455,7 +1455,7 @@ class CanSNPer2(object):
 						mask=self.mask,
 						verbose=self.verbose)
 			'''Walk through the list of queries supplied'''
-			if not self.skip_alignment: print("Run alignments for {queries} queries against the references in {refdir} using {program}".format(queries=len(self.query),refdir=self.refdir,program=self.aligner.name))
+			if not self.skip_alignment: print("Run alignments for {queries} {noun} against the references in {refdir} using {program}".format(queries=len(self.query),noun="query" if len(self.query) == 1 else "queries",refdir=self.refdir,program=self.aligner.name))
 			for q in self.query:			## For each query file_path
 				try:
 					self.query_name = self.sample_name(q)  ## get name of file and remove ending

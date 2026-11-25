@@ -347,7 +347,9 @@ def run_command(args, parser):
 		block per sample; --verbose shows them as they come'''
 	hidden = quiet_warning_count()
 	if hidden:
-		print("{n} warnings about the results are in the log {logpath}, run with --verbose to see them".format(
+		print("{n} {warnings} about the results {verb} in the log {logpath}, run with --verbose to see {them}".format(
+			warnings="warning" if hidden == 1 else "warnings", verb="is" if hidden == 1 else "are",
+			them="it" if hidden == 1 else "them",
 			n=hidden, logpath=logpath))
 	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
 		the reason was already logged by run() (issue #191); a sample whose earlier result
