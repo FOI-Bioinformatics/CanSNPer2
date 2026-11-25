@@ -171,8 +171,9 @@ did not pass the check.
 
 A genome that is already unpacked in `<outdir>/source/` and passes the check is not downloaded
 again, so `ref get` can be run again after an interrupted download. A file `<genome>.fna` that
-is not a link (for example a genome copied there by hand) is kept and is what `cansnper2 type`
-reads; `ref get` then reports that genome as not fetched.
+is not a link (for example a genome copied there by hand) is checked in the same way and, when it
+passes, used instead of a download; when it does not pass, `ref get` keeps it, reports the
+genome as not fetched and names the problem.
 
 ### Sequence names, GenBank and RefSeq
 

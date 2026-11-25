@@ -188,6 +188,21 @@ class DownloadGenomes(object):
 			logger.error("Could not download {refid}: {reason}".format(refid=refid, reason=reason))
 			report(False, reason)
 			return
+		placed = os.path.join(directory, "{refid}.fna".format(refid=refid))
+		if os.path.isfile(placed) and not os.path.islink(placed):
+			'''a reference file placed in the folder by hand, not a link made by a download, is
+				used as it is when it fits the database: it used to be downloaded again into
+				source/, kept, and the genome reported as not fetched (exit status 1)'''
+			problem = check_reference(placed, refid, snps)
+			if problem is None:
+				logger.info("{path} is already in the folder, it is used instead of a download".format(path=placed))
+				report(True, "")
+			else:
+				reason = "{path} is already in the folder but does not fit the database: {problem}; replace or remove it".format(
+					path=placed, problem=problem)
+				logger.error("Could not use {refid}: {reason}".format(refid=refid, reason=reason))
+				report(False, reason)
+			return
 		if not genome_id:
 			'''a NULL accession raised an AttributeError in the worker, which was reported as a
 				process that ended without reporting, with a traceback'''

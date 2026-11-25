@@ -216,3 +216,29 @@ def test_an_earlier_result_is_used_only_with_the_same_database_and_settings(tmp_
 	result_file(obj, "x", source + other)
 	obj.run(database=db)
 	assert "different database or settings" not in obj.not_typed.get("x", "")
+
+
+def test_a_reference_file_placed_by_hand_is_used_without_a_download(tmp_path):
+	'''ref get with a plain <genome>.fna already in the folder downloaded the genome into
+		source/ anyway, kept the file, reported the genome as not fetched and exited 1'''
+	obj = DownloadGenomes.__new__(DownloadGenomes)
+	obj.source, obj.directory, obj.database = "genbank", str(tmp_path / "refs"), None
+	os.makedirs(obj.directory)
+	(tmp_path / "refs" / "Ames.fna").write_text(">chr\n" + "ACGT" * 10 + "\n")
+	def retrieve(link, target, timeout=None):
+		raise AssertionError("downloaded although the file is there")
+	obj.retrieve = retrieve
+	results = []
+	class Q(list):
+		def put(self, item): results.append(item)
+	snps = [("S.1", "chr", 2, "A", "C")]
+	obj.download("GCA_000007845.1", "ASM784v1", "Ames", directory=obj.directory, results=Q(), snps=snps)
+	assert results == [("Ames", True, "")]
+	assert not os.path.exists(os.path.join(obj.directory, "source"))
+	# a placed file that does not fit the database is reported, not replaced
+	(tmp_path / "refs" / "Ames.fna").write_text(">other\nACGT\n")
+	results.clear()
+	obj.download("GCA_000007845.1", "ASM784v1", "Ames", directory=obj.directory, results=Q(), snps=snps)
+	(refid, ok, reason), = results
+	assert not ok and "Ames.fna" in reason and "chr" in reason
+	assert (tmp_path / "refs" / "Ames.fna").read_text() == ">other\nACGT\n"
