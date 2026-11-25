@@ -88,14 +88,14 @@ DOCMISS=0
 for verb in "type" "selftest" "db create" "db import" "db export" "db info" \
         "db convert" "db modify" "db remove" "scheme list" "scheme get" "ref get"; do
     for opt in $("$PY" -m CanSNPer2.cli $verb --help 2>&1 | grep -o -- '--[a-z][a-z-]*' | sort -u); do
-        if grep -q -- "$opt" "$REPO/README.md"; then :; else
-            printf '  FAIL  %-52s %s is not documented in README.md\n' "cansnper2 $verb $opt" "$opt"
+        if grep -q -- "$opt" "$REPO/docs/cli.md"; then :; else
+            printf '  FAIL  %-52s %s is not documented in docs/cli.md\n' "cansnper2 $verb $opt" "$opt"
             DOCMISS=$((DOCMISS+1)); FAILED=$((FAILED+1))
         fi
     done
 done
 if [ "$DOCMISS" = 0 ]; then
-    printf '  ok    %-52s all options of the commands and verbs appear in README.md\n' "README matches --help"
+    printf '  ok    %-52s all options of the commands and verbs appear in docs/cli.md\n' "docs/cli.md matches --help"
     PASSED=$((PASSED+1))
 fi
 

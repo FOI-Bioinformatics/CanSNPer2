@@ -17,8 +17,8 @@ def get_version():
 setup(
     name="CanSNPer2",
     version=get_version(),
-    url="https://git-int.foi.se/bioinfo/cansnper2",
-    description="CanSNPer2: A toolkit for SNP-typing bacterial genomes.",
+    url="https://github.com/FOI-Bioinformatics/CanSNPer2",
+    description="Canonical SNP typing of bacterial genomes from assemblies or sequencing reads",
 
     # Author details
     author='David Sundell',

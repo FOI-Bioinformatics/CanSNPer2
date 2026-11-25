@@ -122,8 +122,8 @@ class ModifyTree(object):
 		elif update_genomes or clean_database or update_node_names or rename_node or purge_database or remove:
 			pass
 		else:
-			raise InputError("Nothing to modify: give --mod_file with changes to the tree, --annotation with SNPs "
-				"to add, --references with reference genomes to add, or --remove with --parent to remove a branch")
+			raise InputError("Nothing to modify: give --mod-file with changes to the tree, --cansnps with SNPs "
+				"to add, or --references with reference genomes to add; cansnper2 db remove --parent removes a branch")
 
 	def _is_int(self,s):
 		'''Small help function, test if value is int'''

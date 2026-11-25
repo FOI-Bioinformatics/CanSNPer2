@@ -2,7 +2,7 @@ name: CI
 
 # Installs CanSNPer2 and runs each command once: build a database, export it,
 # download its reference genome and type that genome against itself with
-# progressiveMauve. The Bacillus anthracis scheme from CanSNPer2-data is used
+# each aligner (minimap2 is the default). The Bacillus anthracis scheme from CanSNPer2-data is used
 # because it is the smallest (13 SNPs, one reference genome).
 #
 # CanSNPer2 has no third party runtime dependencies since 2.2.0 (the ete3
@@ -127,12 +127,12 @@ jobs:
           cansnper2 type -d ba.db --ref-dir references -o results query_Ames.fna --summary
           grep -q "A.Br.001" results/snps_summary.txt
 
-      - name: Type the reference genome with minimap2, same call as progressiveMauve
+      - name: Type the reference genome with progressiveMauve, same call as minimap2
         working-directory: ${{ runner.temp }}
         run: |
-          cansnper2 type -d ba.db --ref-dir references -o results_minimap2 query_Ames.fna --summary --aligner minimap2
+          cansnper2 type -d ba.db --ref-dir references -o results_mauve query_Ames.fna --summary --aligner progressiveMauve
           # the # lines record the run (date, aligner) and differ; the rows must not
-          diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_minimap2/snps_summary.txt)
+          diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_mauve/snps_summary.txt)
 
       - name: Type reads simulated from the reference genome, same call as the assembly
         working-directory: ${{ runner.temp }}
@@ -157,7 +157,7 @@ jobs:
           # the sample is named after the read files; final SNP, support and path must agree
           diff <(grep -v '^#' results/snps_summary.txt | cut -f2-) <(grep -v '^#' results_reads/snps_summary.txt | cut -f2-)
 
-      - name: Type the reference genome with MUMmer4, same call as progressiveMauve
+      - name: Type the reference genome with MUMmer4, same call as minimap2
         working-directory: ${{ runner.temp }}
         run: |
           cansnper2 type -d ba.db --ref-dir references -o results_mummer4 query_Ames.fna --summary --aligner mummer4

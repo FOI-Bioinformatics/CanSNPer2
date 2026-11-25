@@ -116,6 +116,10 @@ def pair_read_files(paths, platform=DEFAULT_PLATFORM):
 	return samples
 
 
+'''the sample names a samplesheet may give, the rule of genome names in scheme files'''
+SAMPLE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
+
+
 def read_samplesheet(path, platform=DEFAULT_PLATFORM):
 	'''the samples of a samplesheet (see the module description)'''
 	folder = os.path.dirname(os.path.abspath(path))
@@ -132,6 +136,11 @@ def read_samplesheet(path, platform=DEFAULT_PLATFORM):
 		where = "samplesheet {path} line {n}".format(path=path, n=number)
 		if not name:
 			raise ReadInputError("{where} has no sample name".format(where=where))
+		if not SAMPLE_NAME.fullmatch(name):
+			'''the name becomes part of the result and temporary file names: a "/" failed only
+				after the run had started, with a missing .sites.bed file'''
+			raise ReadInputError("{where}: sample name '{name}' is not allowed; use letters, digits, '.', '_' and '-' "
+				"only, and do not start with '.'".format(where=where, name=name))
 		if name in seen:
 			raise ReadInputError("{where}: sample {name} is listed more than once".format(where=where, name=name))
 		seen.add(name)

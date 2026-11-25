@@ -95,7 +95,7 @@ def missing_sequences(path, name, sequences, snps):
 	return ("reference {name} ({path}) has no sequence named {missing}, on which the database places SNPs; "
 			"the sequences of the file are {present}. Sequences are identified by the first word of their "
 			"header line. A file with RefSeq names (NC_, NZ_) for a scheme built on GenBank accessions must "
-			"be renamed to the GenBank accessions, or fetched with CanSNPer2-download").format(
+			"be renamed to the GenBank accessions, or fetched with cansnper2 ref get").format(
 			name=name, path=path, missing=listing(missing), present=listing(sequences) or "none")
 
 

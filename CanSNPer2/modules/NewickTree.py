@@ -1476,11 +1476,13 @@ class NewickTree(object):
 					logger.info(msg)
 				elif len(candidates) > 1:
 					paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1],n=c[2]) for c in candidates])
-					msg = "Two or more confirmed SNP paths compete at the same depth: {paths}, no path is auto-picked, check {tree}".format(paths=paths,tree=self.tree_file)
+					msg = "Two or more confirmed SNP paths compete at the same depth: {paths}; no final SNP is chosen, see the tree of the sample in summary.html".format(paths=paths)
 					logger.warning(msg)
 					called = deepest
 				elif deepest:
-					msg = "SNP could not be confirmed!"
+					msg = ("{snp}, the deepest derived SNP, was not confirmed: its path has fewer than min_required_hits "
+						"({hits}) derived SNPs, a smaller fraction than strictness ({strict}), an ancestral or other base, "
+						"or no data directly above it").format(snp=deepest[1], hits=self.min_required_hits, strict=self.strictness)
 					called = deepest
 				else:
 					msg = "None of the called SNPs was found in the tree, cannot call SNPs."

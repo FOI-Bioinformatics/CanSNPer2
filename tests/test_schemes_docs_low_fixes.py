@@ -41,7 +41,7 @@ def test_list_schemes_with_a_malformed_entry_gives_a_message(tmp_path):
 	data = data_with_toml(tmp_path, "sc = 1\n")
 	done = run("CanSNPer2.DownloadGenomes", "--list_schemes", "--data_dir", str(data), "--logs", str(tmp_path / "l"), cwd=tmp_path)
 	assert done.returncode == 1
-	assert "Traceback" not in done.stderr and "sc" in done.stdout and "schemes.toml" in done.stdout
+	assert "Traceback" not in done.stderr and "sc" in done.stderr and "schemes.toml" in done.stderr
 
 
 # 21. a bad scheme SNP file names the scheme
@@ -65,7 +65,7 @@ def test_control_characters_in_scheme_options_are_refused(tmp_path, option, bad)
 	done = run("CanSNPer2.SNPDatabase", "--create", "--database", str(tmp_path / "x.db"), "--tree", paths["tree"],
 		"--annotation", paths["snp"], "--references", paths["references"], option, bad, "--logs", str(tmp_path / "l"), cwd=tmp_path)
 	assert done.returncode != 0
-	assert option in done.stderr + done.stdout and "control" in (done.stderr + done.stdout)
+	assert option.replace("_", "-") in done.stderr + done.stdout and "control" in (done.stderr + done.stdout)
 	assert not (tmp_path / "x.db").exists()
 
 
@@ -84,9 +84,9 @@ def test_save_tree_and_no_snpfiles_help_describe_the_behaviour():
 	assert "Don´t save" not in text
 
 
-def test_readme_help_block_matches_the_help():
-	readme = open(os.path.join(ROOT, "README.md")).read()
-	block = readme.split("cansnper2 type --help\n```\n")[1].split("\n```")[0]
+def test_cli_reference_matches_the_help():
+	reference = open(os.path.join(ROOT, "docs", "cli.md")).read()
+	block = reference.split("## cansnper2 type\n\n```text\n")[1].split("\n```")[0]
 	help_text = run("CanSNPer2.cli", "type", "--help", env=dict(ENV, COLUMNS="80")).stdout
 	for option in re.findall(r"^\s+(--[a-z][a-z-]*)", help_text, re.M):
 		assert option in block, option
@@ -96,7 +96,7 @@ def test_readme_help_block_matches_the_help():
 # 31. install notes
 
 def test_install_md_matches_setup():
-	text = open(os.path.join(ROOT, "INSTALL.md")).read()
+	text = open(os.path.join(ROOT, "docs", "installation.md")).read()
 	for word in ("3.7", "[ETE3]", "pip install PyQt5", "[NumPy]"):
 		assert word not in text
 	assert "3.11" in text

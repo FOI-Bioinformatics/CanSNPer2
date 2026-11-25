@@ -123,7 +123,7 @@ def test_mauve_warnings_name_genome_and_reference(tmp_path, caplog):
 	# which reference; the names come from the staged mauve command arguments, and they
 	# must stay attached to the right alignment while the process containers shrink
 	import logging
-	obj = CanSNPer2([], workdir=str(tmp_path))
+	obj = CanSNPer2([], workdir=str(tmp_path), aligner="progressiveMauve")
 	logdir = tmp_path / "mauve_logs"
 	logdir.mkdir()
 	fast = [sys.executable, "-c", "import sys;sys.exit(11)", "ref_OSU18.fna", "query_genfast.fna"]

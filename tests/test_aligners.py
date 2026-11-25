@@ -10,15 +10,15 @@ import sys
 import pytest
 
 from helpers import make_db
-from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER, Aligner, ProgressiveMauve, get_aligner
+from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER, Aligner, Minimap2, ProgressiveMauve, get_aligner
 from CanSNPer2.modules.AlignmentReader import AlignmentReader
 from CanSNPer2.modules.CanSNPer2 import AlignmentError, CanSNPer2, MauveError, SNP_FILE_COLUMNS
 from CanSNPer2.modules.ParseXMFA import ParseXMFA
 
 
-def test_progressivemauve_is_the_default_aligner():
-	assert DEFAULT_ALIGNER == "progressiveMauve"
-	assert isinstance(get_aligner(), ProgressiveMauve)
+def test_minimap2_is_the_default_aligner():
+	assert DEFAULT_ALIGNER == "minimap2"
+	assert isinstance(get_aligner(), Minimap2)
 	assert isinstance(get_aligner("progressivemauve"), ProgressiveMauve), "names are matched without case"
 	assert set(ALIGNERS) == {"progressiveMauve", "minimap2", "mummer4"}
 	with pytest.raises(ValueError, match="Unknown aligner"):
@@ -60,7 +60,7 @@ def test_mauve_alignment_files_and_reference_names(tmp_path):
 	## the reference is checked against the SNPs of the database, here one SNP at chr:2 (C)
 	db = make_db(tmp_path / "t.db", [("S.1", "chr", 2, "A", "C")], genome="Ames_ancestor")
 	obj = CanSNPer2([str(query)], workdir=str(tmp_path), refdir="refs", tmpdir="shared", logdir="logs", outdir="out",
-		skip_alignment=True, database=db)
+		skip_alignment=True, database=db, aligner="progressiveMauve")
 	files = obj.align(str(query), references=["Ames_ancestor.fna"])
 	assert files == [os.path.join(obj.tmpdir, "Ames_ancestor_sample.xmfa")]
 	assert obj.alignment_references == ["Ames_ancestor"]

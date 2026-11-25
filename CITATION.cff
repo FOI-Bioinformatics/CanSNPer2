@@ -1,0 +1,52 @@
+cff-version: 1.2.0
+message: >-
+  If you use CanSNPer2, please cite the CanSNPer article below, the version of
+  CanSNPer2 you used, and the publications of the typing scheme.
+title: CanSNPer2
+abstract: >-
+  Canonical SNP typing of bacterial genomes from assemblies or sequencing reads.
+type: software
+version: 2.6.0
+license: GPL-3.0-or-later
+repository-code: https://github.com/FOI-Bioinformatics/CanSNPer2
+authors:
+  - family-names: Sundell
+    given-names: David
+  - family-names: Sjödin
+    given-names: Andreas
+  - family-names: Öhrman
+    given-names: Caroline
+  - family-names: Lewerentz
+    given-names: Jacob
+keywords:
+  - bioinformatics
+  - genotyping
+  - canonical SNP
+  - bacterial genomics
+preferred-citation:
+  type: article
+  title: "CanSNPer: a hierarchical genotype classifier of clonal pathogens"
+  authors:
+    - family-names: Lärkeryd
+      given-names: Adrian
+    - family-names: Myrtennäs
+      given-names: Kerstin
+    - family-names: Karlsson
+      given-names: Edvin
+    - family-names: Dwibedi
+      given-names: Chinmay Kumar
+    - family-names: Forsman
+      given-names: Mats
+    - family-names: Larsson
+      given-names: Pär
+    - family-names: Johansson
+      given-names: Anders
+    - family-names: Sjödin
+      given-names: Andreas
+  journal: Bioinformatics
+  volume: 30
+  issue: 12
+  start: 1762
+  end: 1764
+  year: 2014
+  doi: 10.1093/bioinformatics/btu113

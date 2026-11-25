@@ -14,7 +14,7 @@ import pytest
 
 import helpers
 from CanSNPer2.DownloadGenomes import DownloadGenomes
-from CanSNPer2.modules.Aligners import ProgressiveMauve
+from CanSNPer2.modules.Aligners import Minimap2, ProgressiveMauve
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, sequence_names
 
@@ -22,6 +22,11 @@ from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, s
 class InstalledMauve(ProgressiveMauve):
 	'''the run now stops up front when the aligner is not installed; these tests are about what
 		happens after that check, so the program is reported as found'''
+	def available(self):
+		return True
+
+
+class InstalledMinimap2(Minimap2):
 	def available(self):
 		return True
 
@@ -198,8 +203,42 @@ def test_an_earlier_result_is_used_only_with_the_same_database_and_settings(tmp_
 	result_file(obj, "x", source + same.replace("min_required_hits=2", "min_required_hits=3"))
 	obj.run(database=db)
 	assert "different database or settings" in obj.not_typed["x"]
+	# another aligner: refused as well, the alignments differ (minimap2 is the default
+	# since 2.6.0, so a result from an earlier progressiveMauve run must not pass as current)
+	assert "aligner=progressiveMauve" in same
+	obj, db = project(tmp_path, [q], keep_going=True, aligner=InstalledMinimap2())
+	result_file(obj, "x", source + same)
+	obj.run(database=db)
+	assert "x" not in obj.reused
+	assert "different database or settings" in obj.not_typed["x"]
 	# --rerun replaces it
 	obj, db = project(tmp_path, [q], keep_going=True, rerun=True)
 	result_file(obj, "x", source + other)
 	obj.run(database=db)
 	assert "different database or settings" not in obj.not_typed.get("x", "")
+
+
+def test_a_reference_file_placed_by_hand_is_used_without_a_download(tmp_path):
+	'''ref get with a plain <genome>.fna already in the folder downloaded the genome into
+		source/ anyway, kept the file, reported the genome as not fetched and exited 1'''
+	obj = DownloadGenomes.__new__(DownloadGenomes)
+	obj.source, obj.directory, obj.database = "genbank", str(tmp_path / "refs"), None
+	os.makedirs(obj.directory)
+	(tmp_path / "refs" / "Ames.fna").write_text(">chr\n" + "ACGT" * 10 + "\n")
+	def retrieve(link, target, timeout=None):
+		raise AssertionError("downloaded although the file is there")
+	obj.retrieve = retrieve
+	results = []
+	class Q(list):
+		def put(self, item): results.append(item)
+	snps = [("S.1", "chr", 2, "A", "C")]
+	obj.download("GCA_000007845.1", "ASM784v1", "Ames", directory=obj.directory, results=Q(), snps=snps)
+	assert results == [("Ames", True, "")]
+	assert not os.path.exists(os.path.join(obj.directory, "source"))
+	# a placed file that does not fit the database is reported, not replaced
+	(tmp_path / "refs" / "Ames.fna").write_text(">other\nACGT\n")
+	results.clear()
+	obj.download("GCA_000007845.1", "ASM784v1", "Ames", directory=obj.directory, results=Q(), snps=snps)
+	(refid, ok, reason), = results
+	assert not ok and "Ames.fna" in reason and "chr" in reason
+	assert (tmp_path / "refs" / "Ames.fna").read_text() == ">other\nACGT\n"

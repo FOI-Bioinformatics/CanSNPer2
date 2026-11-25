@@ -25,7 +25,7 @@ _MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, reference_snps
-from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.LogSetup import setup_logging, log_tag
 from CanSNPer2.modules.FileMode import set_default_mode
 from CanSNPer2 import COMMANDS_HELP
 import logging
@@ -187,6 +187,21 @@ class DownloadGenomes(object):
 			reason = "the genome name '{refid}' contains a path separator or '..', rename the genome in the references file and build the database again".format(refid=refid)
 			logger.error("Could not download {refid}: {reason}".format(refid=refid, reason=reason))
 			report(False, reason)
+			return
+		placed = os.path.join(directory, "{refid}.fna".format(refid=refid))
+		if os.path.isfile(placed) and not os.path.islink(placed):
+			'''a reference file placed in the folder by hand, not a link made by a download, is
+				used as it is when it fits the database: it used to be downloaded again into
+				source/, kept, and the genome reported as not fetched (exit status 1)'''
+			problem = check_reference(placed, refid, snps)
+			if problem is None:
+				logger.info("{path} is already in the folder, it is used instead of a download".format(path=placed))
+				report(True, "")
+			else:
+				reason = "{path} is already in the folder but does not fit the database: {problem}; replace or remove it".format(
+					path=placed, problem=problem)
+				logger.error("Could not use {refid}: {reason}".format(refid=refid, reason=reason))
+				report(False, reason)
 			return
 		if not genome_id:
 			'''a NULL accession raised an AttributeError in the worker, which was reported as a
@@ -483,7 +498,7 @@ def build_parser():
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-download - fetch the reference genomes a database needs from NCBI',
 		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
-			"CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step."
+			"CanSNPer2-data (or --repo, or --data-dir), build its database and download its references in one step."
 			+ COMMANDS_HELP,
 		formatter_class=argparse.RawDescriptionHelpFormatter)
 
@@ -512,15 +527,26 @@ def build_parser():
 	return parser
 
 
+def log_level(args):
+	'''the log level of the options: --debug, -v/--verbose, --quiet or the default WARNING.
+		--quiet (dest supress) had no effect here and -v printed debug output; the old
+		CanSNPer2-download parser has no --quiet and gives --verbose as DEBUG'''
+	if args.debug:
+		return logging.DEBUG
+	if args.verbose:
+		return args.verbose if isinstance(args.verbose, int) and args.verbose is not True else logging.DEBUG
+	return getattr(args, "supress", None) or logging.WARNING
+
+
 def run_command(args, parser):
 	'''everything after parsing, shared by CanSNPer2-download and the cansnper2 scheme/ref verbs'''
 	if not (args.database or args.scheme or args.list_schemes):
-		parser.error("give a database with --database, a scheme with --scheme, or --list_schemes")
+		parser.error("give the database with -d/--database (or build a scheme with cansnper2 scheme get NAME)")
 	if args.no_references and not args.scheme:
 		'''with only a database there is nothing to build, the references are all the command does'''
-		parser.error("--no_references skips the download after building a database from --scheme, give --scheme or leave it out")
+		parser.error("--no-references skips the download after building a database from a scheme; it is used with cansnper2 scheme get")
 	if args.data_dir and (args.repo or args.branch):
-		parser.error("--data_dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
+		parser.error("--data-dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
 
 	def scheme_source():
 		'''where the schemes are read from: a local directory or a GitHub repository'''
@@ -531,9 +557,7 @@ def run_command(args, parser):
 			return GitHubSchemeSource(ref=args.branch, repo=args.repo) ## default branch of that repository unless --branch is given
 		return GitHubSchemeSource(ref=args.branch or "master")
 
-	logval = logging.WARNING
-	if args.verbose or args.debug:
-		logval = logging.DEBUG
+	logval = log_level(args)
 
 	if args.list_schemes:
 		'''only prints the schemes, so no log file is written'''
@@ -543,7 +567,7 @@ def run_command(args, parser):
 			source = scheme_source()
 			schemes = source.list_schemes()
 		except SchemeError as e:
-			print(e)
+			print(e, file=sys.stderr) ## an error, not the listing a script reads from stdout
 			exit(1)
 		print("SNP schemes in {loc}:".format(loc=source.location()))
 		for name, status in schemes:
@@ -551,7 +575,7 @@ def run_command(args, parser):
 		exit()
 
 	args.logs = args.logs.rstrip("/")+"/"
-	logpath = setup_logging(args.logs, "CanSNPer2-download", level=logval) ## own tag: it used to append to the CanSNPer2-database log (issue #217)
+	logpath = setup_logging(args.logs, log_tag(parser.prog), level=logval) ## own tag per verb: it used to append to the database log (issue #217)
 	logger = logging.getLogger(__name__)
 
 	if args.scheme:

@@ -257,3 +257,18 @@ def test_type_reads_is_the_same_as_the_old_command(tmp_path):
 	assert "A.2" in new.stdout and old.stdout.splitlines()[-1] == new.stdout.splitlines()[-1]
 	strip = lambda p: [l for l in open(p) if not l.startswith("#")]
 	assert strip(tmp_path / "old" / "samples" / "s_site_counts.tsv") == strip(tmp_path / "new" / "samples" / "s_site_counts.tsv")
+
+
+def test_errors_go_to_standard_error(tmp_path):
+	'''a script that reads stdout must not take an error for output: type without a database
+		and scheme list of a missing folder printed their errors to stdout'''
+	r = run_cli("type", "x.fasta", cwd=tmp_path)
+	assert r.returncode == 1 and "A database is required" in r.stderr and r.stdout == ""
+	r = run_cli("scheme", "list", "--data-dir", str(tmp_path / "none"), cwd=tmp_path)
+	assert r.returncode == 1 and r.stderr.strip() and r.stdout == ""
+
+
+def test_error_messages_are_not_quoted():
+	'''the message of a CanSNPer2 error was printed as its repr, in quotes'''
+	from CanSNPer2.modules.CanSNPer2 import CanSNPer2Error
+	assert str(CanSNPer2Error("x.fasta is gzip-compressed")) == "x.fasta is gzip-compressed"

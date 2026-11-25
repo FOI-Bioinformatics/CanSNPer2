@@ -4,11 +4,17 @@ import sys
 from datetime import datetime
 
 '''
-One place for the log file naming that the three commands used to copy paste (issue #217).
-Every command passes its own tag, so CanSNPer2-database and CanSNPer2-download can no
-longer append to each other's log file, and a name that is already taken steps through
--HH:MM and then .2, .3 ... so two runs inside the same minute get separate files.
+One place for the log file naming of the commands (issue #217). Every verb passes its own
+tag (cansnper2-type, cansnper2-db-info, cansnper2-scheme-get, ...), so two verbs never append
+to each other's log file, and a name that is already taken steps through -HHMM and then
+.2, .3 ... so two runs inside the same minute get separate files.
 '''
+
+
+def log_tag(prog):
+	'''the log file tag of a command: its name with the verbs, cansnper2 scheme get gives
+		cansnper2-scheme-get'''
+	return "-".join(prog.split())
 
 
 def get_logpath(logdir, tag, now=None):
@@ -21,7 +27,8 @@ def get_logpath(logdir, tag, now=None):
 	logpath = base+".log"
 	if not os.path.exists(logpath):
 		return logpath
-	stem = "{base}-{hour:02d}:{minute:02d}".format(base=base, hour=now.hour, minute=now.minute)
+	## no colon in the time: it is not allowed in file names on Windows
+	stem = "{base}-{hour:02d}{minute:02d}".format(base=base, hour=now.hour, minute=now.minute)
 	logpath = stem+".log"
 	part = 1
 	while os.path.exists(logpath):

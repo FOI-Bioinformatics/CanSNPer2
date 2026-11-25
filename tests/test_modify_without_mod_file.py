@@ -79,7 +79,7 @@ def test_nothing_to_modify_names_the_options(tmp_path):
 	result = run_database_cli(tmp_path, ["-db", db])
 	assert result.returncode == 1
 	text = result.stderr + result.stdout
-	for option in ("--mod_file", "--annotation", "--references", "--remove"):
+	for option in ("--mod-file", "--cansnps", "--references"):
 		assert option in text
 	assert "both mod_database and mod_file" not in text
 	assert open(db, "rb").read() == before

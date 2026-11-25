@@ -175,7 +175,7 @@ def check_references(path, problems, known=None, database=None, known_accessions
 					"only and do not start with '.' (the name is used in file names)".format(path, number, genome))
 			if not ACCESSION_RE.match(row["genbank_id"]):
 				problems.append("{0}:{1}: genbank_id '{2}' is not an assembly accession (GCA_ or GCF_, nine digits "
-					"and a version, such as GCA_000008985.1); CanSNPer2-download needs it to fetch the genome".format(
+					"and a version, such as GCA_000008985.1); cansnper2 ref get needs it to fetch the genome".format(
 					path, number, row["genbank_id"]))
 			accession = row["genbank_id"]
 			if accession in accessions:

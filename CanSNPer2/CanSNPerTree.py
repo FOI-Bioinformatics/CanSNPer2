@@ -11,7 +11,7 @@ required tasks. It is also written in a modular form with separate
 classes for each task which allows future extentions such as a sequence read
 input option planned during 2020.
 
-Requires an aligner, by default progressiveMauve
+Requires an aligner, by default minimap2
 
 This program is free software: you can redistribute and/or modify
 the code under the terms of the GNU General Public License as published by
@@ -43,7 +43,7 @@ from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER, e
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
-from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count
+from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count, log_tag
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
@@ -198,7 +198,7 @@ def run_command(args, parser):
 	'''everything after parsing, given the parsed options: shared by CanSNPer2 and cansnper2 type;
 		reads are recognised by their content, so --read_input is accepted and does nothing'''
 	if not args.database:
-		print("A database is required: cansnper2 type query.fasta -d database.db")
+		print("A database is required: cansnper2 type query.fasta -d database.db", file=sys.stderr)
 		exit(1)
 	if not args.query and not args.samplesheet:
 		'''a run without queries used to warn, exit 0 and leave an empty run directory'''
@@ -233,21 +233,21 @@ def run_command(args, parser):
 	if not os.path.exists(args.logdir):
 		logdircreated = True
 	try:
-		ensure_directory(args.logdir, "--logdir")
+		ensure_directory(args.logdir, "--log-dir")
 	except CanSNPer2Error as e:
 		print(e.value, file=sys.stderr)
 		exit(1)
 	args.logdir = args.logdir.rstrip("/")+"/" ## a logdir without a trailing slash would glue straight onto the log file name (issue #71)
 
 
-	logpath = setup_logging(args.logdir, "CanSNPer2", level=logval) ## shared log naming for all commands (issue #217)
+	logpath = setup_logging(args.logdir, log_tag(parser.prog), level=logval) ## shared log naming for all commands (issue #217)
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
 	log_scheme_notice(args.database, logger) ## which scheme is typed against, before any work starts
 
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
 	if args.tmpdir is not None and not args.tmpdir.strip():
-		parser.error("--tmpdir cannot be empty")
+		parser.error("--tmp-dir cannot be empty")
 	if args.fetch_local and not args.local_references:
 		parser.error("{f} is used with {l}".format(f=option_name(parser, "fetch_local"), l=option_name(parser, "local_references")))
 	if args.tmpdir is None:
@@ -256,25 +256,25 @@ def run_command(args, parser):
 		for candidate in default_tmpdir_candidates(in_workdir(args.outdir)):
 			candidate = resolve_tmpdir(candidate)
 			try:
-				ensure_directory(candidate, "--tmpdir")
+				ensure_directory(candidate, "--tmp-dir")
 				args.tmpdir = candidate
 				break
 			except CanSNPer2Error as e:
 				problems.append(e.value)
 				logger.warning("{0}; trying another location".format(e.value))
 		else:
-			logger.error("No folder for temporary files could be used ({0}); give one with --tmpdir".format("; ".join(problems)))
+			logger.error("No folder for temporary files could be used ({0}); give one with --tmp-dir".format("; ".join(problems)))
 			exit(1)
 	else:
 		args.tmpdir = resolve_tmpdir(args.tmpdir)
 		if args.skip_alignment and not os.path.isdir(args.tmpdir):
 			'''alignments are only read with --skip_alignment: a missing folder is not created'''
-			logger.error("--skip_alignment reads the alignments in --tmpdir, but {path} does not exist".format(path=args.tmpdir))
+			logger.error("--skip-alignment reads the alignments in --tmp-dir, but {path} does not exist".format(path=args.tmpdir))
 			exit(1)
 		if not os.path.exists(args.tmpdir):
 			logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
 		try:
-			ensure_directory(args.tmpdir, "--tmpdir")
+			ensure_directory(args.tmpdir, "--tmp-dir")
 		except CanSNPer2Error as e:
 			logger.error(e.value)
 			exit(1)
@@ -347,7 +347,9 @@ def run_command(args, parser):
 		block per sample; --verbose shows them as they come'''
 	hidden = quiet_warning_count()
 	if hidden:
-		print("{n} warnings about the results are in the log {logpath}, run with --verbose to see them".format(
+		print("{n} {warnings} about the results {verb} in the log {logpath}, run with --verbose to see {them}".format(
+			warnings="warning" if hidden == 1 else "warnings", verb="is" if hidden == 1 else "are",
+			them="it" if hidden == 1 else "them",
 			n=hidden, logpath=logpath))
 	'''a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
 		the reason was already logged by run() (issue #191); a sample whose earlier result

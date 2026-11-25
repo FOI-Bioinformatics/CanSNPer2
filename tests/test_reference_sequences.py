@@ -139,7 +139,7 @@ def test_missing_sequence_is_refused_naming_it(tmp_path):
 	problem = check_reference(path, "REF", snp_rows())
 	assert problem is not None
 	assert "chrII" in problem and "NZ_CP007763.1" in problem
-	assert "GenBank" in problem and "CanSNPer2-download" in problem
+	assert "GenBank" in problem and "cansnper2 ref get" in problem
 
 
 def test_short_sequence_is_refused(tmp_path):

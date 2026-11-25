@@ -53,7 +53,7 @@ def read_sequence_table(path):
 				name, length = line.rstrip("\n").split("\t")
 				rows.append((name, int(length)))
 	except FileNotFoundError as e:
-		raise FileNotFoundError("The reference sequence table {path} of the alignment is missing. It is written when the alignment is made; alignments made before CanSNPer2 2.3.0 have none, align again without --skip_alignment".format(path=path)) from e
+		raise FileNotFoundError("The reference sequence table {path} of the alignment is missing. It is written when the alignment is made; alignments made before CanSNPer2 2.3.0 have none, align again without --skip-alignment".format(path=path)) from e
 	return rows
 
 '''SNPs closer to either edge of an alignment block than this many reference bases are

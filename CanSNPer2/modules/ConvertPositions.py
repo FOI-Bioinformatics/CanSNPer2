@@ -583,7 +583,7 @@ def genome_files(refdir, genomes, references=None):
 		and references[genome][0] != "NA" and references[genome][1])]
 	if unknown:
 		raise ConversionError(("The reference file(s) {files} are not in {refdir}, and no GenBank accession and assembly "
-			"name are known for {genomes}; give them with --references or place the files in {refdir}").format(
+			"name are known for {genomes}; place the files in {refdir}").format(
 			files=listing("{0}.fna".format(g) for g in unknown), refdir=refdir, genomes=listing(unknown)))
 	from CanSNPer2.DownloadGenomes import DownloadGenomes
 	downloader = DownloadGenomes(None, source="genbank", directory=refdir)

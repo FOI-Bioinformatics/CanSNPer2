@@ -286,7 +286,7 @@ class ReadMapper(Aligner):
 
 '''the aligners that can be selected, by name'''
 ALIGNERS = {aligner.name: aligner for aligner in (ProgressiveMauve, Minimap2, Mummer4)}
-DEFAULT_ALIGNER = ProgressiveMauve.name
+DEFAULT_ALIGNER = Minimap2.name
 
 
 def get_aligner(name=None, path=""):

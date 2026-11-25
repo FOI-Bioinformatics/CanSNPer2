@@ -149,4 +149,4 @@ def test_the_command_line_import_demands_all_three_files(tmp_path):
 		"--logs", str(tmp_path / "logs")],
 		capture_output=True, text=True, cwd=str(tmp_path))
 	assert result.returncode == 1
-	assert "needs all three source files" in result.stderr and "--annotation" in result.stderr
+	assert "needs all three source files" in result.stderr and "--cansnps" in result.stderr

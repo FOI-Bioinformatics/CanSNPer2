@@ -133,13 +133,16 @@ def test_dangling_link_is_replaced(tmp_path):
 	assert os.readlink(link) == "source/GCA_000007845.1_ASM784v1_genomic.fna"
 
 
-def test_real_file_in_place_of_the_link_is_kept_and_reported(tmp_path):
+def test_real_file_in_place_of_the_link_is_kept_and_used(tmp_path):
+	'''a reference placed by hand is used as it is (2.6.0); before, it was kept but the genome
+		was downloaded anyway and reported as not fetched'''
 	obj = downloader(tmp_path, GZ)
 	link = write(os.path.join(obj.directory, "REF.fna"), b">x\nAAAA\n")
 	refid, ok, reason = fetch(obj)
-	assert ok is False and "REF.fna" in reason and "not a link" in reason
+	assert ok is True and reason == ""
 	with open(link, "rb") as fin:
 		assert fin.read() == b">x\nAAAA\n"
+	assert not os.path.exists(os.path.join(obj.directory, "source"))
 
 
 @pytest.mark.parametrize("error", [http.client.IncompleteRead(b"ab", 10), http.client.InvalidURL("bad url"),
