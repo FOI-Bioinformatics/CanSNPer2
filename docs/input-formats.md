@@ -180,7 +180,7 @@ each row becomes the typed canSNP of rank 1 of its node. Files from before 2.3.0
 
 The genomes file places genomes at nodes of the tree. CanSNPer2 stores it in the database, and
 read typing with `--local-references` takes its candidate genomes from the rows with the role
-`representative`. Databases built before 2.5.0 hold no genomes.
+`representative`. Databases built before 2.6.0 hold no genomes.
 
 - Tab-separated text. The first line is the header and must begin with `genome`, `node` and
   `role`; a leading `#` is allowed. Further columns (CanSNPer2-data uses `basis` and `source`) are

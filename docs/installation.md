@@ -24,7 +24,7 @@ The commands below create a conda environment with CanSNPer2, minimap2 and samto
 covers typing of assemblies with the default aligner and typing of sequencing reads:
 
 ```sh
-mamba create -n cansnper2 -c conda-forge -c bioconda cansnper2 minimap2 samtools
+mamba create -n cansnper2 -c conda-forge -c bioconda 'cansnper2>=2.6.0' minimap2 samtools
 mamba activate cansnper2
 ```
 
@@ -36,7 +36,10 @@ mamba install -n cansnper2 -c conda-forge -c bioconda mummer4
 mamba install -n cansnper2 -c conda-forge -c bioconda progressivemauve
 ```
 
-Check the installation with `cansnper2 --version`, which should print 2.6.0 or later, and with
+The version constraint `'cansnper2>=2.6.0'` makes sure that a release with the `cansnper2`
+command is installed; versions up to 2.4.0 installed the commands described in
+[upgrading.md](upgrading.md). Check the installation with `cansnper2 --version`, which should
+print 2.6.0 or later, and with
 `cansnper2 selftest` (see [Check the installation](#check-the-installation)).
 
 Notes on the Bioconda package:
@@ -104,9 +107,10 @@ The lines mean:
 | `read typing: usable (minimap2 and samtools)` | sequencing reads can be typed |
 | `read typing: not usable, <program> not found` | read typing is not possible until the named programs are installed |
 
-The exit status is 0 when at least one aligner is usable. It is 1, with an `ERROR:` line, when
-no aligner is found or when CanSNPer2 itself cannot be imported. A missing read typing program
-does not change the exit status. `selftest` does not check the versions of the programs.
+The exit status is 0 when at least one aligner is usable. When no aligner is found, the
+`usable aligners:` line is left out, the `read typing:` line is followed by an `ERROR:` line, and
+the exit status is 1; the same holds when CanSNPer2 itself cannot be imported. A missing read
+typing program does not change the exit status. `selftest` does not check the versions of the programs.
 
 `cansnper2 --version` prints the installed version, and `cansnper2 --help` lists the commands.
 

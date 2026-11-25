@@ -56,7 +56,9 @@ cansnper2 scheme get brucella_suis --branch dev
    checks are those of `db create`, see [Build a database](#build-a-database)). The database is
    written under a temporary name and renamed when it is complete, so a failed build leaves no
    file behind.
-5. It writes the provenance file `<database>.source.json` next to the database.
+5. It writes the provenance file `<name>.source.json` next to the database, where `<name>` is
+   the database file name without `.db` (for `francisella_tularensis.db`,
+   `francisella_tularensis.source.json`).
 6. It downloads the reference genomes from NCBI GenBank into `./references`, as `ref get` does
    (see [Reference genomes](#reference-genomes)).
 
@@ -87,7 +89,7 @@ them.
 
 ### Provenance file
 
-`<database>.source.json` records where the database came from:
+`<name>.source.json` records where the database came from:
 
 | Key | Content |
 | --- | --- |
@@ -269,13 +271,17 @@ reference genomes	5
 | `status` | `verified`, `draft` or `unknown` |
 | `source` | the repository (`owner/name`) or local directory the scheme files were read from, or the text of `--scheme-source` |
 | `ref` | the branch, tag or commit asked for (`scheme get` from GitHub only) |
-| `commit` | the commit the files were read at; `unknown` when it could not be resolved; followed by `+uncommitted` or `+modified` as described on this page |
-| `known_issues` | canSNPs that `schemes.toml` lists as known issues; `none` when there are none |
+| `commit` | the commit the files were read at; `unknown` when it could not be resolved; followed by `+uncommitted` (a local checkout with uncommitted scheme files) or `+modified` (changed with `db modify` or `db remove`, see [Change a database](#change-a-database)); `modified` alone when no commit was recorded before the change |
+| `known_issues` | canSNPs that `schemes.toml` lists as known issues, comma-separated; `none` when there are none |
 | `format` | the database format (`2.4`) |
-| `built_with`, `built` | the CanSNPer2 version and the date of the build (or of the last change) |
+| `built_with` | the CanSNPer2 version that built the database, or that made the last change with `db modify` or `db remove` |
+| `built` | the date of the build; a later change does not alter it and is recorded in `modified` |
 | `modified` | the date of the last change with `db modify` or `db remove` |
 
-Keys without a value are not printed, and an empty value is printed as `none`. A database
+`format`, `built_with` and `built` are always written. For a database built with `db create` or
+`db import`, `scheme`, `status` and `source` are the values given with `--scheme-name`,
+`--scheme-status` and `--scheme-source`; record them when you build a scheme of your own. Keys
+without a value are not printed, and an empty value is printed as `none`. A database
 without the table (built before 2.3.0, or by hand) is reported with the line
 `the database records no scheme information (built with CanSNPer2 before 2.3.0 or by hand); check where it came from`.
 The counts are the nodes of the tree, the canSNPs and how many of them are typed, the largest

@@ -12,7 +12,7 @@ workflow.
 | `<sample>_snps.txt`, `<sample>_not_called.txt` | The `# Query file:` line (path and sha256 of the query) and the `# Typing settings:` line (sha256 of the database file and the settings that change a call). |
 | `snps_summary.txt`, `summary.html`, tree pages | CanSNPer2 version, date and time of the run, database file name and sha256, the scheme line, the reference genomes with their accessions, the aligner name and the tree walk settings. |
 | the database | The `scheme_info` table: scheme name, status, source, branch or commit, the CanSNPer2 version that built it, and any later change. `cansnper2 db info` prints it. |
-| `<database>.source.json` | Written by `cansnper2 scheme get` next to the database: the repository, branch and commit, and the sha256 of each scheme file. |
+| `<name>.source.json` | Written by `cansnper2 scheme get` next to the database (`<name>` is the database file name without `.db`): the repository, branch and commit, and the sha256 of each scheme file. |
 
 The columns and lines of the result files are described in
 [output-formats.md](output-formats.md).
@@ -41,63 +41,36 @@ platform and the read thresholds that were used (`min_depth`, `min_allele_fracti
 
 CanSNPer2 compares these two lines when it finds a result file from an earlier run in the
 output folder, and uses the earlier result only when both match (see
-[output-formats.md](output-formats.md#results-from-an-earlier-run)).
+[output-formats.md](output-formats.md#results-from-an-earlier-run)). The aligner is not recorded
+in these lines and is not compared: type with each aligner into its own `--outdir`.
 
 The sha256 of the database can be computed with `sha256sum` (or `shasum -a 256` on macOS) and
 compared with this line. It identifies one database file. Two databases built from the same scheme
 files can have different sha256 values, because a database also records when and from which
 branch or commit it was built; to compare schemes, compare the commit and the scheme file hashes
-in `db info` and `<database>.source.json`.
+in `db info` and `<name>.source.json`.
 
 ## Scheme information in the database
 
-`cansnper2 db info -d <database>` prints the `scheme_info` table, then the size of the database:
+`cansnper2 db info -d <database>` prints the `scheme_info` table of the database (scheme name,
+status, source, branch and commit, known issues, format, the CanSNPer2 version and date of the
+build, and the date of a later change), then the size of the database. The output and the
+meaning of each key are given in
+[schemes-and-databases.md](schemes-and-databases.md#scheme-information). For a scheme of your
+own, give `--scheme-name`, `--scheme-status` and `--scheme-source` to `db create` or `db import`,
+so that the database records them. A database without a `scheme_info` table (built before 2.3.0
+or by hand) is used with a warning that it records no scheme information.
 
-```text
-scheme	francisella_tularensis
-status	verified
-source	FOI-Bioinformatics/CanSNPer2-data
-ref	master
-commit	d7493fd26acfe08ff57beeed1e00ebcce0607cc3
-known_issues	none
-format	2.4
-built_with	2.6.0
-built	2026-11-25
-
-nodes	328
-canSNPs	328
-typed canSNPs	328
-canSNPs per node	1
-reference genomes	5
-```
-
-| Key | Content |
-|---|---|
-| `scheme` | Name of the scheme. |
-| `status` | `verified`, `draft` or `unknown`. |
-| `source` | The repository (`owner/name`) or local folder the scheme files were read from. |
-| `ref` | The branch, tag or commit that was asked for. |
-| `commit` | The commit the files were read at; `unknown` when it could not be resolved. `<commit>+uncommitted` for a local checkout whose scheme files have uncommitted changes, and `+modified` (or `modified`) once the database was changed. |
-| `known_issues` | canSNPs that the repository lists as known issues, comma-separated. |
-| `format` | Layout of the database (`2.4` in CanSNPer2 2.6.0). |
-| `built_with` | CanSNPer2 version that built the database, or that made the last change. |
-| `built` | Date the database was built. |
-| `modified` | Date of the last change made with `db modify` or `db remove`. |
-
-`format`, `built_with` and `built` are always written. For a database built with `db create` or
-`db import`, the other keys are the values given with `--scheme-name`, `--scheme-status` and
-`--scheme-source`; record them when you build a scheme of your own. A database without a
-`scheme_info` table (built by hand) is used with a warning that it records no scheme information.
-
-When a database is changed with `db modify` or `db remove`, its `status` becomes `unknown`, its
-`commit` is marked `+modified` and the date is recorded in `modified`, because it no longer
-matches the scheme files it was built from. Each typing run against such a database logs a
-warning.
+A database changed with `db modify` or `db remove` no longer matches the scheme files it was
+built from. Its status becomes `unknown`, its commit is marked `+modified`, and each typing run
+against it logs a warning (see
+[schemes-and-databases.md](schemes-and-databases.md#change-a-database)).
 
 ## The source.json file
 
-`cansnper2 scheme get` writes `<database>.source.json` next to the database (for
-`francisella_tularensis.db`, `francisella_tularensis.source.json`):
+`cansnper2 scheme get` writes `<name>.source.json` next to the database, where `<name>` is the
+database file name without `.db` (for `francisella_tularensis.db`,
+`francisella_tularensis.source.json`):
 
 ```text
 {
@@ -124,7 +97,7 @@ scheme files with uncommitted changes are listed under `uncommitted_sources`.
 
 When the commit cannot be resolved (for example when the GitHub API refuses anonymous requests
 for a while), the files are read from the branch, the commit is recorded as `unknown` in the
-database (and as `null` in `<database>.source.json`), and a warning is printed. Run the command again later to obtain a database with a known commit.
+database (and as `null` in `<name>.source.json`), and a warning is printed. Run the command again later to obtain a database with a known commit.
 
 ## Fixing the scheme version
 

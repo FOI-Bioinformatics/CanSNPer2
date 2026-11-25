@@ -11,7 +11,7 @@ calls CanSNPer2 makes on the assemblies of the same genomes, and the aligners wi
 ## Aligners on Francisellaceae genomes
 
 **Compared.** Typing with minimap2 and with MUMmer4 against typing with progressiveMauve
-(progressiveMauve was the default aligner in earlier releases): final calls, and the base read
+(progressiveMauve was the default aligner up to 2.4.0): final calls, and the base read
 at each canSNP position.
 
 **Data.** The 1,205 genomes of the family Francisellaceae in GTDB release 232: 937 genomes of
@@ -70,8 +70,8 @@ errors (HiFi). Mixtures were made from two genomes on different branches at 50/5
 95/5.
 
 **Software and settings.** The read typing branch of CanSNPer2 that became 2.6.0, minimap2 2.31,
-samtools 1.24, the platform defaults of 2.6.0 (the ONT `--min-depth` default was lowered from 10
-to 5 after this evaluation).
+samtools 1.24, the platform defaults of 2.6.0 (`--min-depth` 5 for every platform). The ONT
+default was lowered from 10 to 5 as a result of this evaluation; the table below uses 5.
 
 **Date.** 2026-11-24.
 
@@ -85,8 +85,9 @@ platform (430 runs). With fewer reads the call stopped higher in the tree or was
 | HiFi | | 46 of 50 | | 50 of 50 | |
 
 The Illumina misses from 20x on are Brucella genomes outside the classical cluster, far from
-the reference genome 16M, whose reads mapped at too few canSNPs. With a `--min-depth` of 10,
-ONT reads at 10x gave no call for 42 of 50 genomes.
+the reference genome 16M, whose reads mapped at too few canSNPs. With the earlier ONT
+`--min-depth` of 10, ONT reads at 10x gave no call for 42 of 50 genomes, where `--min-depth` 5
+gave the assembly call for 42 of 50.
 
 **Mixed sites.** Among the 50 single genomes, one (an *F. tularensis* draft with 90-96 %
 identical copies of three canSNP regions on short contigs) was flagged with 3 to 5 mixed sites;

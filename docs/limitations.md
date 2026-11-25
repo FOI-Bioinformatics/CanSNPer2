@@ -30,7 +30,7 @@ their alleles.
 
 ### Genomes from outside the scheme's taxon
 
-progressiveMauve (`--aligner progressiveMauve`; it was the default aligner in earlier releases) aligns
+progressiveMauve (`--aligner progressiveMauve`; the default aligner up to 2.4.0) aligns
 genomes of other genera to the reference genomes and can then produce a call. In an evaluation on genomes of other Francisellaceae genera, progressiveMauve gave a
 Francisella tularensis final SNP for 5 of the 77 genomes it was run on (all 5 of other genera),
 while minimap2 and MUMmer4 gave no call for any of 268 genomes of other Francisellaceae species
@@ -76,10 +76,13 @@ status, compared with a complete genome of the same isolate.
 
 ### Draft schemes
 
-Draft schemes (on the `dev` branch of CanSNPer2-data, fetched with `--branch dev`) have not been
-verified and are not checked against a manifest. CanSNPer2 logs a notice for a draft scheme, a
-scheme of unknown status and a database modified after it was built. Results from such schemes
-are provisional.
+Draft schemes (on the `dev` branch of CanSNPer2-data, fetched with `--branch dev`) are under
+evaluation and have not been verified. Their files are checked against the manifest of the
+repository when it has one, as for verified schemes; this shows that the files are those
+published, not that the scheme gives correct calls. CanSNPer2 warns about a draft scheme, a
+scheme of unknown status and a database modified after it was built (see
+[schemes-and-databases.md](schemes-and-databases.md#verified-and-draft-schemes)). Results from
+such schemes are provisional.
 
 ### Differences between aligners
 

@@ -16,8 +16,8 @@ Other versions can give other output.
 cansnper2 selftest
 ```
 
-The output must list at least one usable aligner. The last line says whether sequencing reads
-can be typed (step 7 needs it). The meaning of each line is explained in
+The output must list at least one usable aligner. The `read typing:` line says whether
+sequencing reads can be typed (step 7 needs it). The meaning of each line is explained in
 [installation.md](installation.md#check-the-installation).
 
 ## 2. Fetch the scheme
@@ -44,6 +44,12 @@ genomes. A node can carry several canSNPs, ranked within the node, of which exac
 `typed` and is called by CanSNPer2; in this scheme each node has one canSNP. These files are described in
 [schemes-and-databases.md](schemes-and-databases.md).
 
+`scheme get` reads the scheme through the GitHub API, which allows 60 anonymous requests per
+hour from one address. On a shared network this limit can be reached, and the command stops or
+warns with `HTTP Error 403: rate limit exceeded`. Set the environment variable `GITHUB_TOKEN` to
+a GitHub token, or try again later (see
+[schemes-and-databases.md](schemes-and-databases.md#github-api-limits)).
+
 ## 3. Download three genome assemblies
 
 The three assemblies are complete genomes of strains from three *F. tularensis* subspecies:
@@ -64,7 +70,9 @@ curl -sS https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/016/105/GCA_000016105.
 curl -sS https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/018/925/GCA_000018925.1_ASM1892v1/GCA_000018925.1_ASM1892v1_genomic.fna.gz | gunzip > genomes/FSC147.fna
 ```
 
-The NCBI `datasets` program (`datasets download genome accession ...`) gives the same files.
+The NCBI `datasets` program (`datasets download genome accession ...`) can download the same
+assemblies; it writes them into a zip archive under other file names, so rename them as above to
+get the same sample names.
 
 ## 4. Type the assemblies
 
@@ -77,11 +85,15 @@ Run alignments for 3 queries against the references in ./references/ using minim
 FSC147: M.1
 SCHU_S4: A.I.13
 WY96-3418: A.II.6
-1 warnings about the results are in the log /path/to/cansnper2-tutorial/logs/cansnper2-type-Nov-25-2026.log, run with --verbose to see them
+1 warning about the results is in the log /path/to/cansnper2-tutorial/logs/cansnper2-type-Nov-25-2026.log, run with --verbose to see it
 ```
 
-Each assembly was aligned to the five reference genomes, and the final SNP of each sample is
-printed: the deepest node of the scheme tree that its derived canSNPs support. The warning in the
+Each assembly was aligned to the five reference genomes, and the base of the sample was read at
+every canSNP position. A canSNP is derived in a sample when the sample has the derived allele,
+the allele that defines the branch of the tree, and ancestral when it has the allele of the
+lineages outside that branch. The final SNP of each sample is printed: the deepest node of the
+scheme tree that its derived canSNPs support, and the SNP path is the chain of derived canSNPs
+from the root of the tree to it. These terms are defined in [method.md](method.md#terms). The warning in the
 log says that one canSNP position (`B.184`) had no alignment data in WY96-3418; this canSNP is not
 on the path of that sample and does not affect its call.
 
@@ -124,7 +136,9 @@ is `1 derived SNP(s) called outside the SNP path, on another branch: B.83`, and 
 is `... on another branch: B.97`. Each of these genomes carries the derived allele of one canSNP
 that belongs to another branch of the tree, here the branch of subspecies *holarctica*. The call
 itself is not changed by this, but such a canSNP is worth checking, for example in the
-alignment, before the result is reported. The statuses and what to do about them are described
+alignment, before the result is reported. The alignments are removed at the end of a run; type
+the sample again with `--rerun --keep-temp` to keep them (see
+[output-formats.md](output-formats.md#temporary-files)). The statuses and what to do about them are described
 in [interpreting-results.md](interpreting-results.md).
 
 ## 6. Read a result file
@@ -163,12 +177,15 @@ Line by line:
   reason for the `review` status in step 5.
 - `# SNP path`: the derived canSNPs from the root to the final SNP.
 - `# Final SNP: A.II.6 found/depth: 7/7`: the final SNP and its support, 7 derived canSNPs out
-  of the 7 canSNPs on the path.
+  of the 7 canSNPs on the path. (The second number is the depth of the node in the tree, which
+  equals the number of canSNPs on the path in the published schemes; see
+  [output-formats.md](output-formats.md#per-sample-cansnp-files).)
 - `# Query file`: the input file and its SHA-256 checksum.
 - `# Typing settings`: the SHA-256 of the database and the settings that affect the call. A
   later run into the same output folder reuses this result when the input, the database and
   these settings are the same, and stops with a message when they differ; `--rerun` types the
-  sample again.
+  sample again. The aligner is not part of this comparison (see
+  [output-formats.md](output-formats.md#results-from-an-earlier-run)).
 
 `WY96-3418_not_called.txt` has the same columns for the other canSNPs of the scheme: those where
 the sample carries the ancestral or another base, and those without data. All columns are
@@ -188,7 +205,7 @@ cansnper2 type reads/ERR5100339_1.fastq.gz reads/ERR5100339_2.fastq.gz -d franci
 ```
 
 ```text
-Run alignments for 1 queries against the references in ./references/ using minimap2-reads
+Run alignments for 1 query against the references in ./references/ using minimap2-reads
 ERR5100339: B.103
 ```
 

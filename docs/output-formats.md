@@ -13,7 +13,7 @@ minimap2; paths are shortened.
 
 ```text
 results/                              --outdir (default results)
-  summary.html                        overview of all samples (every run)
+  summary.html                        overview of all samples (every run with a sample)
   snps_summary.txt                    table of all samples (--summary)
   summary_tree.html                   tree with the final SNPs of all samples (--summary)
   samples/
@@ -80,12 +80,20 @@ After the table follow lines that start with `# `, so that a reader that skips c
 | Line | Content |
 |---|---|
 | `# SNP path:` | The SNP path, `;`-separated, from the root to the final SNP. For a sample that was not called, all derived canSNPs, or `NA`. |
-| `# Final SNP:` | The final SNP and `found/depth:`, the number of derived canSNPs on the path and the depth of the final node (the number of nodes from the root to it, both included). `# Final SNP: NA` for a sample that was not called. |
+| `# Final SNP:` | The final SNP and `found/depth:`, the number of derived canSNPs on the path and the depth of the final node in the tree (the number of nodes from the top of the tree to it, both included, label nodes counted). `# Final SNP: NA` for a sample that was not called. See the note below the table. |
 | `# Reads:` | Read samples only; see [Reads line](#reads-line). |
 | `# Query file:` | Absolute path of the query file (both files of a read pair, space-separated) and `sha256:` of the query. For a read pair this is the sha256 of the two file sha256 values joined by a space. |
 | `# Typing settings:` | `database sha256:` of the database file and the settings that change a call; see [Typing settings line](#typing-settings-line). |
 
 `<sample>_not_called.txt` ends with the `# Query file:` and `# Typing settings:` lines.
+
+The support of a call, `found/expected` (see
+[interpreting-results.md](interpreting-results.md#support)), counts the canSNPs on the path, and
+label nodes have none (see [method.md](method.md#label-nodes)). In a tree without label nodes,
+which includes every verified scheme of CanSNPer2-data, the depth equals `expected`, so the
+`# Final SNP:` line gives the support. In a tree with label nodes the depth is larger; the
+support is then the `Support` column of `summary.html` and the `support` column of
+`snps_summary.txt`.
 
 Excerpt of `samples/GCA_000807905.1_snps.txt`:
 
@@ -204,7 +212,7 @@ not called. It starts with `# ` lines on the run, followed by a tab-separated ta
 |---|---|
 | `sample` | Sample name. |
 | `final_snp` | Final SNP, or `NA`. |
-| `support` | `found/n`: derived canSNPs on the SNP path / canSNPs on the SNP path; `NA` when not called. |
+| `support` | `found/expected`: derived canSNPs on the SNP path / canSNPs on the SNP path; `NA` when not called. |
 | `snp_path` | The SNP path, `;`-separated, as in `<sample>_snps.txt`. |
 
 ```text
@@ -290,3 +298,8 @@ call is read from the file, printed with `(from an earlier run, use --rerun to t
 and shown as `reused` in `summary.html`. The earlier file is used only when its `# Query file:`
 sha256 and its `# Typing settings:` line match the current run; otherwise the run stops and asks
 for `--rerun` or another `--outdir`. `--rerun` types all samples again and replaces their files.
+
+The aligner is not part of this comparison, because the `# Typing settings:` line does not
+record it. A run with another `--aligner` into the same output folder therefore reuses the
+results of the earlier aligner without a message other than `(from an earlier run, ...)`. To
+compare aligners, type into a separate `--outdir` for each, or give `--rerun`.

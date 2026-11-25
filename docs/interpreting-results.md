@@ -52,11 +52,11 @@ depth. Several missing canSNPs on a short path weaken the call.
 
 ### Edge flags
 
-A canSNP within 25 bases of the end of an aligned block is flagged `edge` in the result files
-(assemblies only). Contig ends and block ends are where alignment errors are most likely. An
-edge-flagged canSNP on the path sets the status to `review`. Check whether the call still holds
-without it; typing again with `--mask 25` leaves such canSNPs out (they then count as no data)
-and shows whether the call depends on them.
+A canSNP near the end of an aligned block is flagged `edge` (assemblies only; the rule is in
+[method.md](method.md#positions-near-alignment-edges-and---mask)). Contig ends and block ends are
+where alignment errors are most likely. Check whether the call still holds without the flagged
+canSNP; typing again with `--mask 25` into another `--outdir` leaves such canSNPs out (they then
+count as no data) and shows whether the call depends on them.
 
 ### Derived canSNPs outside the path
 
@@ -67,9 +67,10 @@ name the canSNPs; several on one other branch need a closer look than a single o
 
 ### Possibly mixed (reads)
 
-A read sample with at least `--mixed-sites` (default 3) canSNP sites where no base reached
-`--min-allele-fraction` is flagged as possibly mixed. The flag never changes the call. Two
-causes give this pattern:
+A read sample with at least `--mixed-sites` canSNP sites where no base reached
+`--min-allele-fraction` is flagged as possibly mixed (the rule and defaults are in
+[method.md](method.md#mixed-sites-and-the-possibly-mixed-flag)). The flag never changes the call.
+Two causes give this pattern:
 
 - the sample holds more than one strain; the call then follows the canSNPs where one base
   dominates and may stop higher in the tree than the majority strain would;
@@ -101,7 +102,7 @@ canSNPs below it are without data rather than ancestral. Common causes:
 - the canSNP directly above a deeper node had no data, which the rules do not allow;
 - the sample belongs to a lineage the scheme does not resolve further.
 
-Compare the tree of the sample in `summary.html`: open circles are canSNPs without data, grey
+Compare the tree of the sample in `summary.html`: open circles are canSNPs without data, gray
 ones ancestral, blue ones an other base.
 
 ## NA results

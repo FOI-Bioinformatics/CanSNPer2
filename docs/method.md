@@ -72,7 +72,8 @@ have no data.
 The query is aligned against each reference genome in a separate process; all alignments of
 one query run at the same time. A round of alignments that takes longer than
 `--alignment-timeout` (default 60 minutes; 0 for no limit) is stopped. The aligner is chosen
-with `--aligner`; minimap2 is the default. The command lines are defined in
+with `--aligner`; minimap2 is the default from 2.6.0 (progressiveMauve was the default up to
+2.4.0). The command lines are defined in
 `CanSNPer2/modules/Aligners.py`.
 
 | `--aligner` | Command | Output |
@@ -331,7 +332,7 @@ not typed in the run:
 | Status | Condition |
 |---|---|
 | `failed` | The alignment or mapping produced no output (with `--keep-going`), or the processing of the sample failed. |
-| `reused` | The result file of an earlier run in the same `--outdir` was read instead of typing the sample again. A result file made from another input file (by sha256) or with another database or settings stops the run instead; a result file from an older version that records neither is reused as it is. `--rerun` types the sample again. |
+| `reused` | The result file of an earlier run in the same `--outdir` was read instead of typing the sample again. A result file made from another input file (by sha256) or with another database or settings stops the run instead; a result file from an older version that records neither is reused as it is. The aligner is not compared (see [output-formats.md](output-formats.md#results-from-an-earlier-run)). `--rerun` types the sample again. |
 
 Sources of no data at a canSNP, as named in the result files and the log:
 
