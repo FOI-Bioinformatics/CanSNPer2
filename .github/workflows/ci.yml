@@ -69,10 +69,12 @@ jobs:
 
       - name: Self test and command line help
         run: |
-          CanSNPer2-test
-          CanSNPer2 --help
-          CanSNPer2-database --help
-          CanSNPer2-download --help
+          cansnper2 selftest
+          cansnper2 --help
+          cansnper2 type --help
+          cansnper2 db create --help
+          cansnper2 scheme get --help
+          cansnper2 ref get --help
 
       - name: Unit tests
         env:
@@ -84,17 +86,17 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           SRC=$GITHUB_WORKSPACE/cansnper2-data/schemes/bacillus_anthracis
-          CanSNPer2-database --create --database ba.db \
+          cansnper2 db create -d ba.db \
             --tree $SRC/bacillus_anthracis_tree.txt \
-            --annotation $SRC/bacillus_anthracis_canSNPs.txt \
+            --cansnps $SRC/bacillus_anthracis_canSNPs.txt \
             --references $SRC/bacillus_anthracis_references.txt
-          CanSNPer2-database --database ba.db --export -o export
-          CanSNPer2-database --database ba.db --export --export_format newick -o export
+          cansnper2 db export -d ba.db -o export
+          cansnper2 db export -d ba.db --format newick -o export
           test -s export/ba_tree.nwk
           # a database rebuilt from the export must export to the same files
-          CanSNPer2-database --create --database rebuilt.db \
-            --tree export/ba_tree.txt --annotation export/ba_canSNPs.txt --references export/ba_references.txt
-          CanSNPer2-database --database rebuilt.db --export -o export_rebuilt
+          cansnper2 db create -d rebuilt.db \
+            --tree export/ba_tree.txt --cansnps export/ba_canSNPs.txt --references export/ba_references.txt
+          cansnper2 db export -d rebuilt.db -o export_rebuilt
           for f in tree canSNPs references; do
             cmp export/ba_$f.txt export_rebuilt/rebuilt_$f.txt
           done
@@ -104,10 +106,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the anonymous API limit is shared by all jobs on a runner address
         run: |
-          CanSNPer2-download --list_schemes
-          CanSNPer2-download --scheme bacillus_anthracis --branch master --no_references
+          cansnper2 scheme list
+          cansnper2 scheme get bacillus_anthracis --branch master --no-references
           test -s bacillus_anthracis.source.json
-          CanSNPer2-database --database bacillus_anthracis.db --export -o export_scheme
+          cansnper2 db export -d bacillus_anthracis.db -o export_scheme
           for f in tree canSNPs references; do
             cmp export/ba_$f.txt export_scheme/bacillus_anthracis_$f.txt
           done
@@ -115,20 +117,20 @@ jobs:
       - name: Download the reference genome
         working-directory: ${{ runner.temp }}
         run: |
-          CanSNPer2-download --database ba.db -o references
+          cansnper2 ref get -d ba.db -o references
           test -s references/Ames.fna
 
       - name: Type the reference genome against itself
         working-directory: ${{ runner.temp }}
         run: |
           cp -L references/Ames.fna query_Ames.fna
-          CanSNPer2 --database ba.db --refdir references -o results query_Ames.fna --summary
+          cansnper2 type -d ba.db --ref-dir references -o results query_Ames.fna --summary
           grep -q "A.Br.001" results/snps_summary.txt
 
       - name: Type the reference genome with minimap2, same call as progressiveMauve
         working-directory: ${{ runner.temp }}
         run: |
-          CanSNPer2 --database ba.db --refdir references -o results_minimap2 query_Ames.fna --summary --aligner minimap2
+          cansnper2 type -d ba.db --ref-dir references -o results_minimap2 query_Ames.fna --summary --aligner minimap2
           # the # lines record the run (date, aligner) and differ; the rows must not
           diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_minimap2/snps_summary.txt)
 
@@ -150,7 +152,7 @@ jobs:
                   r1.write("@r%d/1\n%s\n+\n%s\n" % (i, f[:100], "I" * 100))
                   r2.write("@r%d/2\n%s\n+\n%s\n" % (i, f.translate(comp)[::-1][:100], "I" * 100))
           EOF
-          CanSNPer2 --database ba.db --refdir references -o results_reads ames_R1.fastq.gz ames_R2.fastq.gz --summary
+          cansnper2 type -d ba.db --ref-dir references -o results_reads ames_R1.fastq.gz ames_R2.fastq.gz --summary
           test -s results_reads/samples/ames_site_counts.tsv
           # the sample is named after the read files; final SNP, support and path must agree
           diff <(grep -v '^#' results/snps_summary.txt | cut -f2-) <(grep -v '^#' results_reads/snps_summary.txt | cut -f2-)
@@ -158,6 +160,6 @@ jobs:
       - name: Type the reference genome with MUMmer4, same call as progressiveMauve
         working-directory: ${{ runner.temp }}
         run: |
-          CanSNPer2 --database ba.db --refdir references -o results_mummer4 query_Ames.fna --summary --aligner mummer4
+          cansnper2 type -d ba.db --ref-dir references -o results_mummer4 query_Ames.fna --summary --aligner mummer4
           # the # lines record the run (date, aligner) and differ; the rows must not
           diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_mummer4/snps_summary.txt)
