@@ -97,6 +97,10 @@ def test_samplesheet_without_platform_column_uses_the_default(tmp_path):
 	("S1\t\n", "no read file"),
 	("S1\tx1.fq\t\tpacbio\n", "platform pacbio"),
 	("", "no samples"),
+	("lab/x7\tx1.fq\n", "sample name 'lab/x7' is not allowed"),
+	("..\tx1.fq\n", "sample name '..' is not allowed"),
+	(".hidden\tx1.fq\n", "sample name '.hidden' is not allowed"),
+	("a b\tx1.fq\n", "sample name 'a b' is not allowed"),
 ])
 def test_samplesheet_errors(tmp_path, body, message):
 	write(tmp_path / "x1.fq", FASTQ)

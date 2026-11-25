@@ -78,7 +78,9 @@ cannot be given both.
   A samplesheet may hold samples of several platforms.
 - Relative paths are read from the folder of the samplesheet, not from the current folder.
 - Blank lines are skipped and spaces around the values are removed.
-- A sample name may be listed only once, and every read file must exist.
+- A sample name may be listed only once, may contain only letters, digits, `.`, `_` and `-`,
+  and may not start with `.`. Every read file must exist. These checks are made before anything
+  is typed.
 
 ```tsv
 sample	reads1	reads2	platform
@@ -121,9 +123,9 @@ Every result file, alignment file and row of the summary is named after the samp
 
 Two different files that give the same sample name (for example `a/x.fasta` and `b/x.fasta`)
 stop the run before anything is aligned; the same file given twice is typed once. A file name
-that gives an empty sample name is refused. CanSNPer2 does not otherwise restrict the characters
-of a sample name. Since the name becomes part of file names, letters, digits, `.`, `_` and `-`
-are the safe choice; in particular a samplesheet name must not contain `/`.
+that gives an empty sample name is refused. Names taken from file names are not otherwise
+restricted; names given in a samplesheet follow the rule above. Since the name becomes part of
+file names, letters, digits, `.`, `_` and `-` are the safe choice for file names as well.
 
 ## Node-labels file
 
