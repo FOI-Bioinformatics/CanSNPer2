@@ -43,7 +43,7 @@ from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER, e
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
 from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
-from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count
+from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count, log_tag
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
@@ -240,7 +240,7 @@ def run_command(args, parser):
 	args.logdir = args.logdir.rstrip("/")+"/" ## a logdir without a trailing slash would glue straight onto the log file name (issue #71)
 
 
-	logpath = setup_logging(args.logdir, "CanSNPer2", level=logval) ## shared log naming for all commands (issue #217)
+	logpath = setup_logging(args.logdir, log_tag(parser.prog), level=logval) ## shared log naming for all commands (issue #217)
 	logger = logging.getLogger(__name__)
 	if logdircreated: logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
 	log_scheme_notice(args.database, logger) ## which scheme is typed against, before any work starts

@@ -11,6 +11,12 @@ longer append to each other's log file, and a name that is already taken steps t
 '''
 
 
+def log_tag(prog):
+	'''the log file tag of a command: its name with the verbs, cansnper2 scheme get gives
+		cansnper2-scheme-get'''
+	return "-".join(prog.split())
+
+
 def get_logpath(logdir, tag, now=None):
 	'''First log file name for this command that is not already taken'''
 	now = now or datetime.now()
@@ -21,7 +27,8 @@ def get_logpath(logdir, tag, now=None):
 	logpath = base+".log"
 	if not os.path.exists(logpath):
 		return logpath
-	stem = "{base}-{hour:02d}:{minute:02d}".format(base=base, hour=now.hour, minute=now.minute)
+	## no colon in the time: it is not allowed in file names on Windows
+	stem = "{base}-{hour:02d}{minute:02d}".format(base=base, hour=now.hour, minute=now.minute)
 	logpath = stem+".log"
 	part = 1
 	while os.path.exists(logpath):

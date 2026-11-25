@@ -131,7 +131,9 @@ def get_logger(args):
 		logval = args.verbose
 
 	args.logs = args.logs.rstrip("/")+"/"
-	logpath = setup_logging(args.logs, "CanSNPer2-database", level=logval) ## shared log naming for all commands (issue #217)
+	action = getattr(args, "db_action", None)
+	tag = "cansnper2-db-" + action if action else "CanSNPer2-database"
+	logpath = setup_logging(args.logs, tag, level=logval) ## shared log naming for all commands (issue #217)
 	return logging.getLogger(__name__)
 
 

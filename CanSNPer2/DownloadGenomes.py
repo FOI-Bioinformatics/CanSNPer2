@@ -25,7 +25,7 @@ _MP_CTX = multiprocessing.get_context("fork")
 from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, reference_snps
-from CanSNPer2.modules.LogSetup import setup_logging
+from CanSNPer2.modules.LogSetup import setup_logging, log_tag
 from CanSNPer2.modules.FileMode import set_default_mode
 from CanSNPer2 import COMMANDS_HELP
 import logging
@@ -551,7 +551,7 @@ def run_command(args, parser):
 		exit()
 
 	args.logs = args.logs.rstrip("/")+"/"
-	logpath = setup_logging(args.logs, "CanSNPer2-download", level=logval) ## own tag: it used to append to the CanSNPer2-database log (issue #217)
+	logpath = setup_logging(args.logs, log_tag(parser.prog), level=logval) ## own tag per verb: it used to append to the database log (issue #217)
 	logger = logging.getLogger(__name__)
 
 	if args.scheme:

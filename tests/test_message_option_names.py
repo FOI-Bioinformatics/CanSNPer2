@@ -85,3 +85,17 @@ def test_no_removed_command_is_named_outside_the_upgrade_notes():
 	found = ["{0}:{1}".format(path, line) for path, line, text in user_strings()
 		if pattern.search(text) and "no longer installed" not in text]
 	assert not found, "\n".join(found)
+
+
+def test_log_files_are_named_after_the_verb(tmp_path):
+	'''cansnper2 db info writes cansnper2-db-info-<date>.log; the name has no colon, which
+		file names on Windows cannot contain'''
+	import datetime
+	from CanSNPer2.modules.LogSetup import get_logpath, log_tag
+	assert log_tag("cansnper2 scheme get") == "cansnper2-scheme-get"
+	now = datetime.datetime(2026, 11, 25, 13, 5)
+	first = get_logpath(str(tmp_path), "cansnper2-db-info", now=now)
+	assert pathlib.Path(first).name == "cansnper2-db-info-Nov-25-2026.log"
+	open(first, "w").close()
+	second = get_logpath(str(tmp_path), "cansnper2-db-info", now=now)
+	assert ":" not in pathlib.Path(second).name and second != first
