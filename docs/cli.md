@@ -147,8 +147,10 @@ Read typing options:
   --samplesheet FILE    tab-separated file with the header columns sample,
                         reads1 and optionally reads2 and platform, one sample
                         per row; replaces the query arguments
-  --min-depth N         minimum number of reads covering a canSNP position for
-                        its state to be read (default: 5 for all platforms)
+  --min-depth N         minimum number of A, C, G or T bases at a canSNP
+                        position, after the mapping and base quality filters,
+                        for its state to be read (default: 5 for all
+                        platforms)
   --min-allele-fraction FRACTION
                         minimum fraction of the reads that must carry one base
                         for the site to take that state; below it the site is

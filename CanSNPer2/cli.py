@@ -195,8 +195,9 @@ def add_read_options(parser):
 			"query arguments")
 	reads.add_argument('--min-depth', dest='min_depth', metavar='N',
 		type=typing_command.positive_int, default=None,
-		help="minimum number of reads covering a canSNP position for its state "
-			"to be read (default: 5 for all platforms)")
+		help="minimum number of A, C, G or T bases at a canSNP position, after the "
+			"mapping and base quality filters, for its state to be read (default: 5 "
+			"for all platforms)")
 	reads.add_argument('--min-allele-fraction', dest='min_allele_fraction', metavar='FRACTION',
 		type=typing_command.fraction, default=None,
 		help="minimum fraction of the reads that must carry one base for the "
