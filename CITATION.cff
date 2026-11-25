@@ -7,7 +7,6 @@ abstract: >-
   Canonical SNP typing of bacterial genomes from assemblies or sequencing reads.
 type: software
 version: 2.6.0
-date-released: 2026-11-25
 license: GPL-3.0-or-later
 repository-code: https://github.com/FOI-Bioinformatics/CanSNPer2
 authors:

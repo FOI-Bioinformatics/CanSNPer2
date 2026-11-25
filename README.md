@@ -34,7 +34,7 @@ fetched with `--branch dev`; see [docs/schemes-and-databases.md](docs/schemes-an
 With [Bioconda](https://bioconda.github.io/), on Linux or macOS:
 
 ```sh
-mamba create -n cansnper2 -c conda-forge -c bioconda cansnper2 minimap2 samtools
+mamba create -n cansnper2 -c conda-forge -c bioconda 'cansnper2>=2.6.0' minimap2 samtools
 mamba activate cansnper2
 cansnper2 selftest
 ```
@@ -47,7 +47,7 @@ reports which programs were found. Installation from source is described in
 ## Quick start
 
 Fetch a scheme (this builds the database `francisella_tularensis.db` and downloads its reference
-genomes into `references/`), then type assemblies against it:
+genomes into `references/`), then type assemblies (uncompressed FASTA) against it:
 
 ```sh
 cansnper2 scheme get francisella_tularensis
@@ -95,7 +95,8 @@ If you use CanSNPer2, please cite:
 > 2014;30(12):1762-1764. https://doi.org/10.1093/bioinformatics/btu113
 
 together with the CanSNPer2 version you used and the publications of the scheme, which are listed
-in the scheme description in CanSNPer2-data. [CITATION.cff](CITATION.cff) holds the same
+in the description of each scheme in CanSNPer2-data (`schemes/<name>/README.md`, for example
+[francisella_tularensis](https://github.com/FOI-Bioinformatics/CanSNPer2-data/blob/master/schemes/francisella_tularensis/README.md)). [CITATION.cff](CITATION.cff) holds the same
 information in machine-readable form.
 
 ## License and support
