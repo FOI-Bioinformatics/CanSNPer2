@@ -483,7 +483,7 @@ def build_parser():
 	parser = argparse.ArgumentParser(
 		description='CanSNPer2-download - fetch the reference genomes a database needs from NCBI',
 		epilog="Give a database with --database, or name a scheme with --scheme to fetch it from "
-			"CanSNPer2-data (or --repo, or --data_dir), build its database and download its references in one step."
+			"CanSNPer2-data (or --repo, or --data-dir), build its database and download its references in one step."
 			+ COMMANDS_HELP,
 		formatter_class=argparse.RawDescriptionHelpFormatter)
 
@@ -515,12 +515,12 @@ def build_parser():
 def run_command(args, parser):
 	'''everything after parsing, shared by CanSNPer2-download and the cansnper2 scheme/ref verbs'''
 	if not (args.database or args.scheme or args.list_schemes):
-		parser.error("give a database with --database, a scheme with --scheme, or --list_schemes")
+		parser.error("give the database with -d/--database (or build a scheme with cansnper2 scheme get NAME)")
 	if args.no_references and not args.scheme:
 		'''with only a database there is nothing to build, the references are all the command does'''
-		parser.error("--no_references skips the download after building a database from --scheme, give --scheme or leave it out")
+		parser.error("--no-references skips the download after building a database from a scheme; it is used with cansnper2 scheme get")
 	if args.data_dir and (args.repo or args.branch):
-		parser.error("--data_dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
+		parser.error("--data-dir reads the directory as it is on disk, it cannot be combined with --repo or --branch")
 
 	def scheme_source():
 		'''where the schemes are read from: a local directory or a GitHub repository'''

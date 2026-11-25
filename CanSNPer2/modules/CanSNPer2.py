@@ -182,11 +182,11 @@ class CanSNPer2(object):
 		self.tmpdir = os.path.join(self.workdir, tmpdir)
 		if not os.path.exists(self.tmpdir):
 			logger.info("Creating tmp directory {tmpdir}".format(tmpdir=self.tmpdir))
-		ensure_directory(self.tmpdir, "--tmpdir")
+		ensure_directory(self.tmpdir, "--tmp-dir")
 		self.logdir = os.path.join(self.workdir, kwargs.get("logdir","logs"))
 		if not os.path.exists(self.logdir):
 			logger.info("Creating logs directory {logdir}".format(logdir=self.logdir))
-		ensure_directory(self.logdir, "--logdir")
+		ensure_directory(self.logdir, "--log-dir")
 
 		self.outdir = os.path.join(self.workdir, kwargs.get("outdir","results"))
 		if not os.path.exists(self.outdir):
@@ -349,7 +349,7 @@ class CanSNPer2(object):
 		if self.aligner.available():
 			return
 		raise CanSNPer2Error("The aligner {name} was not found (looked for {program}); install it, give its location with "
-			"--aligner_path, or choose another --aligner. CanSNPer2-test lists the aligners that are installed".format(
+			"--aligner-path, or choose another --aligner. cansnper2 selftest lists the aligners that are installed".format(
 			name=self.aligner.name, program=self.aligner.executable()))
 
 	def check_start(self):
@@ -391,10 +391,10 @@ class CanSNPer2(object):
 			raise CanSNPer2Error("{n} reference genome(s) of {database} have no file <genome>.fna in {refdir}: {names}; "
 				"the SNPs on them would not be compared. Fetch them with {download}{option}".format(
 				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing),download=download,
-				option="" if self.allow_missing_references else ", or give --allow_missing_references to type without them"))
+				option="" if self.allow_missing_references else ", or give --allow-missing-references to type without them"))
 		if missing:
 			logger.warning("{n} reference genome(s) of {database} have no file <genome>.fna in {refdir}: {names}; "
-				"the SNPs on them are not compared (--allow_missing_references)".format(
+				"the SNPs on them are not compared (--allow-missing-references)".format(
 				n=len(missing),database=self.database,refdir=self.refdir,names=listing(missing)))
 		matched = [genome + ".fna" for genome in genomes if genome not in missing]
 		skipped = [ref.rsplit(".",1)[0] for ref in refs if ref not in matched]
@@ -459,7 +459,7 @@ class CanSNPer2(object):
 					'''an aligner that never returns used to hang the whole run'''
 					for idx in range(len(processes)):
 						ref_name, query_name = running_names[idx]
-						logger.error("{program} did not finish within {minutes:g} minutes for genome {query} against reference {ref}, it was stopped (--alignment_timeout)".format(
+						logger.error("{program} did not finish within {minutes:g} minutes for genome {query} against reference {ref}, it was stopped (--alignment-timeout)".format(
 								program=program, minutes=self.alignment_timeout/60, query=query_name, ref=ref_name))
 						processes[idx].terminate()
 					for idx, p in enumerate(processes):
@@ -1241,7 +1241,7 @@ class CanSNPer2(object):
 		with open(record) as handle:
 			recorded = handle.read().strip()
 		if recorded != self.query_sha256:
-			raise CanSNPer2Error("the alignments of {name} in {tmpdir} were made from a different query file; align {q} again without --skip_alignment".format(
+			raise CanSNPer2Error("the alignments of {name} in {tmpdir} were made from a different query file; align {q} again without --skip-alignment".format(
 				name=self.query_name, tmpdir=self.tmpdir, q=q))
 
 	def file_sha256(self, path):
@@ -1690,7 +1690,7 @@ class CanSNPer2(object):
 					logger.error("Error while processing {file}: {err}".format(file=self.query_name,err=e))
 					self.not_typed[self.query_name] = "failed: {err}".format(err=e)
 					if not self.keep_going:
-						raise CanSNPer2Error("A file did not run correctly exit CanSNPer2 (use --keep_going to continue with next file!)") from e
+						raise CanSNPer2Error("A query could not be typed and the run was stopped; use --keep-going to continue with the next query") from e
 					logger.warning("An error occured during processing of {file}, continuing!".format(file=self.query_name))
 					self.add_sample_report(self.query_name,"failed","NA","NA",["processing failed: {err}".format(err=e)])
 
@@ -1716,7 +1716,7 @@ class CanSNPer2(object):
 		if not self.keep_temp: ## a run without queries also removes its (empty) run directory
 			self.cleanup()
 		elif self.own_tmpdir:
-			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip_alignment --tmpdir {tmpdir}".format(tmpdir=self.tmpdir))
+			logger.info("Alignments were kept in {tmpdir}, reuse them with --skip-alignment --tmp-dir {tmpdir}".format(tmpdir=self.tmpdir))
 
 		if self.typed or self.reused or not self.query:
 			logger.info("CanSNPer2 finished successfully, files can be found in {outdir}".format(outdir=self.outdir.rstrip("/")+"/")) ## a trailing slash was already there would print dir// (issue #76)

@@ -68,7 +68,7 @@ def test_no_typo_left():
 	(["--info", "--export"], ["--info", "--export"]),
 	(["--export", "--convert"], ["--export", "--convert"]),
 	(["--import", "--create"], ["--import", "--create"]),
-	(["--mod_file", "x.txt", "--export"], ["--mod_file", "--export"]),
+	(["--mod_file", "x.txt", "--export"], ["--mod-file", "--export"]),
 ])
 def test_conflicting_modes_refused(tmp_path, scheme, flags, named):
 	db, _ = scheme
@@ -94,21 +94,21 @@ def test_message_for_database_alone(tmp_path, scheme):
 	db, _ = scheme
 	r = run(tmp_path, "-db", db)
 	assert r.returncode == 1
-	assert "nothing to do" in out(r).lower() and "--export" in out(r)
+	assert "nothing to do" in out(r).lower() and "--mod-file" in out(r)
 
 
 def test_message_for_replace_alone(tmp_path, scheme):
 	db, _ = scheme
 	r = run(tmp_path, "-db", db, "--replace")
 	assert r.returncode == 1
-	assert "--replace" in out(r) and "--mod_file" in out(r) and "are empty" not in out(r)
+	assert "--replace" in out(r) and "--mod-file" in out(r) and "are empty" not in out(r)
 
 
 def test_message_for_export_format_without_export(tmp_path, scheme):
 	db, _ = scheme
 	r = run(tmp_path, "-db", db, "--export_format", "newick")
 	assert r.returncode == 1
-	assert "--export_format" in out(r) and "--export" in out(r)
+	assert "--format" in out(r) and "--export" in out(r)
 
 
 def test_nonpositive_joined_position(tmp_path):

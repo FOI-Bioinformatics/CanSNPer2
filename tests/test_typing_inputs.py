@@ -120,7 +120,7 @@ class Missing(Aligner):
 def test_a_missing_aligner_stops_before_the_first_sample(tmp_path):
 	q = write(tmp_path / "x.fasta")
 	obj, db = project(tmp_path, [q], aligner=Missing())
-	with pytest.raises(CanSNPer2Error, match="missing.*not found.*--aligner_path.*CanSNPer2-test"):
+	with pytest.raises(CanSNPer2Error, match="missing.*not found.*--aligner-path.*cansnper2 selftest"):
 		obj.run(database=db)
 	assert not obj.not_typed
 
@@ -153,13 +153,13 @@ def test_a_read_only_outdir_is_refused(tmp_path):
 
 def test_a_logdir_that_is_a_file_is_refused(tmp_path):
 	write(tmp_path / "logs", "x")
-	with pytest.raises(CanSNPer2Error, match="--logdir .*not a directory"):
+	with pytest.raises(CanSNPer2Error, match="--log-dir .*not a directory"):
 		project(tmp_path, [])
 
 
 def test_a_tmpdir_that_is_a_file_is_refused(tmp_path):
 	write(tmp_path / "shared", "x")
-	with pytest.raises(CanSNPer2Error, match="--tmpdir .*not a directory"):
+	with pytest.raises(CanSNPer2Error, match="--tmp-dir .*not a directory"):
 		project(tmp_path, [])
 
 

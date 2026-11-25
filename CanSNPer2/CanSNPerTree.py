@@ -233,7 +233,7 @@ def run_command(args, parser):
 	if not os.path.exists(args.logdir):
 		logdircreated = True
 	try:
-		ensure_directory(args.logdir, "--logdir")
+		ensure_directory(args.logdir, "--log-dir")
 	except CanSNPer2Error as e:
 		print(e.value, file=sys.stderr)
 		exit(1)
@@ -247,7 +247,7 @@ def run_command(args, parser):
 
 	'''Fix temp path, see resolve_tmpdir (issue #177)'''
 	if args.tmpdir is not None and not args.tmpdir.strip():
-		parser.error("--tmpdir cannot be empty")
+		parser.error("--tmp-dir cannot be empty")
 	if args.fetch_local and not args.local_references:
 		parser.error("{f} is used with {l}".format(f=option_name(parser, "fetch_local"), l=option_name(parser, "local_references")))
 	if args.tmpdir is None:
@@ -256,25 +256,25 @@ def run_command(args, parser):
 		for candidate in default_tmpdir_candidates(in_workdir(args.outdir)):
 			candidate = resolve_tmpdir(candidate)
 			try:
-				ensure_directory(candidate, "--tmpdir")
+				ensure_directory(candidate, "--tmp-dir")
 				args.tmpdir = candidate
 				break
 			except CanSNPer2Error as e:
 				problems.append(e.value)
 				logger.warning("{0}; trying another location".format(e.value))
 		else:
-			logger.error("No folder for temporary files could be used ({0}); give one with --tmpdir".format("; ".join(problems)))
+			logger.error("No folder for temporary files could be used ({0}); give one with --tmp-dir".format("; ".join(problems)))
 			exit(1)
 	else:
 		args.tmpdir = resolve_tmpdir(args.tmpdir)
 		if args.skip_alignment and not os.path.isdir(args.tmpdir):
 			'''alignments are only read with --skip_alignment: a missing folder is not created'''
-			logger.error("--skip_alignment reads the alignments in --tmpdir, but {path} does not exist".format(path=args.tmpdir))
+			logger.error("--skip-alignment reads the alignments in --tmp-dir, but {path} does not exist".format(path=args.tmpdir))
 			exit(1)
 		if not os.path.exists(args.tmpdir):
 			logger.debug("Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir))
 		try:
-			ensure_directory(args.tmpdir, "--tmpdir")
+			ensure_directory(args.tmpdir, "--tmp-dir")
 		except CanSNPer2Error as e:
 			logger.error(e.value)
 			exit(1)

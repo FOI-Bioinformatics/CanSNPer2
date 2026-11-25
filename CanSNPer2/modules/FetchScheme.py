@@ -286,7 +286,7 @@ class SchemeSource(object):
 			refused, unless allow_unverified is given; otherwise the problem is a warning'''
 		if self.missing_manifest_is_error and status == "verified" and not allow_unverified:
 			raise SchemeError("{problem}; the files of the verified scheme {name} cannot be checked. "
-				"Give --allow_unverified to build it without this check".format(problem=problem, name=name))
+				"Give --allow-unverified to build it without this check".format(problem=problem, name=name))
 		logger.warning("{problem}, the files of {name} cannot be checked".format(problem=problem, name=name))
 
 	def verify(self, name, manifest_path, hashes, status=None, allow_unverified=False):

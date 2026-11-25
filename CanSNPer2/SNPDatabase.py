@@ -144,10 +144,10 @@ def convert(args, logger):
 		check_table_format, check_database_format, canSNPs_target, database_stage, table_stage,
 		upgrade_database, upgrade_table)
 	if bool(args.annotation) == bool(args.database):
-		logger.error("--convert converts either a SNP source file (--annotation) or a database (--database), give one of them!")
+		logger.error("db convert converts either a canSNP source file (--cansnps) or a database (-d/--database); give one of them")
 		return 1
 	if not args.outdir:
-		logger.error("--convert writes the converted file to a folder, give it with -o/--outdir!")
+		logger.error("db convert writes the converted file to a folder; give it with -o/--outdir")
 		return 1
 	source = args.annotation or args.database
 	sequences = set()
@@ -167,7 +167,7 @@ def convert(args, logger):
 		logger.error(str(e))
 		return 1
 	if stage == "joined" and not args.refdir:
-		logger.error("--convert checks each SNP against its reference, give the folder with the reference files <genome>.fna with --refdir!")
+		logger.error("db convert checks each canSNP against its reference; give the folder with the reference files <genome>.fna with --ref-dir")
 		return 1
 	target = canSNPs_target(args.outdir, source) if args.annotation else os.path.join(
 		args.outdir, os.path.basename(source))
@@ -225,20 +225,20 @@ def check_mode(args, logger):
 			("--info", args.info), ("--convert", args.convert)):
 		if given:
 			modes.append(flag)
-	modification = [flag for flag, given in (("--mod_file", args.mod_file), ("--remove", args.remove),
+	modification = [flag for flag, given in (("--mod-file", args.mod_file), ("--remove", args.remove),
 		("--replace", args.replace)) if given]
 	if modification:
 		modes.append(" ".join(modification))
 	if len(modes) > 1:
 		logger.error("{given} cannot be combined, give one of --create, --import, --export, --info, --convert "
-			"or a modification (--mod_file, --remove) at a time".format(given=" and ".join(modes)))
+			"or a modification (--mod-file, --remove) at a time".format(given=" and ".join(modes)))
 		return False
 	if args.export_format is not None and not args.export:
-		logger.error("--export_format {format} only applies with --export, add --export or remove --export_format".format(
+		logger.error("--format {format} only applies with --export, add --export or remove --format".format(
 			format=args.export_format))
 		return False
 	if args.replace and not args.mod_file:
-		logger.error("--replace replaces a node with the tree in --mod_file, give --mod_file (and --parent) with --replace!")
+		logger.error("--replace replaces a node with the tree in --mod-file, give --mod-file (and --parent) with --replace!")
 		return False
 	return True
 
@@ -340,20 +340,20 @@ def run_command(args):
 	if not check_mode(args, logger):
 		exit(1)
 	args.export_format = args.export_format or "source"
-	scheme_options = [option for option, value in (("--scheme_name", args.scheme_name),
-		("--scheme_status", args.scheme_status), ("--scheme_source", args.scheme_source)) if value is not None]
+	scheme_options = [option for option, value in (("--scheme-name", args.scheme_name),
+		("--scheme-status", args.scheme_status), ("--scheme-source", args.scheme_source)) if value is not None]
 	if scheme_options and not (args.create or args.do_import):
 		logger.error("{options} {verb} recorded by --create and --import only, they cannot be "
 			"used with an existing database".format(options=", ".join(scheme_options),
 			verb="is" if len(scheme_options) == 1 else "are"))
 		exit(1)
-	for option, value in (("--scheme_name", args.scheme_name), ("--scheme_source", args.scheme_source)):
+	for option, value in (("--scheme-name", args.scheme_name), ("--scheme-source", args.scheme_source)):
 		if value is not None and any(c in value for c in "\t\n\r"):
 			logger.error("{option} contains a control character (tab, newline or carriage return), "
 				"remove it; the value is recorded in the database and shown by --info".format(option=option))
 			exit(1)
 	if args.scheme_status is not None and args.scheme_status not in STATUSES:
-		logger.error("--scheme_status {status} is not a known status, give verified, draft or unknown".format(
+		logger.error("--scheme-status {status} is not a known status, give verified, draft or unknown".format(
 			status=args.scheme_status))
 		exit(1)
 	scheme_info = {"scheme": args.scheme_name, "status": args.scheme_status, "source": args.scheme_source}
@@ -363,14 +363,14 @@ def run_command(args):
 		'''import is the counterpart of --export: it reads the source triple and writes a
 			current-format database, so it is handled before the database checks below,
 			which expect --database to be an existing database or a --create target'''
-		missing = [name for name, value in (("--tree", args.tree), ("--annotation", args.annotation),
+		missing = [name for name, value in (("--tree", args.tree), ("--cansnps", args.annotation),
 			("--references", args.references)) if not value]
 		if missing:
-			logger.error("--import builds a database from the files --export writes, it needs all "
-				"three source files, missing: {0}!".format(", ".join(missing)))
+			logger.error("db import builds a database from the files db export writes and needs all "
+				"three source files; missing: {0}".format(", ".join(missing)))
 			exit(1)
 		if not args.database:
-			logger.error("--import needs the new database to write, give it with --database!")
+			logger.error("db import needs the new database to write; give it with -d/--database")
 			exit(1)
 		if not check_folder(args.database, logger):
 			exit(1)
@@ -389,7 +389,7 @@ def run_command(args):
 		'''a wrong path let sqlite create an empty database and the modification or export only failed
 			later with "no such table" errors (issue #125)'''
 		if not args.database:
-			logger.error("A database is required, use --database, or --create together with a source file!")
+			logger.error("A database is required; give it with -d/--database")
 			exit(1)
 		try:
 			check_database(args.database)
@@ -418,10 +418,10 @@ def run_command(args):
 			logger.error("--remove removes a branch from an existing database and cannot be combined with --create!")
 			exit(1)
 		if args.mod_file:
-			logger.error("--remove only needs the branch root given with --parent, it does not read --mod_file!")
+			logger.error("--remove only needs the branch root given with --parent, it does not read --mod-file!")
 			exit(1)
 		if not args.parent:
-			logger.error("--remove needs the branch to remove, give the branch root with --parent!")
+			logger.error("db remove needs the branch to remove; give its root node with --parent")
 			exit(1)
 		exit(modify(args, logger))
 	if args.export: ## Dump database to file
@@ -455,8 +455,8 @@ def run_command(args):
 		exit()
 	if not args.create:
 		if not (args.mod_file or args.annotation or args.references):
-			logger.error("Nothing to do with {db}: give a mode, --export, --info or --remove --parent, or the changes to "
-				"make, --mod_file, --annotation or --references!".format(db=args.database))
+			logger.error("Nothing to do with {db}: give the changes to make with --mod-file, --cansnps or "
+				"--references".format(db=args.database))
 			exit(1)
 		'''--annotation and --references need no --mod_file. A modification without any source is a usage error, not a crash (issue #150); a source
 			file without the expected columns is refused, not a crash in the loader (issue #154)'''
@@ -464,7 +464,7 @@ def run_command(args):
 	elif args.annotation or args.tree or args.references:
 		'''a database can also be created from only a tree or only a reference list (issue #129)'''
 		if not args.database:
-			logger.error("--create needs the new database to write, give it with --database!")
+			logger.error("db create needs the new database to write; give it with -d/--database")
 			exit(1)
 		if os.path.exists(args.database):
 			'''--create into an existing file added the tree, the references and the SNPs a second
@@ -476,8 +476,8 @@ def run_command(args):
 			except ConnectionError as e:
 				logger.error(str(e))
 				exit(1)
-			logger.error("The database {db} already exists, --create builds a new database, "
-				"choose a new name or remove it first".format(db=args.database))
+			logger.error("The database {db} already exists; db create builds a new database, "
+				"choose a new name or remove the file first".format(db=args.database))
 			exit(1)
 		if not check_folder(args.database, logger):
 			exit(1)

@@ -65,7 +65,7 @@ def test_control_characters_in_scheme_options_are_refused(tmp_path, option, bad)
 	done = run("CanSNPer2.SNPDatabase", "--create", "--database", str(tmp_path / "x.db"), "--tree", paths["tree"],
 		"--annotation", paths["snp"], "--references", paths["references"], option, bad, "--logs", str(tmp_path / "l"), cwd=tmp_path)
 	assert done.returncode != 0
-	assert option in done.stderr + done.stdout and "control" in (done.stderr + done.stdout)
+	assert option.replace("_", "-") in done.stderr + done.stdout and "control" in (done.stderr + done.stdout)
 	assert not (tmp_path / "x.db").exists()
 
 

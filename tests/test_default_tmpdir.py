@@ -56,4 +56,4 @@ def test_a_given_tmpdir_that_is_not_writable_is_still_an_error(tmp_path):
 	finally:
 		locked.chmod(0o700)
 	assert result.returncode != 0
-	assert "--tmpdir" in result.stderr and "cannot be created" in result.stderr
+	assert "--tmp-dir" in result.stderr and "cannot be created" in result.stderr

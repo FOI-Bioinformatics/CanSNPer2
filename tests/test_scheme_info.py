@@ -69,7 +69,7 @@ def test_an_unknown_scheme_status_is_refused(tmp_path):
 	db = str(tmp_path / "s.db")
 	result, _paths = create(tmp_path, db, "--scheme_status", "tested")
 	assert result.returncode == 1
-	assert "--scheme_status" in result.stderr and "verified, draft or unknown" in result.stderr
+	assert "--scheme-status" in result.stderr and "verified, draft or unknown" in result.stderr
 	assert "Traceback" not in result.stderr
 	assert not os.path.exists(db)
 
@@ -410,7 +410,7 @@ def test_a_missing_reference_file_stops_typing(tmp_path):
 	db = two_genome_toy(tmp_path)
 	result = type_toy(tmp_path, db)
 	assert result.returncode == 1, result.stdout + result.stderr
-	assert "REF_B" in result.stderr and "--allow_missing_references" in result.stderr, result.stderr
+	assert "REF_B" in result.stderr and "--allow-missing-references" in result.stderr, result.stderr
 	assert "Traceback" not in result.stderr
 
 

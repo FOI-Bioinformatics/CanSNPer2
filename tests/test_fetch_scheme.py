@@ -118,7 +118,7 @@ def test_a_file_that_does_not_match_the_manifest_builds_nothing(tmp_path):
 
 def test_a_verified_scheme_without_a_manifest_is_refused(tmp_path):
 	db = str(tmp_path / "test_scheme.db")
-	with pytest.raises(SchemeError, match="--allow_unverified"):
+	with pytest.raises(SchemeError, match="--allow-unverified"):
 		build_scheme("test_scheme", db, source=source(scheme_repo(manifest=False)))
 	assert os.listdir(tmp_path) == []
 
