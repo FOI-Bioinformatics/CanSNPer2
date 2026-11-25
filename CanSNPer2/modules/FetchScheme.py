@@ -181,6 +181,7 @@ class SchemeSource(object):
 			"snp": entry.get("snp", "{folder}/{name}_snp.txt".format(folder=folder, name=name)),
 			"tree": entry.get("tree", "{folder}/{name}_tree.txt".format(folder=folder, name=name)),
 			"references": "{folder}/{name}_references.txt".format(folder=folder, name=name),
+			"genomes": entry.get("genomes", "{folder}/{name}_genomes.txt".format(folder=folder, name=name)),
 			"readme": entry.get("readme", "{folder}/README.md".format(folder=folder)),
 			"manifest": "{dir}/{name}.manifest.json".format(dir=database_dir, name=name),
 			"source_type": entry.get("source_type", "CanSNPer"),
@@ -244,6 +245,18 @@ class SchemeSource(object):
 			with open(local[role], "wb") as out:
 				out.write(data)
 			hashes[path] = sha256(data)
+		'''the genomes file (genome, node, role) is optional; when the scheme has one it is checked
+			against the manifest as the others are, and read typing with local references takes the
+			representative genomes from it'''
+		try:
+			data = self.raw(files["genomes"])
+		except NotFound:
+			data = None
+		if data is not None:
+			local["genomes"] = os.path.join(directory, os.path.basename(files["genomes"]))
+			with open(local["genomes"], "wb") as out:
+				out.write(data)
+			hashes[files["genomes"]] = sha256(data)
 		status = self.status(files["readme"])
 		self.verify(name, files["manifest"], hashes, status=status, allow_unverified=allow_unverified)
 		if status == "draft":
@@ -509,7 +522,7 @@ def build_scheme(name, database, ref="master", overwrite=False, source=None, all
 				os.remove(partial) ## the database loader creates the file itself
 				CanSNPDatabase(database=partial, create=True, tree=local["tree"], annotation=local["canSNPs"],
 								references=local["references"], source_type=provenance["source_type"], verbose=False,
-								scheme_info=scheme_info)
+								scheme_info=scheme_info, genomes=local.get("genomes"))
 			except (sqlite3.Error, OSError, DatabaseConnectionError) as e:
 				raise SchemeError("The database {db} could not be built from the scheme {name}: {e}".format(
 					db=database, name=name, e=name_scheme_files(str(e), local, name)))

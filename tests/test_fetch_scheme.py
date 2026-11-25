@@ -382,3 +382,43 @@ def test_a_canSNP_file_the_manifest_has_no_hash_for_is_refused(tmp_path):
 
 def test_list_schemes_finds_a_canSNP_scheme(tmp_path):
 	assert source(cansnp_repo()).list_schemes() == [("test_scheme", "verified")]
+
+
+# the genomes file of a scheme, which read typing with local references reads from the database
+
+GENOMES = "genome\tnode\trole\tbasis\nGCA_000000002.1\tB.1\trepresentative\tcluster\nGCA_000000009.1\t\toutgroup\t\n"
+
+
+def with_genomes(files, recorded=True):
+	folder = "schemes/test_scheme/test_scheme"
+	files[folder + "_genomes.txt"] = GENOMES
+	if recorded:
+		manifest = json.loads(files["database/test_scheme.manifest.json"])
+		manifest["sources"][folder + "_genomes.txt"] = sha(GENOMES)
+		files["database/test_scheme.manifest.json"] = json.dumps(manifest)
+	return files
+
+
+def test_the_genomes_file_of_a_scheme_is_loaded(tmp_path):
+	db = str(tmp_path / "test_scheme.db")
+	provenance = build_scheme("test_scheme", db, source=source(with_genomes(cansnp_repo())))
+	conn = sqlite3.connect(db)
+	rows = set(conn.execute("SELECT genome, role FROM genomes"))
+	conn.close()
+	assert rows == {("GCA_000000002.1", "representative"), ("GCA_000000009.1", "outgroup")}
+	assert provenance["sources"]["schemes/test_scheme/test_scheme_genomes.txt"] == sha(GENOMES)
+
+
+def test_a_genomes_file_that_does_not_match_the_manifest_builds_nothing(tmp_path):
+	files = with_genomes(cansnp_repo())
+	files["schemes/test_scheme/test_scheme_genomes.txt"] = GENOMES + "GCA_000000003.1\tA.1\trepresentative\t\n"
+	db = str(tmp_path / "test_scheme.db")
+	with pytest.raises(SchemeError):
+		build_scheme("test_scheme", db, source=source(files))
+	assert not os.path.exists(db)
+
+
+def test_a_scheme_without_a_genomes_file_has_no_genomes(tmp_path):
+	db = str(tmp_path / "test_scheme.db")
+	provenance = build_scheme("test_scheme", db, source=source(cansnp_repo()))
+	assert not any(path.endswith("_genomes.txt") for path in provenance["sources"])
