@@ -274,5 +274,5 @@ def test_keep_going_with_every_sample_failed_exits_1_and_names_the_sample(tmp_pa
     assert result.returncode == 1, result.stderr
     assert "No sample was typed" in result.stderr
     assert "q: " in result.stderr.split("No sample was typed", 1)[1]
-    assert sorted(os.listdir(tmp_path / "out")) == ["summary.html"]
+    assert sorted(os.listdir(tmp_path / "out")) == ["run.json", "summary.html"]
     assert '"q"' in (tmp_path / "out" / "summary.html").read_text()

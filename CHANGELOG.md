@@ -26,6 +26,9 @@ Git history.
 - An overview page of all samples (`summary.html`).
 - Assemblies can be given gzip-compressed (`.fna.gz`); they are decompressed into the temporary
   folder before the alignment, and `x.fna.gz` is the sample `x`.
+- JSON results: `samples/<sample>.json` for each typed sample and `run.json` for the run, with
+  JSON Schemas in `docs/schemas/`; with `--summary` also `cansnper2_mqc.tsv`, a MultiQC custom
+  content table.
 
 ### Changed
 

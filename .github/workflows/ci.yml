@@ -84,7 +84,7 @@ jobs:
       - name: Install CanSNPer2
         run: |
           python -m pip install --upgrade pip
-          python -m pip install . pytest
+          python -m pip install ".[test]"
           python -m pip check
 
       - name: Self test and command line help

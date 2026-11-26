@@ -447,3 +447,27 @@ def test_a_gzipped_assembly_is_typed_like_the_plain_one(tmp_path):
     again = open(tmp_path / "out" / "samples" / "ga_snps.txt").read()
     strip = lambda text: [line for line in text.splitlines() if not line.startswith("# Query file:")]
     assert strip(again) == strip(rows)
+
+
+def test_the_sample_json_of_reads_gives_the_reads_line(tmp_path):
+    """samples/<sample>.json of a read sample (#97)"""
+    import json
+
+    from test_result_json import validate
+
+    db, a, _ = make_scheme(tmp_path)
+    files = write_pair(tmp_path, "sa", [(a, 20, 1)])
+    run(tmp_path, files, db=db, summary=True)
+    document = json.loads((tmp_path / "out" / "samples" / "sa.json").read_text())
+    validate(document, "cansnper2-sample")
+    reads = [
+        line for line in comments(tmp_path / "out" / "samples" / "sa_snps.txt") if line.startswith("Reads: ")
+    ][0]
+    assert document["input"]["kind"] == "reads" and len(document["input"]["files"]) == 2
+    assert document["reads"]["platform"] == "illumina"
+    assert document["reads"]["sites_with_reads"] == reads.split("sites_with_reads=")[1].split()[0]
+    assert document["result_files"]["site_counts"] == "samples/sa_site_counts.tsv"
+    assert document["settings"]["min_depth"] == 5 and document["settings"]["max_reads"] == 300000
+    run_document = json.loads((tmp_path / "out" / "run.json").read_text())
+    validate(run_document, "cansnper2-run")
+    assert run_document["read_settings"][0]["platform"] == "illumina"
