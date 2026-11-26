@@ -189,3 +189,17 @@ def test_the_root_without_a_snp_is_warned_about_once(tmp_path, caplog):
 	caplog.set_level(logging.WARNING)
 	obj.run(database=db)
 	assert caplog.text.count("has no snp_annotation root") <= 1
+
+
+# moved from tests/release_test.sh: --keep-going must not hide a run that typed nothing
+# (issues #43 and #191)
+
+def test_keep_going_with_every_sample_failed_exits_1_and_names_the_sample(tmp_path):
+	db = toy_database(tmp_path)
+	(tmp_path / "q").mkdir()  # a directory as query fails the sample, --keep_going goes on
+	result = cli(tmp_path, "--database", db, "--keep_going", "-o", "out", "q")
+	assert result.returncode == 1, result.stderr
+	assert "No sample was typed" in result.stderr
+	assert "q: " in result.stderr.split("No sample was typed", 1)[1]
+	assert sorted(os.listdir(tmp_path / "out")) == ["summary.html"]
+	assert '"q"' in (tmp_path / "out" / "summary.html").read_text()

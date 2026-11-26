@@ -2,8 +2,8 @@
 
 The four separate commands made the same jobs look like four tools with four
 spellings of the same options. They are no longer installed; the old modules keep
-their code for the transition (the test suite and the release gate still drive
-them) and their --help points at the verbs."""
+their code for the transition (the test suite still drives them) and their --help
+points at the verbs."""
 import os
 import re
 import subprocess

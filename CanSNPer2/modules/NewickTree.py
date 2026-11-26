@@ -1025,7 +1025,7 @@ class NewickNode(object):
 			thousand levels exceeded the recursion limit. Children are rendered in name order: the
 			children container is a set, and its iteration order changes between processes with the
 			python hash seed, which made the newick export (and with it the drawn trees and the
-			release gate's check on them) different from one run to the next. Names with characters
+			export comparisons) different from one run to the next. Names with characters
 			that are special in newick are written in single quotes.'''
 		out = []
 		stack = [self]
