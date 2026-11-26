@@ -32,7 +32,7 @@ conda list
 The `# Typing settings:` line of each `<sample>_snps.txt` identifies the database by the sha256 of
 the file, and lists `min_required_hits`, `strictness` and `mask`. For assemblies it adds the
 aligner; for read samples it adds the platform and the read thresholds that were used (`min_depth`, `min_allele_fraction`, `min_mapq`,
-`min_baseq`), and with `--local-references` the number of local rounds.
+`min_baseq`, `max_reads`), and with `--local-references` the number of local rounds.
 
 ```text
 # Query file: /data/project/genomes/GCA_000807905.1.fasta sha256:57f4df3e9755607532bcf142ebdd9c2cbb4b06ddbe296fe19473887531f76849

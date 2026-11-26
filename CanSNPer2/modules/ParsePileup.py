@@ -37,11 +37,14 @@ BASES = "ACGT"
 	than the assembly call at any depth, Illumina reached the assembly call from 10x and ONT
 	from 10x (42 of 50; min_depth 10 gave no call for 42 of 50 at 10x). The ONT reads were
 	simulated with badread, whose errors are close to random; real ONT errors at homopolymers
-	are not covered'''
+	are not covered.
+
+	max_reads is the number of reads mapped per read file, the first ones in the file; with
+	two files it is the number of read pairs. 0 maps every read'''
 PLATFORMS = {
-	"illumina": {"preset": "sr", "min_mapq": 20, "min_baseq": 20, "min_depth": 5, "min_allele_fraction": 0.8},
-	"ont": {"preset": "map-ont", "min_mapq": 20, "min_baseq": 10, "min_depth": 5, "min_allele_fraction": 0.7},
-	"hifi": {"preset": "map-hifi", "min_mapq": 20, "min_baseq": 20, "min_depth": 5, "min_allele_fraction": 0.8},
+	"illumina": {"preset": "sr", "min_mapq": 20, "min_baseq": 20, "min_depth": 5, "min_allele_fraction": 0.8, "max_reads": 300000},
+	"ont": {"preset": "map-ont", "min_mapq": 20, "min_baseq": 10, "min_depth": 5, "min_allele_fraction": 0.7, "max_reads": 300000},
+	"hifi": {"preset": "map-hifi", "min_mapq": 20, "min_baseq": 20, "min_depth": 5, "min_allele_fraction": 0.8, "max_reads": 300000},
 }
 DEFAULT_PLATFORM = "illumina"
 

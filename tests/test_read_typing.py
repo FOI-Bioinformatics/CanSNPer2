@@ -156,6 +156,79 @@ def test_alignments_are_kept_and_read_again(tmp_path):
 	assert again.typed == first.typed == {"keep": "A.3"}
 
 
+def reads_line(path):
+	return [line for line in comments(path) if line.startswith("Reads: ")][0]
+
+
+def median_depth(path):
+	return float(reads_line(path).split("median_depth=")[1].split()[0])
+
+
+def test_max_reads_maps_only_the_first_read_pairs(tmp_path):
+	# 3000 pairs of 2 x 100 bases on 20 kb, depth 30; the first 500 pairs give depth 5
+	db, a, _ = make_scheme(tmp_path)
+	files = write_pair(tmp_path, "cap", [(a, 30, 16)])
+	run(tmp_path, files, db=db, max_reads=500, min_depth=1)
+	capped = tmp_path / "out" / "samples" / "cap_snps.txt"
+	assert 1 <= median_depth(capped) <= 10
+	settings = [l for l in comments(capped) if l.startswith("Typing settings:")][0]
+	assert settings.endswith(" max_reads=500")
+	(tmp_path / "out").rename(tmp_path / "out_capped")
+	run(tmp_path, files, db=db, max_reads=0)
+	assert median_depth(tmp_path / "out" / "samples" / "cap_snps.txt") >= 20, "0 maps every read"
+
+
+def test_max_reads_counts_single_reads_and_is_the_default(tmp_path):
+	db, _, b = make_scheme(tmp_path)
+	reads, _ = helpers.simulate_reads(b, 30, seed=17, length=2000, paired=False)
+	(tmp_path / "long.fq").write_text(reads)
+	run(tmp_path, [str(tmp_path / "long.fq")], db=db, platform="ont", max_reads=50, min_depth=1)
+	depth = median_depth(tmp_path / "out" / "samples" / "long_snps.txt")
+	assert 1 <= depth <= 10, "50 reads of 2 kb on 20 kb"
+	(tmp_path / "out").rename(tmp_path / "out_capped")
+	obj = run(tmp_path, [str(tmp_path / "long.fq")], db=db, platform="ont")
+	assert obj.typed == {"long": "B.3"}
+	settings = [l for l in comments(tmp_path / "out" / "samples" / "long_snps.txt") if l.startswith("Typing settings:")][0]
+	assert settings.endswith(" max_reads=300000")
+
+
+def test_a_result_made_with_another_max_reads_is_not_reused(tmp_path, caplog):
+	db, a, _ = make_scheme(tmp_path)
+	files = write_pair(tmp_path, "again", [(a, 30, 18)])
+	run(tmp_path, files, db=db, max_reads=500)
+	with caplog.at_level(logging.ERROR), pytest.raises(CanSNPer2Error):
+		run(tmp_path, files, db=db, max_reads=0)
+	assert "was made with a different database or settings" in caplog.text and "max_reads=500)" in caplog.text
+	again = run(tmp_path, files, db=db, max_reads=0, rerun=True)
+	assert again.typed == {"again": "A.3"}
+	assert median_depth(tmp_path / "out" / "samples" / "again_snps.txt") >= 20
+
+
+def make_two_reference_scheme(tmp_path):
+	'''the toy scheme with its B canSNPs on a second reference genome, REF2 (the same
+		sequence), so that each sample is mapped to two references at the same time'''
+	db, a, b = make_scheme(tmp_path)
+	conn = sqlite3.connect(db)
+	conn.execute("INSERT INTO snp_references (id, genome, strain) VALUES (6, 'REF2', 'second strain')")
+	conn.execute("UPDATE snp_annotation SET genome_i = 6 WHERE snp_id LIKE 'B.%'")
+	conn.commit()
+	conn.close()
+	shutil.copy(tmp_path / "refs" / "REF.fna", tmp_path / "refs" / "REF2.fna")
+	return db, a, b
+
+
+@pytest.mark.parametrize("threads, each", [(4, 2), (1, 1), (5, 2)])
+def test_the_threads_of_a_sample_are_divided_between_its_references(tmp_path, caplog, threads, each):
+	db, a, _ = make_two_reference_scheme(tmp_path)
+	with caplog.at_level(logging.DEBUG):
+		obj = run(tmp_path, write_pair(tmp_path, "t", [(a, 30, 19)]), db=db, threads=threads)
+	assert obj.typed == {"t": "A.3"}
+	mappings = [r.getMessage() for r in caplog.records if "minimap2" in r.getMessage() and "samtools sort" in r.getMessage()]
+	assert len(mappings) == 2, "one mapping per reference"
+	for message in mappings:
+		assert " -t {n} ".format(n=each) in message and "samtools sort -@ {n} ".format(n=each) in message
+
+
 def test_reads_and_assemblies_are_not_mixed_in_one_run(tmp_path):
 	db, a, _ = make_scheme(tmp_path)
 	files = write_pair(tmp_path, "r", [(a, 5, 9)])
@@ -189,11 +262,30 @@ def cli(tmp_path, *args):
 def test_command_line_reads(tmp_path):
 	db, a, _ = make_scheme(tmp_path)
 	files = write_pair(tmp_path, "c1", [(a, 30, 12)])
-	run = cli(tmp_path, "--database", db, *files, "--min_depth", "4", "--threads", "2")
+	run = cli(tmp_path, "--database", db, *files, "--min_depth", "4", "--threads", "2", "--max_reads", "2000")
 	assert run.returncode == 0, run.stderr
 	assert "c1: A.3" in run.stdout
 	settings = [l for l in comments(tmp_path / "out" / "samples" / "c1_snps.txt") if l.startswith("Typing settings:")][0]
-	assert "min_depth=4" in settings
+	assert "min_depth=4" in settings and settings.endswith(" max_reads=2000")
+
+
+def test_cansnper2_type_takes_max_reads(tmp_path):
+	import subprocess, sys
+	db, a, _ = make_scheme(tmp_path)
+	files = write_pair(tmp_path, "v1", [(a, 30, 20)])
+	run = subprocess.run([sys.executable, "-m", "CanSNPer2.cli", "type", "-d", db, *files, "--max-reads", "2000",
+		"--threads", "2", "--ref-dir", "refs", "--tmp-dir", "tmp", "-o", "out"], capture_output=True, text=True, cwd=str(tmp_path))
+	assert run.returncode == 0, run.stderr
+	assert "v1: A.3" in run.stdout
+	settings = [l for l in comments(tmp_path / "out" / "samples" / "v1_snps.txt") if l.startswith("Typing settings:")][0]
+	assert settings.endswith(" max_reads=2000")
+
+
+@pytest.mark.parametrize("value", ["-1", "many"])
+def test_max_reads_must_be_a_count(tmp_path, value):
+	db, _, _ = make_scheme(tmp_path)
+	run = cli(tmp_path, "--database", db, "--max_reads", value, "x.fq")
+	assert run.returncode == 2 and "max_reads" in run.stderr
 
 
 def test_command_line_samplesheet_without_query_arguments(tmp_path):

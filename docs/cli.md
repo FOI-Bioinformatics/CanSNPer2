@@ -66,9 +66,9 @@ usage: cansnper2 type [-h] [-d DB] [-o DIR] [--save-tree] [--no-snp-files]
                       [--platform {hifi,illumina,ont}] [--samplesheet FILE]
                       [--min-depth N] [--min-allele-fraction FRACTION]
                       [--min-mapq Q] [--min-baseq Q] [--mixed-sites N]
-                      [--threads N] [--local-references] [--local-rounds N]
-                      [--screen-reads N] [--fetch-local] [--log-dir DIR] [-v]
-                      [--debug] [--quiet]
+                      [--threads N] [--max-reads N] [--local-references]
+                      [--local-rounds N] [--screen-reads N] [--fetch-local]
+                      [--log-dir DIR] [-v] [--debug] [--quiet]
                       [query ...]
 
 Type assemblies or sequencing reads against a scheme database: each query is
@@ -162,8 +162,13 @@ Read typing options:
                         hifi 20)
   --mixed-sites N       number of mixed canSNP sites from which a sample is
                         flagged as possibly mixed (default: 3)
-  --threads N           threads for minimap2 and samtools sort, per reference
-                        (default: 4)
+  --threads N           threads for minimap2 and samtools sort, per sample;
+                        they are divided between the reference genomes the
+                        reads are mapped to at the same time, at least one
+                        each (default: 4)
+  --max-reads N         number of reads mapped per sample, the first ones in
+                        each read file; read pairs for paired-end reads; 0
+                        maps all reads (default: 300000 for all platforms)
   --local-references    map the reads again to the representative genome of
                         the scheme closest to the sample and read the canSNPs
                         at their positions in that genome (genomes in <ref-

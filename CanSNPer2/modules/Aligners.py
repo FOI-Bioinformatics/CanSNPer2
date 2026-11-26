@@ -207,6 +207,23 @@ class Mummer4(Aligner):
 		return ParseDelta(**kwargs)
 
 
+def is_gzip(path):
+	'''True when the file starts with the gzip magic bytes; False for a file that cannot be
+		read, which the mapping then reports'''
+	try:
+		with open(path, "rb") as handle:
+			return handle.read(2) == b"\x1f\x8b"
+	except OSError:
+		return False
+
+
+def threads_per_mapping(threads, mappings):
+	'''the threads of one mapping when the threads of a sample are divided between mappings
+		that run at the same time; at least one each, so more mappings than threads use more
+		threads than given'''
+	return max(1, int(threads) // max(1, int(mappings)))
+
+
 def write_sites_bed(path, snps):
 	'''the canSNP positions of one reference as a BED file for samtools mpileup -l; snps are
 		(snp_id, sequence, position, ancestral, derived) with 1-based positions'''
@@ -233,6 +250,12 @@ class ReadMapper(Aligner):
 		The three programs run as one bash command with pipefail, so a failure of minimap2
 		inside the pipe fails the alignment instead of leaving an empty pileup.
 
+		Only the first max_reads reads of each read file are mapped (read pairs when there are
+		two files; 0 maps all of them): head cuts each file in a process substitution, after
+		gzip -cd for a compressed one, so no shortened copy is written. The first reads of a
+		file from a sequencer come from the whole genome; a file sorted by position (converted
+		from a sorted BAM) does not, and needs max_reads 0.
+
 		Not one of the --aligner choices: CanSNPer2 uses it when the query files are reads.'''
 	name = "minimap2-reads"
 	program = "minimap2"
@@ -241,15 +264,17 @@ class ReadMapper(Aligner):
 	needs_sites = True
 
 	def __init__(self, path="", platform=DEFAULT_PLATFORM, threads=4, samtools="samtools",
-			min_mapq=None, min_baseq=None, min_depth=None, min_allele_fraction=None):
+			min_mapq=None, min_baseq=None, min_depth=None, min_allele_fraction=None, max_reads=None):
 		super(ReadMapper, self).__init__(path)
 		if platform not in PLATFORMS:
 			raise ValueError("Unknown platform {p}, choose one of: {known}".format(p=platform, known=", ".join(sorted(PLATFORMS))))
 		self.platform = platform
+		'''the threads of one sample; the run divides them between the references the sample is
+			mapped to at the same time (threads_per_mapping)'''
 		self.threads = int(threads)
 		self.samtools = samtools or "samtools"
 		self.given = {"min_mapq": min_mapq, "min_baseq": min_baseq, "min_depth": min_depth,
-				"min_allele_fraction": min_allele_fraction}
+				"min_allele_fraction": min_allele_fraction, "max_reads": max_reads}
 
 	def setting(self, key):
 		'''a threshold: the one given, else the default of the platform'''
@@ -258,20 +283,32 @@ class ReadMapper(Aligner):
 
 	def settings(self):
 		'''the settings that change a call, for the settings line of the result files'''
-		return "platform={p} min_depth={d} min_allele_fraction={f} min_mapq={q} min_baseq={b}".format(
+		return "platform={p} min_depth={d} min_allele_fraction={f} min_mapq={q} min_baseq={b} max_reads={n}".format(
 				p=self.platform, d=self.setting("min_depth"), f=self.setting("min_allele_fraction"),
-				q=self.setting("min_mapq"), b=self.setting("min_baseq"))
+				q=self.setting("min_mapq"), b=self.setting("min_baseq"), n=self.setting("max_reads"))
 
 	def available(self):
 		return shutil.which(self.executable()) is not None and shutil.which(self.samtools) is not None
 
-	def command(self, reference_file, query_file, output):
-		'''query_file is the read file, or the two files of paired-end reads'''
+	def read_input(self, path):
+		'''path as minimap2 is given it: the file itself, or the first max_reads FASTQ records of it
+			(4 lines each) through a bash process substitution'''
+		n = int(self.setting("max_reads"))
+		if n <= 0:
+			return shlex.quote(path)
+		if is_gzip(path):
+			return "<(gzip -cd {p} | head -n {lines})".format(p=shlex.quote(path), lines=4 * n)
+		return "<(head -n {lines} {p})".format(p=shlex.quote(path), lines=4 * n)
+
+	def command(self, reference_file, query_file, output, threads=None):
+		'''query_file is the read file, or the two files of paired-end reads; threads, when given,
+			replaces the threads of the sample for this one mapping'''
 		reads = [query_file] if isinstance(query_file, str) else list(query_file)
 		bam = output + ".bam"
 		q = shlex.quote
-		t = str(self.threads)
-		mapping = " ".join(q(a) for a in [self.executable(), "-a", "-x", PLATFORMS[self.platform]["preset"], "-t", t, reference_file] + reads)
+		t = str(self.threads if threads is None else int(threads))
+		mapping = " ".join([q(a) for a in [self.executable(), "-a", "-x", PLATFORMS[self.platform]["preset"], "-t", t, reference_file]]
+				+ [self.read_input(r) for r in reads])
 		sort = " ".join(q(a) for a in [self.samtools, "sort", "-@", t, "-o", bam, "-"])
 		index = " ".join(q(a) for a in [self.samtools, "index", bam])
 		pileup = " ".join(q(a) for a in [self.samtools, "mpileup", "-l", output + ".sites.bed", "-a", "-B", "-A", "-d", "0",

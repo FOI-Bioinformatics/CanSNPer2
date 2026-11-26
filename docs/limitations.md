@@ -68,6 +68,11 @@ typing evaluation on simulated reads, 5x Illumina coverage gave the assembly cal
 50 genomes. The ONT defaults were checked on simulated reads whose errors are close to random;
 systematic errors of real ONT reads, as at homopolymers, were not part of that evaluation.
 
+Only the first 300000 reads (read pairs) of a sample are mapped by default (`--max-reads`). For
+Illumina reads this limits the depth to about 45x on a 2 Mb genome with 2 x 150 base reads, and
+less on a larger genome. A read file sorted by position is covered only in part by its first
+reads; type such a file with `--max-reads 0`.
+
 ### Fragmented assemblies
 
 canSNPs in gaps between contigs have no data, and canSNPs within 25 bases of a contig or block
