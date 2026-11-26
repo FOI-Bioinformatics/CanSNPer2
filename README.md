@@ -47,7 +47,7 @@ reports which programs were found. Installation from source is described in
 ## Quick start
 
 Fetch a scheme (this builds the database `francisella_tularensis.db` and downloads its reference
-genomes into `references/`), then type assemblies (uncompressed FASTA) against it:
+genomes into `references/`), then type assemblies (FASTA, plain or gzip-compressed) against it:
 
 ```sh
 cansnper2 scheme get francisella_tularensis

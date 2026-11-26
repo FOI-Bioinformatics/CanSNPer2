@@ -260,10 +260,49 @@ def test_a_latin1_header_is_read(tmp_path):
     assert b"ACGT" in open(cleaned, "rb").read()
 
 
-def test_a_gzipped_query_is_refused(tmp_path):
+def test_a_gzipped_query_is_decompressed_for_the_aligner(tmp_path):
+    """assemblies are distributed gzip-compressed (NCBI .fna.gz) and were refused (#95)"""
     obj, path = check(tmp_path, gzip.compress(GENOME.encode()), "wb", "q.fasta.gz")
-    with pytest.raises(CanSNPer2Error, match="q.fasta.gz is gzip-compressed, decompress it first"):
+    cleaned = obj.clean_input_fasta(path, "query")
+    assert cleaned != path and os.path.dirname(cleaned) == obj.tmpdir
+    assert not cleaned.endswith(".gz")
+    assert open(cleaned).read() == GENOME
+
+
+def test_a_gzipped_query_is_cleaned_like_a_plain_one(tmp_path):
+    text = ">chr1 a\nAC-GT\n\nRYAC\n"
+    obj, plain = check(tmp_path, text)
+    expected = open(obj.clean_input_fasta(plain, "query")).read()
+    gz = write(tmp_path / "q2.fasta.gz", gzip.compress(text.encode()), "wb")
+    assert open(obj.clean_input_fasta(gz, "query")).read() == expected
+
+
+def test_a_truncated_gzipped_query_is_refused(tmp_path):
+    data = gzip.compress((GENOME * 20).encode())
+    obj, path = check(tmp_path, data[: len(data) // 2], "wb", "q.fasta.gz")
+    with pytest.raises(CanSNPer2Error, match="q.fasta.gz is a damaged or truncated gzip file"):
         obj.clean_input_fasta(path, "query")
+
+
+def test_a_gzipped_reference_is_still_refused(tmp_path):
+    """reference genomes are written by ref get, uncompressed; the reference checks read them as they are"""
+    obj, path = check(tmp_path, gzip.compress(GENOME.encode()), "wb", "REF.fna")
+    with pytest.raises(CanSNPer2Error, match="REF.fna is gzip-compressed, decompress it first"):
+        obj.clean_input_fasta(path, "ref")
+
+
+@pytest.mark.parametrize(
+    "name,sample",
+    [
+        ("x.fna.gz", "x"),
+        ("x.fasta.GZ", "x"),
+        ("GCA_1.1_ASM1v1_genomic.fna.gz", "GCA_1.1_ASM1v1_genomic"),
+        ("x.fna", "x"),
+    ],
+)
+def test_the_sample_name_drops_the_gz_ending_with_the_fasta_ending(tmp_path, name, sample):
+    obj, db = project(tmp_path, [])
+    assert obj.sample_name(str(tmp_path / name)) == sample
 
 
 @pytest.mark.parametrize(

@@ -3,8 +3,10 @@ CanSNPer2 module: A toolkit for SNP-typing using NGS data.
 Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 """
 
+import gzip
 import os
 import re
+import zlib
 import shutil
 import hashlib
 import datetime
@@ -735,32 +737,14 @@ class CanSNPer2(object):
 
     stage_for_mauve = stage_input
 
-    def clean_input_fasta(self, path, kind):
-        """Replace every sequence character that is not A/C/G/T (or their lowercase) with N before
-        anything is aligned: gaps ('-', '.', '*') made progressiveMauve fail with exitcode 6/11
-        (the gap retry used to replace dashes only after a failure, and could not see dashes it
-        could not "see", issue #28), and the ambiguous IUPAC codes (R,Y,M,K,S,W,B,D,H,V) can never
-        match the target base of a SNP, so replacing them with N is the honest call (issue #26).
-        Every replacement keeps the exact position of the base, so database SNP positions still
-        match, and an already clean file is returned unchanged.
-        Whitespace is not sequence: blank lines are dropped (progressiveMauve never returns on a
-        file that starts with one) and spaces or tabs inside a sequence line are removed. They
-        used to become N, which added bases and shifted every position after them.
-        """
-        keep = set("ACGTacgtn")
+    @staticmethod
+    def _read_fasta_lines(opener, path, keep):
+        """the header and sequence lines of a FASTA file as clean_input_fasta writes them, the
+        first word of every header, and whether a line was changed"""
         dirty = False
         lines = []
         names = []
-        with open(path, "rb") as raw:
-            start = raw.read(3)
-        if start[:2] == b"\x1f\x8b":
-            raise CanSNPer2Error("{path} is gzip-compressed, decompress it first".format(path=path))
-        if start == b"\xef\xbb\xbf":
-            dirty = True  ## a byte order mark is removed, aligners read it as part of the first header
-        """utf-8-sig drops a byte order mark, and bytes that are not UTF-8 (a latin-1 character in a header)
-			become U+FFFD instead of stopping the run with a decoding error; sequence characters
-			that are not ACGT become N below in any case"""
-        with open(path, encoding="utf-8-sig", errors="replace") as seq_in:
+        with opener(path, "rt", encoding="utf-8-sig", errors="replace") as seq_in:
             for line in seq_in:
                 if "\ufffd" in line:
                     dirty = True
@@ -779,6 +763,47 @@ class CanSNPer2(object):
                 if cleaned != bases:
                     dirty = True
                 lines.append(cleaned + "\n")
+        return lines, names, dirty
+
+    def clean_input_fasta(self, path, kind):
+        """Replace every sequence character that is not A/C/G/T (or their lowercase) with N before
+        anything is aligned: gaps ('-', '.', '*') made progressiveMauve fail with exitcode 6/11
+        (the gap retry used to replace dashes only after a failure, and could not see dashes it
+        could not "see", issue #28), and the ambiguous IUPAC codes (R,Y,M,K,S,W,B,D,H,V) can never
+        match the target base of a SNP, so replacing them with N is the honest call (issue #26).
+        Every replacement keeps the exact position of the base, so database SNP positions still
+        match, and an already clean file is returned unchanged.
+        Whitespace is not sequence: blank lines are dropped (progressiveMauve never returns on a
+        file that starts with one) and spaces or tabs inside a sequence line are removed. They
+        used to become N, which added bases and shifted every position after them.
+        A gzip-compressed query is read decompressed and always written to the temporary folder,
+        since the aligners read plain FASTA; reference genomes are refused compressed (#95).
+        """
+        keep = set("ACGTacgtn")
+        dirty = False
+        lines = []
+        names = []
+        with open(path, "rb") as raw:
+            compressed = raw.read(2) == b"\x1f\x8b"
+        if compressed and kind != "query":
+            raise CanSNPer2Error("{path} is gzip-compressed, decompress it first".format(path=path))
+        opener = gzip.open if compressed else open
+        try:
+            with opener(path, "rb") as raw:
+                start = raw.read(3)
+            if compressed or start == b"\xef\xbb\xbf":
+                dirty = True  ## a byte order mark is removed, aligners read it as part of the first header
+            """utf-8-sig drops a byte order mark, and bytes that are not UTF-8 (a latin-1 character in a header)
+				become U+FFFD instead of stopping the run with a decoding error; sequence characters
+				that are not ACGT become N below in any case"""
+            lines, names, changed = self._read_fasta_lines(opener, path, keep)
+        except (EOFError, zlib.error, gzip.BadGzipFile) as e:
+            raise CanSNPer2Error(
+                "{path} is a damaged or truncated gzip file ({e}); download or compress it again".format(
+                    path=path, e=e
+                )
+            )
+        dirty = dirty or changed
         """sequences are identified by the first word of their header (aligners, result files);
 			a query with two sequences of the same name gave bases and positions of the wrong
 			contig. References are checked once per run in check_reference_file."""
@@ -802,16 +827,20 @@ class CanSNPer2(object):
                 )
         if not dirty:
             return path
-        cleaned_path = os.path.join(
-            self.tmpdir, "cleaned_{kind}_{name}".format(kind=kind, name=os.path.basename(path))
-        )
+        name = os.path.basename(path)
+        if compressed and name.lower().endswith(".gz"):
+            name = name[:-3]
+        cleaned_path = os.path.join(self.tmpdir, "cleaned_{kind}_{name}".format(kind=kind, name=name))
         with open(cleaned_path, "w") as seq_out:
             seq_out.write("".join(lines))
-        logger.info(
-            "Replaced characters that are not ACGT with N and removed whitespace in {name} before alignment (gaps, ambiguous nucleotides and blank lines, issues #26, #28)".format(
-                name=os.path.basename(path)
+        if changed or not compressed:
+            logger.info(
+                "Replaced characters that are not ACGT with N and removed whitespace in {name} before alignment (gaps, ambiguous nucleotides and blank lines, issues #26, #28)".format(
+                    name=os.path.basename(path)
+                )
             )
-        )
+        if compressed:
+            logger.info("Decompressed {name} for the alignment".format(name=os.path.basename(path)))
         return cleaned_path
 
     def check_reference_file(self, path, name):
@@ -1269,11 +1298,14 @@ class CanSNPer2(object):
         return SNPS, SNP_info, called_snps
 
     def sample_name(self, path):
-        """the sample name of a query file: its file name without the last extension; for reads
-        the name ReadInput gave the sample"""
+        """the sample name of a query file: its file name without the last extension, and without
+        .gz before it; for reads the name ReadInput gave the sample"""
         if path in self.read_samples:
             return self.read_samples[path].name
-        return os.path.basename(path).rsplit(".", 1)[0]
+        name = os.path.basename(path)
+        if name.lower().endswith(".gz"):  ## x.fna.gz is sample x, as x.fna (#95)
+            name = name[:-3]
+        return name.rsplit(".", 1)[0]
 
     def is_read(self, query):
         """True when the query is a read sample"""

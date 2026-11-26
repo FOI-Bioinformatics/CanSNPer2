@@ -188,6 +188,16 @@ jobs:
           # the sample is named after the read files; final SNP, support and path must agree
           diff <(grep -v '^#' results/snps_summary.txt | cut -f2-) <(grep -v '^#' results_reads/snps_summary.txt | cut -f2-)
 
+      - name: Type the gzip-compressed reference genome with each aligner, same call
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p gz
+          gzip -c query_Ames.fna > gz/query_Ames.fna.gz
+          for aligner in minimap2 progressiveMauve mummer4; do
+            cansnper2 type -d ba.db --ref-dir references -o results_gz_$aligner gz/query_Ames.fna.gz --summary --aligner $aligner
+            diff <(grep -v '^#' results/snps_summary.txt) <(grep -v '^#' results_gz_$aligner/snps_summary.txt)
+          done
+
       - name: Type the reference genome with MUMmer4, same call as minimap2
         working-directory: ${{ runner.temp }}
         run: |
