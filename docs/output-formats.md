@@ -80,7 +80,7 @@ After the table follow lines that start with `# `, so that a reader that skips c
 | Line | Content |
 |---|---|
 | `# SNP path:` | The SNP path, `;`-separated, from the root to the final SNP. For a sample that was not called, all derived canSNPs, or `NA`. |
-| `# Final SNP:` | The final SNP and `found/depth:`, the number of derived canSNPs on the path and the depth of the final node in the tree (the number of nodes from the top of the tree to it, both included, label nodes counted). `# Final SNP: NA` for a sample that was not called. See the note below the table. |
+| `# Final SNP:` | The final SNP, `found/depth:` and `found/expected:`. `found` is the number of derived canSNPs on the path; `depth` is the depth of the final node in the tree (the number of nodes from the top of the tree to it, both included, label nodes counted); `found/expected` is the support. `# Final SNP: NA` for a sample that was not called. See the note below the table. |
 | `# Reads:` | Read samples only; see [Reads line](#reads-line). |
 | `# Query file:` | Absolute path of the query file (both files of a read pair, space-separated) and `sha256:` of the query. For a read pair this is the sha256 of the two file sha256 values joined by a space. |
 | `# Typing settings:` | `database sha256:` of the database file and the settings that change a call; see [Typing settings line](#typing-settings-line). |
@@ -90,10 +90,11 @@ After the table follow lines that start with `# `, so that a reader that skips c
 The support of a call, `found/expected` (see
 [interpreting-results.md](interpreting-results.md#support)), counts the canSNPs on the path, and
 label nodes have none (see [method.md](method.md#label-nodes)). In a tree without label nodes,
-which includes every verified scheme of CanSNPer2-data, the depth equals `expected`, so the
-`# Final SNP:` line gives the support. In a tree with label nodes the depth is larger; the
-support is then the `Support` column of `summary.html` and the `support` column of
-`snps_summary.txt`.
+which includes every verified scheme of CanSNPer2-data, the depth equals `expected`. In a tree
+with label nodes the depth is larger. `found/depth:` is kept in the line for scripts that read it;
+`found/expected:` is the value given in the `Support` column of `summary.html` and the `support`
+column of `snps_summary.txt`. Result files written before `found/expected:` was added give only
+`found/depth:`; when such a file is reused, its `found/depth` is taken as the support.
 
 Excerpt of `samples/GCA_000807905.1_snps.txt`:
 
@@ -105,7 +106,7 @@ B.1	OSU18	CP000437.1	1710718	JUJV01000058.1	9619	C	T	T
 ...
 B.136	FSC200	CP003862.1	350028	JUJV01000122.1	8867	C	T	T	
 # SNP path: T/N.1;T.1;B.1;B.2;B.3;B.5;B.6;B.7;B.133;B.81;B.136
-# Final SNP: B.136 found/depth: 11/11
+# Final SNP: B.136 found/depth: 11/11 found/expected: 11/11
 # Query file: /data/project/genomes/GCA_000807905.1.fasta sha256:57f4df3e9755607532bcf142ebdd9c2cbb4b06ddbe296fe19473887531f76849
 # Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0 aligner=minimap2
 ```
@@ -230,9 +231,16 @@ GCA_000746455.1	A.I.14	9/9	T/N.1;T.1;A/M.1;A.1;A.I.1;A.I.7;A.I.12;A.I.2;A.I.14
 GCA_000807905.1	B.136	11/11	T/N.1;T.1;B.1;B.2;B.3;B.5;B.6;B.7;B.133;B.81;B.136
 ```
 
-A `# Note:` line follows when the scheme is not verified or the database was changed after it
-was built. For read runs the `# Aligner:` line reads `minimap2-reads`; the read thresholds are
-recorded in the `# Typing settings:` line of each `<sample>_snps.txt`, not here.
+For read runs the `# Aligner:` line reads `minimap2-reads`, and a `# Read settings:` line per
+platform of the run follows the `# Typing settings:` line, with the read thresholds as the
+`# Typing settings:` line of each `<sample>_snps.txt` gives them:
+
+```text
+# Read settings: platform=illumina min_depth=5 min_allele_fraction=0.8 min_mapq=20 min_baseq=20 max_reads=300000
+```
+
+With `--local-references`, `local_references=on local_rounds=<n>` is added to it. A `# Note:` line
+follows when the scheme is not verified or the database was changed after it was built.
 
 `--summary` also writes `summary_tree.html`, the scheme tree with the final SNPs of all samples
 marked.
@@ -259,13 +267,15 @@ The log files are written to `--log-dir` (default `logs`, relative to `--workdir
 
 The other verbs name their log after the verb in the same way, in their own `--log-dir`
 (default `logs` in the current folder): `cansnper2-db-create-<date>.log` (and `db-import`,
-`db-export`, `db-info`, `db-convert`, `db-modify`, `db-remove`), `cansnper2-scheme-get-<date>.log`
+`db-export`, `db-convert`, `db-modify`, `db-remove`), `cansnper2-scheme-get-<date>.log`
 and `cansnper2-ref-get-<date>.log`. `-v`, `--debug` and `--quiet` set their level in the same way.
-`cansnper2 scheme list` writes no log, and `cansnper2 selftest` none either.
+`cansnper2 db info` writes `cansnper2-db-info-<date>.log` only when `--log-dir` is given, since it
+only reads the database. `cansnper2 scheme list` writes no log, and `cansnper2 selftest` none
+either.
 
 Error messages are printed to standard error; results, listings and progress messages to
 standard output.
-`scheme list` and `selftest` write no log file.
+`scheme list` and `selftest` write no log file, and `db info` writes one only with `--log-dir`.
 
 ## Temporary files
 

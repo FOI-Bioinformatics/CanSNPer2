@@ -1715,6 +1715,18 @@ class CanSNPer2(object):
                     "snp_files": bool(self.export),
                 }
             )
+            if self.read_mappers:
+                """the read thresholds change a call as much as the settings above: one line per
+					platform of the run, as the settings line of the result files gives them (#99)"""
+                info["read_settings"] = [
+                    mapper.settings()
+                    + (
+                        " local_references=on local_rounds={n}".format(n=self.local_rounds)
+                        if self.local_references
+                        else ""
+                    )
+                    for _platform, mapper in sorted(self.read_mappers.items())
+                ]
             self._run_info = info
         return self._run_info
 
@@ -1726,14 +1738,17 @@ class CanSNPer2(object):
         return None
 
     def read_result_support(self, resultfile):
-        """the support of the call of a result file, "found/depth" as its "Final SNP:" line
-        gives it, NA when the line has none (a sample that was not called)"""
+        """the support of the call of a result file, "found/expected" of its "Final SNP:" line,
+        NA when the line has none (a sample that was not called). Result files before 2.6.0
+        give only "found/depth", which is read instead; it differs from the support when the
+        path has label nodes"""
         if os.path.isfile(resultfile):
             for row in self.result_trailer(resultfile):
                 if row.startswith("Final SNP:") and "found/depth:" in row:
                     if row.split(":", 1)[1].split()[0] == "NA":
                         return "NA"
-                    return row.split("found/depth:", 1)[1].split()[0]
+                    key = "found/expected:" if "found/expected:" in row else "found/depth:"
+                    return row.split(key, 1)[1].split()[0]
         return "NA"
 
     def read_result_file(self, resultfile):
@@ -2152,6 +2167,11 @@ class CanSNPer2(object):
                         final_line = "Final SNP: {snp} found/depth: {found}/{depth}".format(
                             snp=SNP, depth=int(final_snp[0]), found=final_snp[2][1]
                         )
+                        """found/depth counts label nodes in the depth; the support of the call,
+							found/expected, follows it, so that scripts that read found/depth keep
+							working (#99)"""
+                        if support != "NA":
+                            final_line += " found/expected: {support}".format(support=support)
                         path_text = ";".join(path_names)
                         logger.info(final_line)
                     else:

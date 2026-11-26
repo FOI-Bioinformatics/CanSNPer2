@@ -51,14 +51,12 @@ def examples(*lines):
     return "examples:\n" + "\n".join("  " + line for line in lines)
 
 
-def add_logging_options(parser, logs_dest, logs_default):
+def add_logging_options(parser, logs_dest, logs_default, logs_help="folder for the log files"):
     """-v/--debug/--quiet and the log folder, the same three levels the old commands
     have (--supress becomes --quiet); logs_dest and logs_default are the internal
     name and default of the log folder of this command"""
     group = parser.add_argument_group("Logging options")
-    group.add_argument(
-        "--log-dir", dest=logs_dest, metavar="DIR", default=logs_default, help="folder for the log files"
-    )
+    group.add_argument("--log-dir", dest=logs_dest, metavar="DIR", default=logs_default, help=logs_help)
     group.add_argument(
         "-v", "--verbose", action="store_const", const=logging.INFO, help="print progress information"
     )
@@ -536,7 +534,12 @@ def add_db_subparsers(subparsers):
         formatter_class=HelpFormatter,
     )
     info.add_argument("-d", "--database", metavar="DB", help="the database; required")
-    add_logging_options(info, logs_dest="logs", logs_default="logs")
+    add_logging_options(
+        info,
+        logs_dest="logs",
+        logs_default=None,
+        logs_help="folder for a log file; without it, db info writes no log file",
+    )
     parsers["db info"] = info
 
     export = db_sub.add_parser(

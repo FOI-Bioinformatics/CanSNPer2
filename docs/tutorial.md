@@ -158,7 +158,7 @@ A.II.2	SCHUS4.2	AJ749949.2	201094	CP000608.1	1790280	C	T	T
 A.II.6	SCHUS4.2	AJ749949.2	29478	CP000608.1	114370	C	T	T	
 B.97	FSC200	CP003862.1	1282065	CP000608.1	1352237	G	A	A	
 # SNP path: T/N.1;T.1;A/M.1;A.1;A.II.1;A.II.2;A.II.6
-# Final SNP: A.II.6 found/depth: 7/7
+# Final SNP: A.II.6 found/depth: 7/7 found/expected: 7/7
 # Query file: .../genomes/WY96-3418.fna sha256:2978cb107c98a0d8f893abf8bd786dde5da7af8d3e2f8475857e289c4c646dd8
 # Typing settings: database sha256:f3fc3d4822ae378ebb5922afcb3c41a311c1ac9d0102dc9395f508a02fa104a2 min_required_hits=3 strictness=0.7 mask=0 aligner=minimap2
 ```
@@ -176,10 +176,10 @@ Line by line:
 - `B.97`: a derived canSNP on another branch, defined on the reference genome FSC200. It is the
   reason for the `review` status in step 5.
 - `# SNP path`: the derived canSNPs from the root to the final SNP.
-- `# Final SNP: A.II.6 found/depth: 7/7`: the final SNP and its support, 7 derived canSNPs out
-  of the 7 canSNPs on the path. (The second number is the depth of the node in the tree, which
-  equals the number of canSNPs on the path in the published schemes; see
-  [output-formats.md](output-formats.md#per-sample-cansnp-files).)
+- `# Final SNP: A.II.6 found/depth: 7/7 found/expected: 7/7`: the final SNP and its support
+  (`found/expected`), 7 derived canSNPs out of the 7 canSNPs on the path. (`found/depth` gives the
+  depth of the node in the tree instead, which equals the number of canSNPs on the path in the
+  published schemes; see [output-formats.md](output-formats.md#per-sample-cansnp-files).)
 - `# Query file`: the input file and its SHA-256 checksum.
 - `# Typing settings`: the SHA-256 of the database and the settings that affect the call. A
   later run into the same output folder reuses this result when the input, the database and
@@ -214,7 +214,7 @@ each reference genome with minimap2 and counted the bases at the canSNP position
 
 ```text
 # SNP path: T/N.1;T.1;B.1;B.2;B.3;B.5;B.12;B.72;B.13;B.26;B.42;B.168;B.66;B.33;B.103
-# Final SNP: B.103 found/depth: 15/15
+# Final SNP: B.103 found/depth: 15/15 found/expected: 15/15
 # Reads: platform=illumina files=2 sites_with_reads=328/328 median_depth=50 mixed_sites=0
 ```
 

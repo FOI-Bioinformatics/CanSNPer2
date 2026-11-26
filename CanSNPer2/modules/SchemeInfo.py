@@ -164,6 +164,8 @@ def describe(info):
     ]
     origin = info.get("source") or ""
     ref, commit = info.get("ref"), info.get("commit")
+    if ref and commit and re.fullmatch("[0-9a-f]{7,40}", ref) and commit.partition("+")[0].startswith(ref):
+        ref = None  ## the ref is the commit itself (scheme get --branch <commit>): named once below
     if ref:
         origin = "{origin} {ref}".format(origin=origin, ref=ref).strip()
     if commit and commit != "unknown":

@@ -84,7 +84,7 @@ Options that keep their spelling: `-o`/`--outdir`, `--summary`, `--workdir`, `--
   written to `<outdir>` itself. `summary.html` and the files of `--summary` stay in `<outdir>`.
   The result files are described in [output-formats.md](output-formats.md).
 - The log files are named after the verb, for example `logs/cansnper2-type-Nov-25-2026.log` or
-  `logs/cansnper2-db-info-Nov-25-2026.log`. Up to 2.4.0 they were named
+  `logs/cansnper2-db-create-Nov-25-2026.log`. Up to 2.4.0 they were named
   `CanSNPer2-<date>.log`, `CanSNPer2-database-<date>.log` and `CanSNPer2-download-<date>.log`. A
   second log of the same verb on the same day has the time added as `-HHMM` (up to 2.4.0,
   `-HH:MM`).

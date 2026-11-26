@@ -461,7 +461,8 @@ options:
   -d, --database DB  the database; required
 
 Logging options:
-  --log-dir DIR      folder for the log files (default: logs)
+  --log-dir DIR      folder for a log file; without it, db info writes no log
+                     file
   -v, --verbose      print progress information
   --debug            print debug information, and the traceback of an
                      unexpected error
