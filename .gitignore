@@ -17,3 +17,5 @@ logs
 references
 .commit-msg
 .fix-backups
+.coverage
+.coverage.*

@@ -31,6 +31,10 @@ dependencies = []
 [project.optional-dependencies]
 test = ["pytest"]
 
+[dependency-groups]
+# the ruff version that CI runs; install with pip install --group lint (pip 25.1 or later)
+lint = ["ruff==0.17.6"]
+
 [project.urls]
 Homepage = "https://github.com/FOI-Bioinformatics/CanSNPer2"
 Documentation = "https://github.com/FOI-Bioinformatics/CanSNPer2/tree/master/docs"
@@ -61,3 +65,19 @@ indent-style = "space"
 # (zip(strict=), a change of behavior where lengths differ).
 select = ["E4", "E7", "E9", "F", "W", "B"]
 ignore = ["E402", "E731", "E741", "B904", "B905"]
+
+[tool.coverage.run]
+# the test suite runs cansnper2 as a subprocess and in forked worker processes: both are
+# measured, each in its own data file, combined with coverage combine
+source = ["CanSNPer2"]
+parallel = true
+patch = ["subprocess"]
+concurrency = ["multiprocessing", "thread"]
+sigterm = true
+
+[tool.coverage.paths]
+# the tests import the installed package, and the subprocess tests the checkout
+source = ["CanSNPer2", "*/site-packages/CanSNPer2"]
+
+[tool.coverage.report]
+skip_empty = true
