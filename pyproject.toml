@@ -1,0 +1,47 @@
+[build-system]
+# 77 is the first setuptools that reads license as an SPDX expression with license-files
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "CanSNPer2"
+# read from CanSNPer2/__init__.py without importing the package
+dynamic = ["version"]
+description = "Canonical SNP typing of bacterial genomes from assemblies or sequencing reads"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "David Sundell", email = "david.sundell@foi.se" }]
+keywords = ["Bioinformatics", "SNP-typing", "sequence-data"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.11"
+# no third party runtime imports: the tree is written as a self-contained HTML viewer
+# (modules/NewickTree.py), so ete3 and its imports are not needed. The external programs
+# (minimap2, progressiveMauve, MUMmer4, samtools) are not Python packages; see
+# docs/installation.md
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/FOI-Bioinformatics/CanSNPer2"
+Documentation = "https://github.com/FOI-Bioinformatics/CanSNPer2/tree/master/docs"
+Issues = "https://github.com/FOI-Bioinformatics/CanSNPer2/issues"
+Changelog = "https://github.com/FOI-Bioinformatics/CanSNPer2/blob/master/CHANGELOG.md"
+
+[project.scripts]
+cansnper2 = "CanSNPer2.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "CanSNPer2.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["CanSNPer2*"]

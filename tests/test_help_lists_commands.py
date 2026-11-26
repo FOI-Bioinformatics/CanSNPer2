@@ -23,12 +23,26 @@ def help_output(*args):
 	return run.stdout
 
 
+def project():
+	import tomllib
+	with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
+		return tomllib.load(f)["project"]
+
+
 def test_only_cansnper2_is_installed():
-	'''the console scripts of setup.py: the old commands were replaced in 2.6.0'''
-	with open(os.path.join(ROOT, "setup.py")) as f:
-		entry_points = re.search(r"console_scripts['\"]?\s*:\s*\[(.*?)\]", f.read(), re.S).group(1)
-	scripts = re.findall(r"['\"]([A-Za-z0-9_-]+)=", entry_points)
-	assert scripts == ["cansnper2"], "setup.py installs {0}".format(scripts)
+	'''the console scripts of pyproject.toml: the old commands were replaced in 2.6.0'''
+	assert project()["scripts"] == {"cansnper2": "CanSNPer2.cli:main"}
+
+
+def test_the_python_versions_agree():
+	'''requires-python, the version classifiers and the CI matrix name the same versions'''
+	meta = project()
+	classifiers = [c.rsplit(" :: ", 1)[1] for c in meta["classifiers"]
+		if re.fullmatch(r"Programming Language :: Python :: 3\.\d+", c)]
+	assert meta["requires-python"] == ">=" + classifiers[0]
+	with open(os.path.join(ROOT, ".github", "workflows", "ci.yml")) as f:
+		matrix = re.search(r"python-version:\s*\[(.*?)\]", f.read()).group(1)
+	assert re.findall(r"[\d.]+", matrix) == classifiers
 
 
 def test_the_help_names_every_verb():
