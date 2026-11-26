@@ -127,12 +127,13 @@ B.36	OSU18	CP000437.1	557870	N/A	N/A	G	T	N/A
 ### Typing settings line
 
 The `# Typing settings:` line holds `database sha256:<sha256>`, `min_required_hits`, `strictness`
-and `mask`. For assemblies it adds `aligner`; for read samples it adds `platform`, `min_depth`, `min_allele_fraction`, `min_mapq`
-and `min_baseq` (the values used, whether given or taken from the platform defaults), and with
+and `mask`. For assemblies it adds `aligner`; for read samples it adds `platform`, `min_depth`, `min_allele_fraction`, `min_mapq`,
+`min_baseq` and `max_reads` (the values used, whether given or taken from the platform defaults;
+`max_reads=0` means that all reads were mapped), and with
 `--local-references` also `local_references=on` and `local_rounds`.
 
 ```text
-# Typing settings: database sha256:f3fc3d48...a104a2 min_required_hits=3 strictness=0.7 mask=0 platform=illumina min_depth=5 min_allele_fraction=0.8 min_mapq=20 min_baseq=20
+# Typing settings: database sha256:f3fc3d48...a104a2 min_required_hits=3 strictness=0.7 mask=0 platform=illumina min_depth=5 min_allele_fraction=0.8 min_mapq=20 min_baseq=20 max_reads=300000
 ```
 
 ### Reads line

@@ -14,7 +14,7 @@ import statistics
 logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
-from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, write_sites_bed
+from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, threads_per_mapping, write_sites_bed
 from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
 from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
 from CanSNPer2.modules.LiftOver import lift
@@ -153,8 +153,10 @@ class CanSNPer2(object):
 		self.read_mappers = {}
 		self.platform = kwargs.get("platform") or DEFAULT_PLATFORM
 		self.samplesheet = kwargs.get("samplesheet")
+		'''threads per sample, divided between the references a sample is mapped to at the same time'''
 		self.threads = int(kwargs.get("threads") or 4)
-		self.read_options = {key: kwargs.get(key) for key in ("min_mapq", "min_baseq", "min_depth", "min_allele_fraction")}
+		'''max_reads: reads (read pairs) mapped per sample, None for the default of the platform'''
+		self.read_options = {key: kwargs.get(key) for key in ("min_mapq", "min_baseq", "min_depth", "min_allele_fraction", "max_reads")}
 		'''a second round of read typing against the genome of the scheme closest to the sample
 			(LocalReferences): off unless asked for'''
 		self.local_references = bool(kwargs.get("local_references", False))
@@ -656,8 +658,11 @@ class CanSNPer2(object):
 		names = []     # (reference, query) of each command
 		if len(references) == 0:	## If specific references are not given fetch references from the reference folder
 			references = self.get_references()
+		threads = None
 		if self.is_read(query):
 			query_file = tuple(self.not_an_option(f) for f in self.query_files(query))
+			'''the reads are mapped to all references at the same time; they share the threads of the sample'''
+			threads = threads_per_mapping(self.aligner.threads, len(references))
 		else:
 			query_file = self.not_an_option(self.stage_input(self.clean_input_fasta(query,"query"),"query"))
 		for ref in references:	  ## For each reference in the reference folder align to query
@@ -672,7 +677,10 @@ class CanSNPer2(object):
 			if not self.skip_alignment or os.path.isfile(ref_path):
 				self.check_reference_file(ref_path, ref_name)
 			ref_file = self.not_an_option(self.stage_input(self.clean_input_fasta("{refdir}/{ref}".format(refdir=self.refdir, ref=ref),"ref"),"ref"))
-			commands.append(self.aligner.command(ref_file, query_file, output))
+			if threads is None:
+				commands.append(self.aligner.command(ref_file, query_file, output))
+			else:
+				commands.append(self.aligner.command(ref_file, query_file, output, threads=threads))
 			if not self.skip_alignment:
 				self.aligner.prepare(ref_file, query_file, output)
 				if getattr(self.aligner, "needs_sites", False):
@@ -1043,6 +1051,11 @@ class CanSNPer2(object):
 			if sample.platform not in self.read_mappers:
 				self.read_mappers[sample.platform] = ReadMapper(platform=sample.platform, threads=self.threads, **self.read_options)
 		self.aligner = self.read_mappers[samples[0].platform]
+		for platform, mapper in sorted(self.read_mappers.items()):
+			max_reads = int(mapper.setting("max_reads"))
+			logger.info("{p} reads: {n} of each sample are mapped, with {t} thread(s) per sample".format(p=platform,
+					n="the first {m} reads (read pairs for paired-end reads)".format(m=max_reads) if max_reads > 0 else "all reads",
+					t=mapper.threads))
 		if self.mask:
 			logger.warning("--mask is not used for reads: it leaves out canSNPs near the ends of assembly alignments, while read ends are filtered by base quality")
 		return [sample.files[0] for sample in samples]
@@ -1093,8 +1106,11 @@ class CanSNPer2(object):
 				logger.info("{s}: no local reference below {call}".format(s=sample.name, call=call))
 				break
 			def screen_fn(genomes):
+				'''the screen maps fewer reads than the typing, not more'''
+				max_reads = int(mapper.setting("max_reads"))
+				n_reads = min(self.screen_reads, max_reads) if max_reads > 0 else self.screen_reads
 				return screen(sample.files, genomes, preset=PLATFORMS[mapper.platform]["preset"],
-						n_reads=self.screen_reads, tmpdir=self.tmpdir, threads=mapper.threads, minimap2=mapper.executable())
+						n_reads=n_reads, tmpdir=self.tmpdir, threads=mapper.threads, minimap2=mapper.executable())
 			local, steps = descend(database, call, self.refdir, site_rows, screen_fn, fetch=fetcher)
 			if local is None:
 				logger.info("{s}: the screened reads matched none of the local references below {call}".format(s=sample.name, call=call))

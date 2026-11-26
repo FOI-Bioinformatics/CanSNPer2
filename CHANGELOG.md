@@ -15,6 +15,9 @@ Git history.
   reference genomes with minimap2 and the bases at the canSNP positions are counted with samtools.
   Paired files are grouped by name; a samplesheet can be given with `--samplesheet`. Per-site read
   counts are written to `<sample>_site_counts.tsv`, and samples with mixed sites are flagged.
+  The first 300000 reads (read pairs for paired-end reads) of each sample are mapped
+  (`--max-reads`, 0 for all reads). `--threads` is the number of threads per sample, divided
+  between the reference genomes the reads are mapped to at the same time.
 - Local references for read typing (`--local-references`): the reads are mapped again to the
   representative genome of the scheme closest to the sample, and the canSNPs are read at their
   positions in that genome. Representative genomes are stored in the database from the genomes

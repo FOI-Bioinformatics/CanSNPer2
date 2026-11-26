@@ -177,7 +177,8 @@ def build_parser():
 	read_options.add_argument('--local_rounds',	type=positive_int, default=2,			help="With --local_references: at most this many rounds against local references (default 2)")
 	read_options.add_argument('--fetch_local',	action='store_true',								help="With --local_references: download the representative genomes the choice of the local reference needs and that are not in <refdir>/local yet (from NCBI, while typing); by default typing never downloads")
 	read_options.add_argument('--screen_reads',	type=positive_int, default=100000,		help="With --local_references: reads of each file mapped to the candidate genomes to choose the local reference (default 100000)")
-	read_options.add_argument('--threads',		type=positive_int, default=4,			help="Threads of minimap2 and samtools sort for each reference (default 4)")
+	read_options.add_argument('--threads',		type=positive_int, default=4,			help="Threads of minimap2 and samtools sort per sample, divided between the references the reads are mapped to at the same time, at least one each (default 4)")
+	read_options.add_argument('--max_reads',		type=non_negative_int, default=None,	help="Reads mapped per sample, the first ones of each read file; read pairs for paired-end reads; 0 maps all reads (default 300000)")
 
 	'''Remove the two below when script is complete, possibly keep as hidden for debug'''
 	run_options.add_argument('--skip_alignment', '--skip_mauve', dest='skip_alignment',	action='store_true', 	help="Do not align, read the alignments already in --tmpdir (--skip_mauve is the old name)")
@@ -314,6 +315,7 @@ def run_command(args, parser):
 									min_baseq=args.min_baseq,
 									mixed_sites=args.mixed_sites,
 									threads=args.threads,
+									max_reads=args.max_reads,
 									local_references=args.local_references,
 									local_rounds=args.local_rounds,
 									screen_reads=args.screen_reads,

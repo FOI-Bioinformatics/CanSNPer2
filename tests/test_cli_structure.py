@@ -185,7 +185,7 @@ import shutil
 import sqlite3
 
 READ_OPTIONS = ["--platform", "--samplesheet", "--min-depth", "--min-allele-fraction", "--min-mapq",
-	"--min-baseq", "--mixed-sites", "--threads", "--local-references", "--local-rounds",
+	"--min-baseq", "--mixed-sites", "--threads", "--max-reads", "--local-references", "--local-rounds",
 	"--screen-reads", "--fetch-local"]
 GENOMES = "genome\tnode\trole\nGCA_000000002.1\tA.2\trepresentative\nGCA_000000003.1\tB.1\trepresentative\n"
 

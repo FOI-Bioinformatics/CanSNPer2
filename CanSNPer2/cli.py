@@ -215,7 +215,14 @@ def add_read_options(parser):
 		help="number of mixed canSNP sites from which a sample is flagged as "
 			"possibly mixed")
 	reads.add_argument('--threads', metavar='N', type=typing_command.positive_int, default=4,
-		help="threads for minimap2 and samtools sort, per reference")
+		help="threads for minimap2 and samtools sort, per sample; they are divided "
+			"between the reference genomes the reads are mapped to at the same time, "
+			"at least one each")
+	reads.add_argument('--max-reads', dest='max_reads', metavar='N',
+		type=typing_command.non_negative_int, default=None,
+		help="number of reads mapped per sample, the first ones in each read file; "
+			"read pairs for paired-end reads; 0 maps all reads (default: 300000 for "
+			"all platforms)")
 	reads.add_argument('--local-references', dest='local_references',
 		action='store_true',
 		help="map the reads again to the representative genome of the scheme "

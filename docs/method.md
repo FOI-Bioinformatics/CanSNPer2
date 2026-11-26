@@ -174,7 +174,7 @@ For each reference genome the following runs as one `bash -o pipefail` command, 
 failure of any step fails the sample:
 
 ```text
-minimap2 -a -x <preset> -t <threads> <reference> <reads...>
+minimap2 -a -x <preset> -t <threads> <reference> <(head -n <4 x max-reads> <reads>)...
   | samtools sort -@ <threads> -o <out>.bam -
 samtools index <out>.bam
 samtools mpileup -l <out>.sites.bed -a -B -A -d 0 -q <min-mapq> -Q <min-baseq> -o <out> <out>.bam
@@ -187,19 +187,33 @@ pairs that are not properly paired, which are frequent against a distant referen
 removes the depth limit; `-a` writes a line for every position, also without reads. Reads below
 `--min-mapq` and bases below `--min-baseq` are not counted. Secondary, QC-failed and
 duplicate-flagged reads are excluded by the `mpileup` defaults, and a base covered by both reads
-of a pair is counted once. `--threads` (default 4) sets the threads of minimap2 and
-`samtools sort` for each reference.
+of a pair is counted once.
+
+Only the first `--max-reads` reads of each read file are mapped (default 300000; for paired-end
+reads, 300000 read pairs). Each file is cut with `head` in a process substitution, after
+`gzip -cd` when it is compressed, so no shortened copy is written to disk. The first reads of a
+file written by a sequencer are distributed over the whole genome. A file sorted by position,
+such as one converted from a sorted BAM file, is not; for such a file the first reads cover only
+part of the genome, and `--max-reads 0` maps all reads. For 2 x 150 base reads, 300000 read pairs
+correspond to about 90 Mb, or 45x on a 2 Mb genome. For long reads the same number of reads is
+usually the whole run.
+
+`--threads` (default 4) is the number of threads for one sample. A sample is mapped to all
+reference genomes of the scheme at the same time, and the threads are divided between these
+mappings, at least one each: with 4 threads and the five reference genomes of
+`francisella_tularensis`, each mapping uses one thread for minimap2 and for `samtools sort`. A
+mapping to a local reference runs alone and uses all threads.
 
 ### Platform defaults
 
 `--platform` sets the minimap2 preset and the default thresholds (`ParsePileup.PLATFORMS`).
 Options given on the command line replace the defaults.
 
-| `--platform` | minimap2 preset | `--min-mapq` | `--min-baseq` | `--min-depth` | `--min-allele-fraction` |
-|---|---|---|---|---|---|
-| `illumina` (default) | `sr` | 20 | 20 | 5 | 0.8 |
-| `ont` | `map-ont` | 20 | 10 | 5 | 0.7 |
-| `hifi` | `map-hifi` | 20 | 20 | 5 | 0.8 |
+| `--platform` | minimap2 preset | `--min-mapq` | `--min-baseq` | `--min-depth` | `--min-allele-fraction` | `--max-reads` |
+|---|---|---|---|---|---|---|
+| `illumina` (default) | `sr` | 20 | 20 | 5 | 0.8 | 300000 |
+| `ont` | `map-ont` | 20 | 10 | 5 | 0.7 | 300000 |
+| `hifi` | `map-hifi` | 20 | 20 | 5 | 0.8 | 300000 |
 
 ### Site state of a canSNP from its counts
 
