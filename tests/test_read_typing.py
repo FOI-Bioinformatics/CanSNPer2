@@ -408,3 +408,24 @@ def test_unknown_platform_is_an_argument_error(tmp_path):
     db, _, _ = make_scheme(tmp_path)
     run = cli(tmp_path, "--database", db, "--platform", "sanger", "x.fq")
     assert run.returncode == 2 and "platform" in run.stderr
+
+
+def test_the_summary_records_the_read_settings(tmp_path):
+    """snps_summary.txt named the assembly settings only, not the thresholds of read typing (#99)"""
+    db, a, _ = make_scheme(tmp_path)
+    run(tmp_path, write_pair(tmp_path, "sa", [(a, 20, 1)]), db=db, summary=True, min_depth=3)
+    notes = comments(tmp_path / "out" / "snps_summary.txt")
+    reads = [line for line in notes if line.startswith("Read settings: ")]
+    assert reads == [
+        "Read settings: platform=illumina min_depth=3 min_allele_fraction=0.8 min_mapq=20 min_baseq=20"
+        " max_reads=300000"
+    ], notes
+
+
+def test_the_summary_of_assemblies_has_no_read_settings(tmp_path):
+    db, a, _ = make_scheme(tmp_path)
+    genome = tmp_path / "ga.fna"
+    genome.write_text(">ga\n" + a + "\n")
+    run(tmp_path, [str(genome)], db=db, summary=True, aligner="minimap2")
+    notes = comments(tmp_path / "out" / "snps_summary.txt")
+    assert notes and not [line for line in notes if line.startswith("Read settings")]

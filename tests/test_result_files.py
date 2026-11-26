@@ -178,3 +178,28 @@ def test_a_sample_whose_result_exists_prints_its_call_and_how_to_redo_it(tmp_pat
     printed = capsys.readouterr().out
     assert "x: B.1" in printed, "the call of the earlier run is reported"
     assert "--rerun" in printed, "and what to do to type it again"
+
+
+# the "Final SNP:" line gives found/depth (kept for scripts that read it) and found/expected,
+# the support; the root of the test tree has no canSNP, a label node, so the two differ (#99)
+
+
+def test_the_final_snp_line_gives_the_depth_and_the_support(tmp_path):
+    obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
+    path = os.path.join(obj.results_dir, "x_snps.txt")
+    final = [line for line in comments(path) if line.startswith("# Final SNP:")]
+    assert final == ["# Final SNP: B.1 found/depth: 2/3 found/expected: 2/2"]
+    assert obj.read_result_support(path) == "2/2"
+    assert obj.sample_supports["x"] == "2/2"
+
+
+def test_a_reused_result_gives_the_same_support_in_the_summary(tmp_path):
+    obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, summary=True)
+    first = table_rows(os.path.join(obj.outdir, "snps_summary.txt"))
+    again, db = project(tmp_path, [q], min_required_hits=2, summary=True)
+    fake_alignment(again, ["A.1", "B.1"], {"A.1": 1, "B.1": 1}, q)
+    again.run(database=db)
+    assert "x" in again.reused
+    second = table_rows(os.path.join(again.outdir, "snps_summary.txt"))
+    assert second == first
+    assert second[1][2] == "2/2"

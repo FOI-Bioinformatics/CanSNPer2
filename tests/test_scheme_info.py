@@ -568,3 +568,14 @@ def test_allow_missing_references_still_stops_when_no_genome_has_a_file(tmp_path
     assert result.returncode == 1, result.stdout + result.stderr
     assert "REF_A, REF_B" in result.stderr and "cansnper2 ref get" in result.stderr, result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_describe_names_a_commit_given_as_the_ref_once():
+    """scheme get --branch <commit> records the commit as the ref as well (#99)"""
+    sha = "d7493fd26acfe08ff57beeed1e00ebcce0607cc3"
+    info = {"scheme": "s", "status": "verified", "source": "owner/data", "ref": sha, "commit": sha}
+    assert "owner/data@d7493fd," in describe(info), describe(info)
+    info["ref"] = sha[:7]
+    assert "owner/data@d7493fd," in describe(info), describe(info)
+    info["ref"] = "master"
+    assert "owner/data master@d7493fd," in describe(info), describe(info)

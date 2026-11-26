@@ -68,14 +68,16 @@ def quiet_warning_count():
 def setup_logging(logdir, tag, level=logging.WARNING, now=None):
     """Log to the console and to the log file of this command, and return that path.
     When the log folder cannot be made or written (a read-only working directory), one
-    warning is written to stderr, the command logs to stderr only and None is returned."""
+    warning is written to stderr, the command logs to stderr only and None is returned.
+    With logdir None no log file is written (db info without --log-dir)."""
     global console_filter
     console = logging.StreamHandler()
     handlers = []
     logpath = None
     try:
-        logpath = get_logpath(logdir, tag, now=now)
-        handlers.append(logging.FileHandler(logpath))
+        if logdir is not None:  ## None: no log file, the console only
+            logpath = get_logpath(logdir, tag, now=now)
+            handlers.append(logging.FileHandler(logpath))
     except OSError as e:
         logpath = None
         print(

@@ -177,6 +177,8 @@ def provenance_lines(info):
                 hits=info["min_required_hits"], strict=info.get("strictness"), mask=info.get("mask")
             )
         )
+    for settings in info.get("read_settings") or []:
+        lines.append("Read settings: {s}".format(s=settings))
     if info.get("notice"):
         lines.append("Note: {n}".format(n=info["notice"]))
     return lines

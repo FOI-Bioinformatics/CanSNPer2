@@ -478,3 +478,16 @@ def test_error_messages_are_not_quoted():
     from CanSNPer2.modules.CanSNPer2 import CanSNPer2Error
 
     assert str(CanSNPer2Error("x.fasta is gzip-compressed")) == "x.fasta is gzip-compressed"
+
+
+def test_db_info_writes_a_log_file_only_with_log_dir(tmp_path, scheme):
+    """db info only reads the database; it used to leave an empty log file in ./logs (#99)"""
+    db, _ = scheme
+    work = tmp_path / "work"
+    work.mkdir()
+    r = run_cli("db", "info", "-d", db, cwd=work)
+    assert r.returncode == 0, r.stderr
+    assert os.listdir(work) == []
+    r = run_cli("db", "info", "-d", db, "--log-dir", str(tmp_path / "chosen"), cwd=work)
+    assert r.returncode == 0, r.stderr
+    assert len(os.listdir(tmp_path / "chosen")) == 1

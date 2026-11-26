@@ -43,6 +43,16 @@ Git history.
 - The package metadata moved from `setup.py` to `pyproject.toml`. `pip install .` installs the
   same files and the same `cansnper2` command.
 
+### Fixed
+
+- The `# Final SNP:` line of `<sample>_snps.txt` gives the support as `found/expected:` after
+  `found/depth:`. A reused result was listed in `snps_summary.txt` with `found/depth`, which
+  differs from the support when the path has label nodes.
+- `snps_summary.txt` of a read run records the read thresholds in a `# Read settings:` line.
+- The scheme line names a commit given with `scheme get --branch <commit>` once
+  (`owner/repository@abc1234`), not as the branch and again as the commit.
+- `db info` writes a log file only when `--log-dir` is given; it left an empty log file in `logs/`.
+
 ## [2.4.0] - 2026-11-22 (tag v2.4.0)
 
 ### Added

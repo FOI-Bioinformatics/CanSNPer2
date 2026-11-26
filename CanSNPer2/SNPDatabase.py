@@ -211,9 +211,13 @@ def get_logger(args):
     elif args.verbose:
         logval = args.verbose
 
-    args.logs = args.logs.rstrip("/") + "/"
     action = getattr(args, "db_action", None)
     tag = "cansnper2-db-" + action if action else "CanSNPer2-database"
+    if args.logs is None:
+        """db info only reads the database: it writes a log file only when --log-dir is given (#99)"""
+        setup_logging(None, tag, level=logval)
+        return logging.getLogger(__name__)
+    args.logs = args.logs.rstrip("/") + "/"
     setup_logging(args.logs, tag, level=logval)  ## shared log naming for all commands (issue #217)
     return logging.getLogger(__name__)
 
