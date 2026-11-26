@@ -123,6 +123,26 @@ job runs with Python 3.11, 3.12, 3.13 and 3.14. It:
 9. types that reference genome against the database with the default aligner, with
    progressiveMauve and with MUMmer4, and types reads simulated from it; the calls must agree.
 
+## The typing run
+
+`CanSNPer2.run` (in `CanSNPer2/modules/CanSNPer2.py`) follows the steps of
+[method.md](method.md). `prepare_queries` resolves the queries into samples and checks the
+inputs, the database and the reference folder once. `type_sample` then types each sample:
+
+| Method | Step |
+| --- | --- |
+| `reuse_result` | use the result file of an earlier run made from the same input and settings |
+| `align_sample` | align the assembly to each reference genome, or map the reads |
+| `read_site_states` | read the alignments into the state of each canSNP |
+| `read_counts` | for reads: the base counts, the rounds against local references, the `# Reads:` line |
+| `call_sample` | walk the tree and call the final SNP; returns a `SampleCall` |
+| `write_result_files` | `<sample>_snps.txt` and `<sample>_not_called.txt` |
+| `record_outcome`, `review_reasons` | the outcome of the sample and its row in `summary.html` |
+
+`finish_run` writes the summary and `summary.html` and removes the temporary folder. An error in a
+sample is handled in `_run`, which stops the run or, with `--keep-going`, goes on to the next
+sample.
+
 ## Regenerate the command line reference
 
 `docs/cli.md` is generated from the parsers in `CanSNPer2/cli.py`. After a change to an option

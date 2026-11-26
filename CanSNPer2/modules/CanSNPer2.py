@@ -10,6 +10,7 @@ import zlib
 import shutil
 import hashlib
 import datetime
+from dataclasses import dataclass
 import tempfile
 import logging
 import statistics
@@ -137,6 +138,25 @@ def ensure_directory(path, option):
                 option=option, path=path
             )
         )
+
+
+@dataclass
+class SampleCall:
+    """the call of one sample, as CanSNPer2.call_sample makes it: the final SNP (NA without a
+    call), the reason when there is none, what create_tree returned for the final SNP and the
+    positions without data, the SNP path and the derived canSNPs outside it, the support, and
+    the "Final SNP:" line, the path text and the called rows of the result file"""
+
+    snp: str
+    message: str
+    final_snp: object
+    no_data_snps: list
+    path_names: list
+    off_chain: list
+    support: str
+    final_line: str
+    path_text: str
+    called_rows: list
 
 
 class CanSNPer2(object):
@@ -1918,42 +1938,13 @@ class CanSNPer2(object):
             raise
 
     def _run(self, database):
+        """The typing run, in the steps of docs/method.md: the queries are prepared and checked
+        (prepare_queries), each sample is typed (type_sample), and the run ends with the summary,
+        the results overview and the clean-up (finish_run)."""
         logger.info("Running CanSNPer2 version-{version}".format(version=__version__))
         self.run_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         if len(self.query) > 0 or self.samplesheet:
-            """A query list file (file paths, one per line) is read, see resolve_queries"""
-            self.query = self.resolve_queries(self.query) if self.query else []
-            """read files are grouped into samples (paired-end mates, or --samplesheet)"""
-            self.query = self.resolve_read_input(self.query)
-            self.query = self.check_sample_names(self.query)
-            """a missing query used to be found only after the queries before it were aligned"""
-            unusable = [q for q in self.query if not all(os.path.isfile(f) for f in self.query_files(q))]
-            if unusable and not self.keep_going:
-                shown = ", ".join(unusable[:5]) + (
-                    " and {n} more".format(n=len(unusable) - 5) if len(unusable) > 5 else ""
-                )
-                raise CanSNPer2Error(
-                    "{n} query file(s) were not found or are not files: {files}".format(
-                        n=len(unusable), files=shown
-                    )
-                )
-            """the database and the reference folder are checked once, before the first sample"""
-            self.check_start()
-            """the aligner is checked only when a sample will be aligned: a run whose samples all have a
-				result from an earlier run (made again for a summary, for example) needs no aligner"""
-            if self.rerun or any(
-                not self.sample_output_exists(self.sample_name(q), "_snps.txt") for q in self.query
-            ):
-                self.check_aligner()
-
-            """Main function of CanSNPer2
-					1. Align sequences with the selected aligner (minimap2 by default)
-					2. Read the alignments and find SNPs
-					3. Create a tree visualising SNPs found in sequence
-					3b. If requested create a list with SNPs and their status
-					4. Clean up tmp directory
-					"""
-
+            self.prepare_queries()
             """ Create the reader of the alignment files; it connects to the database in the worker"""
             alignment_reader = self.aligner.reader(database=database, mask=self.mask, verbose=self.verbose)
             """Walk through the list of queries supplied"""
@@ -1973,365 +1964,7 @@ class CanSNPer2(object):
                         """the mapper and the thresholds of the platform of this sample"""
                         self.aligner = self.read_mappers[self.read_samples[q].platform]
                         alignment_reader = self.aligner.reader(database=database, verbose=self.verbose)
-
-                    qfile = q.rsplit("/")[-1]  ## Remove path from query name
-                    if os.path.isdir(q):
-                        raise CanSNPer2Error(
-                            "Input file: {qfile} is a directory, not a FASTA file".format(qfile=q)
-                        )
-                    if not os.path.exists(q):
-                        raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
-
-                    outputfile = self.sample_output(self.query_name, "_snps.txt")
-                    self.query_sha256 = self.query_digest(q)
-                    if os.path.exists(outputfile) and not self.rerun:
-                        """a result is only used again when it was made from the same input: the
-							name alone used to let a different genome with the same file name be
-							reported with the old call"""
-                        old_path, old_sha = self.read_result_source(outputfile)
-                        if old_sha is not None and old_sha != self.query_sha256:
-                            raise CanSNPer2Error(
-                                "{outputfile} exists for a different input ({old}); use --rerun to replace it or choose another --outdir".format(
-                                    outputfile=outputfile, old=old_path or "unknown file"
-                                )
-                            )
-                        old_settings = self.read_result_settings(outputfile)
-                        if old_settings is not None and old_settings != self.settings_line():
-                            raise CanSNPer2Error(
-                                "{outputfile} was made with a different database or settings ({old}); use --rerun to replace it or choose another --outdir".format(
-                                    outputfile=outputfile, old=old_settings.split(":", 1)[1].strip()
-                                )
-                            )
-                        if old_sha is None:
-                            logger.info(
-                                "{outputfile} does not record its input (older version), it is used again as it is".format(
-                                    outputfile=outputfile
-                                )
-                            )
-                        logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
-                        """the skip used to be a debug line, so a run that typed nothing said nothing
-							after announcing the alignments (issue #78); the call of the earlier run is
-							printed like a computed one, with what to do to recompute it"""
-                        self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(
-                            outputfile=outputfile
-                        )
-                        self.reused.add(self.query_name)
-                        """the dashboard lists reused samples too, but without states: the tree cannot
-							paint a result it did not compute in this run"""
-                        old_final, old_path = self.read_result_file(outputfile)
-                        print(
-                            "{query}: {SNP} (from an earlier run, use --rerun to type it again)".format(
-                                query=self.query_name, SNP=old_final
-                            )
-                        )
-                        self.add_sample_report(
-                            self.query_name,
-                            "reused",
-                            old_final,
-                            old_path,
-                            [
-                                "result from an earlier run, use --rerun to recompute it and see it in the tree"
-                            ],
-                            support=self.read_result_support(outputfile),
-                        )
-                        continue
-                    logger.info("Running CanSNPer2 on {query}".format(query=qfile))
-                    if not self.skip_alignment:  ### alignments made before (--skip_alignment) are only read
-                        logger.info("Run {program} alignments".format(program=self.aligner.name))
-
-                    """For each query fasta align to all CanSNP references the reference folder
-						with --skip_alignment the align function only lists the alignment file paths
-					"""
-                    if self.skip_alignment:
-                        self.check_alignment_query(q)
-                    alignment_files = self.align(q)
-                    logger.debug(alignment_files)
-                    if alignment_files and not self.skip_alignment:
-                        with open(self.query_record(), "w") as record:
-                            print(self.query_sha256, file=record)
-                    if (
-                        len(alignment_files) == 0
-                    ):  ## if keep going is set and the aligner exits with an error continue to next sequence
-                        logger.debug(
-                            "{program} exited with a non zero exit status, continue with next sample!".format(
-                                program=self.aligner.name
-                            )
-                        )
-                        logger.warning(
-                            "{program} error skip {sample}".format(program=self.aligner.name, sample=q)
-                        )
-                        self.skipped[self.query_name] = "{program} produced no alignments".format(
-                            program=self.aligner.name
-                        )
-                        self.add_sample_report(
-                            self.query_name,
-                            "failed",
-                            "NA",
-                            "NA",
-                            [
-                                "{program} produced no alignments for this sample".format(
-                                    program=self.aligner.name
-                                )
-                            ],
-                        )
-                        self.alignment_files = []
-                        continue
-                    """Read the alignments and find SNPs; returns SNPS (for the visual tree) and SNP_info (text file output)"""
-                    logger.info("Find SNPs")
-                    """the query file maps the query coordinates of the alignments to its sequences when
-						the staged copy named in the alignment header is gone (issue #23)"""
-                    alignment_reader.query_file = q
-                    try:
-                        SNPS, SNP_info, called_snps = self.find_snps_multiproc(
-                            xmfa_obj=alignment_reader,
-                            xmfa_files=alignment_files,
-                            export=True,
-                            references=list(self.alignment_references),
-                        )
-                    except FileNotFoundError as e:
-                        """the message has to carry the reason: the default log level only shows
-							warnings, and the folder that was searched is what the user needs (issue #176, #177).
-							A sample without its alignments is a failed sample: it stops the run unless
-							--keep_going is set, as other failures do, instead of being skipped quietly."""
-                        self.alignment_files = []
-                        raise CanSNPer2Error(
-                            "alignment files of {qfile} are missing: {error}".format(qfile=qfile, error=e)
-                        ) from e
-                    """reads: the counts of every canSNP site, and the sites where no base reached the
-						allele fraction, which suggest more than one strain in the sample"""
-                    site_rows = self.collect_site_counts(alignment_files) if self.is_read(q) else None
-                    local_done = None
-                    if site_rows is not None and self.local_references:
-                        """further rounds against the genome of the scheme closest to the sample"""
-                        site_rows, local_done = self.local_reference_rounds(q, site_rows, database)
-                        if local_done:
-                            SNPS, SNP_info, called_snps = states_from_rows(site_rows)
-                    mixed = (
-                        [row["Name"] for row in site_rows if row["state"] == "mixed"]
-                        if site_rows is not None
-                        else []
-                    )
-                    reads_line = None
-                    if site_rows is not None:
-                        """the median depth is over the sites with reads: with a distant reference many
-							sites have none, and a median over all of them hid the depth of the rest"""
-                        depths = [int(row["depth"]) for row in site_rows if int(row["depth"]) > 0]
-                        reads_line = "Reads: platform={p} files={n} sites_with_reads={k}/{t} median_depth={d:g} mixed_sites={m}".format(
-                            p=self.read_samples[q].platform,
-                            n=len(self.query_files(q)),
-                            k=len(depths),
-                            t=len(site_rows),
-                            d=statistics.median(depths) if depths else 0,
-                            m=len(mixed),
-                        )
-                        if self.local_references:
-                            conflicts = sum(1 for row in site_rows if row["state"] == "conflict")
-                            reads_line += (
-                                " local_reference={g} local_node={n} screen_share={s:.2f} screens={k} local_rounds={r} conflicts={c}".format(
-                                    g=local_done["genome"],
-                                    n=local_done["node"],
-                                    s=local_done["share"],
-                                    k=local_done["screens"],
-                                    r=local_done["rounds"],
-                                    c=conflicts,
-                                )
-                                if local_done
-                                else " local_reference=none"
-                            )
-                            if self.local_fetcher is not None:
-                                reads_line += " fetched={f}".format(f=self.sample_fetched)
-                        if self.export:
-                            with open(
-                                self.sample_output(self.query_name, "_site_counts.tsv"), "w"
-                            ) as counts_out:
-                                print("\t".join(SITE_COUNT_COLUMNS), file=counts_out)
-                                for row in site_rows:
-                                    print("\t".join(row[c] for c in SITE_COUNT_COLUMNS), file=counts_out)
-                    """If file export is requested the result of each SNP position is written to the two
-						result files after the call; the rows of the called SNPs are collected here"""
-                    if self.export:
-                        outputfile = self.sample_output(self.query_name, "_not_called.txt")
-                        outputfile2 = self.sample_output(self.query_name, "_snps.txt")
-                        self.csnpdict = {snp[0]: snp for snp in SNP_info if snp[0] in called_snps}
-
-                    """Color the tree with the states of the sample and call the final SNP"""
-                    SNP = "NA"  ## Default message if SNP cannot be confirmed
-                    tree_result = self.create_tree(
-                        SNPS,
-                        self.query_name,
-                        called_snps,
-                        self.save_tree,
-                        min_required_hits=self.min_required_hits,
-                        strictness=self.strictness,
-                        snp_info=SNP_info,
-                        outdir=self.results_dir,
-                    )
-                    if not isinstance(
-                        tree_result, tuple
-                    ):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
-                        tree_result = (False, "No SNP call was produced.", [], [])
-                    final_snp, message, called, no_data_snps = tree_result
-                    """The SNP path of a confirmed call is the chain of the final SNP: the called SNPs from the
-						root of the tree down to the final SNP. Derived SNPs that were called outside that chain
-						(a competing branch) are not part of the path, they are listed in the dashboard
-						report for review. The table of called SNPs keeps one row for every called SNP.
-						Without a confirmed call (NA) the path lists all called SNPs, as before."""
-                    called_names = [snp[1] for snp in called] if called else []
-                    path_names = called_names
-                    off_chain = []
-                    if final_snp and final_snp[2][0] and len(final_snp) > 5:
-                        chain = final_snp[5]
-                        path_names = [name for name in chain if name in set(called_names)]
-                        off_chain = sorted(name for name in called_names if name not in set(chain))
-                    self.result_paths[self.query_name] = ";".join(path_names) if path_names else "NA"
-                    """the support of a call: the derived SNPs on the SNP path out of the SNPs on it"""
-                    support = "NA"
-                    if final_snp:
-                        SNP = final_snp[1]
-                        if not final_snp[2][0]:  ## if snp was never confirmed print NA
-                            SNP = "NA"
-                        else:
-                            support = "{found}/{n}".format(
-                                found=final_snp[2][1],
-                                n=final_snp[3] if len(final_snp) > 3 else int(final_snp[0]),
-                            )
-                        called_rows = [self.csnpdict[snp[1]] for snp in called] if self.export else []
-                        final_line = "Final SNP: {snp} found/depth: {found}/{depth}".format(
-                            snp=SNP, depth=int(final_snp[0]), found=final_snp[2][1]
-                        )
-                        """found/depth counts label nodes in the depth; the support of the call,
-							found/expected, follows it, so that scripts that read found/depth keep
-							working (#99)"""
-                        if support != "NA":
-                            final_line += " found/expected: {support}".format(support=support)
-                        path_text = ";".join(path_names)
-                        logger.info(final_line)
-                    else:
-                        """an NA sample used to write a snps file with nothing but the final
-							line: the SNPs that WERE called on the way to the failing point are
-							real information, and with them in this file the two result files
-							together list every evaluated position of the tree (issue #35)"""
-                        called_ids = set(called_snps)
-                        called_rows = [row for row in SNP_info if row[0] in called_ids]
-                        final_line = "Final SNP: {snp}".format(snp=SNP)
-                        path_text = ";".join(path_names) if path_names else "NA"
-                        logger.info(message)
-                    self.sample_supports[self.query_name] = support
-                    if self.export:
-                        """Both files start with the table, a header row and the rows; the lines on the
-							call and the input follow as # comment lines, so that a table reader that skips
-							comments (pandas.read_csv(comment="#")) reads the table. SNP positions of the tree
-							that no alignment carried a base for are listed in the not called file with an
-							N/A target base (issue #27)"""
-                        with open(outputfile2, "w") as called_out:
-                            print("\t".join(SNP_FILE_COLUMNS), file=called_out)
-                            for row in called_rows:
-                                print("\t".join(row), file=called_out)
-                            for line in (
-                                "SNP path: {path}".format(path=path_text),
-                                final_line,
-                                reads_line,
-                                self.query_source_line(q),
-                                self.settings_line(),
-                            ):
-                                if line is not None:
-                                    print("# " + line, file=called_out)
-                        logger.info("Printing SNP info of non called SNPs to {file}".format(file=outputfile))
-                        if no_data_snps:
-                            logger.info(
-                                "Listing {n} SNP positions without any alignment data in {file}".format(
-                                    n=len(no_data_snps), file=outputfile
-                                )
-                            )
-                        with open(outputfile, "w") as snplist_out:
-                            print("\t".join(SNP_FILE_COLUMNS), file=snplist_out)
-                            for snp in SNP_info:
-                                if snp[0] not in called_snps:
-                                    print("\t".join(snp), file=snplist_out)
-                            for snp in no_data_snps:
-                                print("\t".join(snp), file=snplist_out)
-                            for line in (self.query_source_line(q), self.settings_line()):
-                                print("# " + line, file=snplist_out)
-                    """remember the outcome per sample: the exit code is decided from this
-						(issue #191)"""
-                    if SNP != "NA":
-                        self.typed[self.query_name] = SNP
-                    else:
-                        self.not_typed[self.query_name] = (
-                            message  ## names the competing paths, or the unconfirmed SNP and why
-                        )
-                    """the dashboard row for this sample: severity and the reasons a call needs a
-						manual look (positions on the path with no alignment data, SNPs flagged at an
-						alignment edge, a competing unconfirmed path); states/called let the embedded
-						tree paint the sample when it is selected"""
-                    called_path = path_names
-                    edge_flags = set(
-                        row[0] for row in SNP_info if len(row) > EDGE_COLUMN and row[EDGE_COLUMN] == "edge"
-                    )
-                    edge_on_path = [s for s in edge_flags if s in set(called_path)]
-                    path_missing = final_snp[4] if final_snp and len(final_snp) > 4 else []
-                    severity = "clean"
-                    reasons = []
-                    if SNP == "NA":
-                        severity = "not called"
-                        reasons.append(message)
-                    if path_missing:
-                        if severity == "clean":
-                            severity = "review"
-                        reasons.append(
-                            "{k} SNP positions on the SNP path had no alignment data (the call leans on --strictness): {ids}".format(
-                                k=len(path_missing), ids=", ".join(path_missing)
-                            )
-                        )
-                    if edge_on_path:
-                        if severity == "clean":
-                            severity = "review"
-                        reasons.append(
-                            "SNPs flagged at an alignment edge on the SNP path: {ids}".format(
-                                ids=", ".join(sorted(edge_on_path))
-                            )
-                        )
-                    if off_chain and SNP != "NA":
-                        if severity == "clean":
-                            severity = "review"
-                        reasons.append(
-                            "{k} derived SNP(s) called outside the SNP path, on another branch: {ids}".format(
-                                k=len(off_chain), ids=", ".join(off_chain)
-                            )
-                        )
-                    if len(mixed) >= self.mixed_sites and mixed:
-                        """isolates are typed; reads that disagree at several canSNPs suggest a mixture"""
-                        if severity == "clean":
-                            severity = "review"
-                        reasons.append(
-                            "possibly mixed: at {k} canSNP sites no base reached the allele fraction: {ids}; a duplicated region of the sample (a copy the reference lacks) gives the same pattern, see the counts in the site count file".format(
-                                k=len(mixed), ids=", ".join(mixed[:20])
-                            )
-                        )
-                        logger.warning(
-                            "{sample} is possibly mixed: at {k} canSNP sites no base reached the allele fraction ({ids})".format(
-                                sample=self.query_name, k=len(mixed), ids=", ".join(mixed[:20])
-                            )
-                        )
-                    self.add_sample_report(
-                        self.query_name,
-                        severity,
-                        SNP,
-                        ";".join(called_path) if called_path else "NA",
-                        reasons,
-                        states=SNPS,
-                        called=called_snps,
-                        edge=sorted(s for s in edge_flags if s in set(called_snps)),
-                        no_data=[row[0] for row in no_data_snps],
-                        support=support,
-                        path_no_data=path_missing if SNP != "NA" else [],
-                        path_snps=path_details(called_path, SNP_info),
-                    )
-                    print(
-                        "{query}: {SNP}".format(query=self.query_name, SNP=SNP)
-                    )  ## the call is printed whether or not result files are written
-                    """Clean references to aligned xmfa files between queries if several was supplied"""
-                    self.alignment_files = []
+                    self.type_sample(q, database, alignment_reader)
                 except Exception as e:
                     """log the real failure before wrapping it, otherwise the cause is invisible (issue #121)"""
                     logger.debug("Traceback for {file}".format(file=self.query_name), exc_info=True)
@@ -2349,7 +1982,450 @@ class CanSNPer2(object):
                     self.add_sample_report(
                         self.query_name, "failed", "NA", "NA", ["processing failed: {err}".format(err=e)]
                     )
+        self.finish_run()
 
+    def prepare_queries(self):
+        """Resolve the queries of the run into samples and check them, the database and the
+        reference folder once, before the first sample is aligned"""
+        """A query list file (file paths, one per line) is read, see resolve_queries"""
+        self.query = self.resolve_queries(self.query) if self.query else []
+        """read files are grouped into samples (paired-end mates, or --samplesheet)"""
+        self.query = self.resolve_read_input(self.query)
+        self.query = self.check_sample_names(self.query)
+        """a missing query used to be found only after the queries before it were aligned"""
+        unusable = [q for q in self.query if not all(os.path.isfile(f) for f in self.query_files(q))]
+        if unusable and not self.keep_going:
+            shown = ", ".join(unusable[:5]) + (
+                " and {n} more".format(n=len(unusable) - 5) if len(unusable) > 5 else ""
+            )
+            raise CanSNPer2Error(
+                "{n} query file(s) were not found or are not files: {files}".format(
+                    n=len(unusable), files=shown
+                )
+            )
+        """the database and the reference folder are checked once, before the first sample"""
+        self.check_start()
+        """the aligner is checked only when a sample will be aligned: a run whose samples all have a
+			result from an earlier run (made again for a summary, for example) needs no aligner"""
+        if self.rerun or any(
+            not self.sample_output_exists(self.sample_name(q), "_snps.txt") for q in self.query
+        ):
+            self.check_aligner()
+
+    def type_sample(self, q, database, alignment_reader):
+        """Type one sample (self.query_name): use the result of an earlier run, or align (map the
+        reads), read the site states, call the final SNP, write the result files and record the
+        outcome. An error is raised to _run, which decides whether the run goes on."""
+        qfile = q.rsplit("/")[-1]  ## Remove path from query name
+        if os.path.isdir(q):
+            raise CanSNPer2Error("Input file: {qfile} is a directory, not a FASTA file".format(qfile=q))
+        if not os.path.exists(q):
+            raise FileNotFoundError("Input file: {qfile} was not found!".format(qfile=q))
+
+        outputfile = self.sample_output(self.query_name, "_snps.txt")
+        self.query_sha256 = self.query_digest(q)
+        if os.path.exists(outputfile) and not self.rerun:
+            self.reuse_result(outputfile)
+            return
+        logger.info("Running CanSNPer2 on {query}".format(query=qfile))
+        alignment_files = self.align_sample(q)
+        if (
+            len(alignment_files) == 0
+        ):  ## if keep going is set and the aligner exits with an error continue to next sequence
+            self.report_no_alignments(q)
+            return
+        SNPS, SNP_info, called_snps = self.read_site_states(alignment_reader, q, qfile, alignment_files)
+        """reads: the counts of every canSNP site, and the sites where no base reached the
+			allele fraction, which suggest more than one strain in the sample"""
+        (SNPS, SNP_info, called_snps), mixed, reads_line = self.read_counts(
+            q, database, alignment_files, (SNPS, SNP_info, called_snps)
+        )
+        call = self.call_sample(SNPS, SNP_info, called_snps)
+        if self.export:
+            self.write_result_files(q, call, SNP_info, called_snps, reads_line)
+        self.record_outcome(call, SNPS, SNP_info, called_snps, mixed)
+        """Clean references to aligned xmfa files between queries if several was supplied"""
+        self.alignment_files = []
+
+    def reuse_result(self, outputfile):
+        """The result file of the sample exists and --rerun is not given: it is used again when
+        it was made from the same input with the same database and settings"""
+        """a result is only used again when it was made from the same input: the
+			name alone used to let a different genome with the same file name be
+			reported with the old call"""
+        old_path, old_sha = self.read_result_source(outputfile)
+        if old_sha is not None and old_sha != self.query_sha256:
+            raise CanSNPer2Error(
+                "{outputfile} exists for a different input ({old}); use --rerun to replace it or choose another --outdir".format(
+                    outputfile=outputfile, old=old_path or "unknown file"
+                )
+            )
+        old_settings = self.read_result_settings(outputfile)
+        if old_settings is not None and old_settings != self.settings_line():
+            raise CanSNPer2Error(
+                "{outputfile} was made with a different database or settings ({old}); use --rerun to replace it or choose another --outdir".format(
+                    outputfile=outputfile, old=old_settings.split(":", 1)[1].strip()
+                )
+            )
+        if old_sha is None:
+            logger.info(
+                "{outputfile} does not record its input (older version), it is used again as it is".format(
+                    outputfile=outputfile
+                )
+            )
+        logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
+        """the skip used to be a debug line, so a run that typed nothing said nothing
+			after announcing the alignments (issue #78); the call of the earlier run is
+			printed like a computed one, with what to do to recompute it"""
+        self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(
+            outputfile=outputfile
+        )
+        self.reused.add(self.query_name)
+        """the dashboard lists reused samples too, but without states: the tree cannot
+			paint a result it did not compute in this run"""
+        old_final, old_path = self.read_result_file(outputfile)
+        print(
+            "{query}: {SNP} (from an earlier run, use --rerun to type it again)".format(
+                query=self.query_name, SNP=old_final
+            )
+        )
+        self.add_sample_report(
+            self.query_name,
+            "reused",
+            old_final,
+            old_path,
+            ["result from an earlier run, use --rerun to recompute it and see it in the tree"],
+            support=self.read_result_support(outputfile),
+        )
+
+    def align_sample(self, q):
+        """Align the sample to every reference genome (map its reads), or with --skip-alignment
+        list the alignments of an earlier run; returns the alignment files"""
+        if not self.skip_alignment:  ### alignments made before (--skip_alignment) are only read
+            logger.info("Run {program} alignments".format(program=self.aligner.name))
+
+        """For each query fasta align to all CanSNP references the reference folder
+			with --skip_alignment the align function only lists the alignment file paths
+		"""
+        if self.skip_alignment:
+            self.check_alignment_query(q)
+        alignment_files = self.align(q)
+        logger.debug(alignment_files)
+        if alignment_files and not self.skip_alignment:
+            with open(self.query_record(), "w") as record:
+                print(self.query_sha256, file=record)
+        return alignment_files
+
+    def report_no_alignments(self, q):
+        """the aligner produced no alignments for the sample (with --keep-going): it is skipped"""
+        logger.debug(
+            "{program} exited with a non zero exit status, continue with next sample!".format(
+                program=self.aligner.name
+            )
+        )
+        logger.warning("{program} error skip {sample}".format(program=self.aligner.name, sample=q))
+        self.skipped[self.query_name] = "{program} produced no alignments".format(program=self.aligner.name)
+        self.add_sample_report(
+            self.query_name,
+            "failed",
+            "NA",
+            "NA",
+            ["{program} produced no alignments for this sample".format(program=self.aligner.name)],
+        )
+        self.alignment_files = []
+
+    def read_site_states(self, alignment_reader, q, qfile, alignment_files):
+        """Read the alignments and find SNPs; returns SNPS (the state of each canSNP, for the tree),
+        SNP_info (the rows of the result files) and called_snps (the derived canSNPs)"""
+        logger.info("Find SNPs")
+        """the query file maps the query coordinates of the alignments to its sequences when
+			the staged copy named in the alignment header is gone (issue #23)"""
+        alignment_reader.query_file = q
+        try:
+            return self.find_snps_multiproc(
+                xmfa_obj=alignment_reader,
+                xmfa_files=alignment_files,
+                export=True,
+                references=list(self.alignment_references),
+            )
+        except FileNotFoundError as e:
+            """the message has to carry the reason: the default log level only shows
+				warnings, and the folder that was searched is what the user needs (issue #176, #177).
+				A sample without its alignments is a failed sample: it stops the run unless
+				--keep_going is set, as other failures do, instead of being skipped quietly."""
+            self.alignment_files = []
+            raise CanSNPer2Error(
+                "alignment files of {qfile} are missing: {error}".format(qfile=qfile, error=e)
+            ) from e
+
+    def read_counts(self, q, database, alignment_files, states):
+        """For a read sample: the base counts at the canSNP sites, the rounds against local
+        references, the mixed sites and the "Reads:" line, and the site count file. Returns the
+        site states (replaced by those of the local reference when a round was made), the
+        names of the mixed sites and the Reads line; for an assembly the states unchanged, []
+        and None."""
+        site_rows = self.collect_site_counts(alignment_files) if self.is_read(q) else None
+        local_done = None
+        if site_rows is not None and self.local_references:
+            """further rounds against the genome of the scheme closest to the sample"""
+            site_rows, local_done = self.local_reference_rounds(q, site_rows, database)
+            if local_done:
+                states = states_from_rows(site_rows)
+        mixed = [row["Name"] for row in site_rows if row["state"] == "mixed"] if site_rows is not None else []
+        reads_line = None
+        if site_rows is not None:
+            reads_line = self.reads_line(q, site_rows, mixed, local_done)
+            if self.export:
+                with open(self.sample_output(self.query_name, "_site_counts.tsv"), "w") as counts_out:
+                    print("\t".join(SITE_COUNT_COLUMNS), file=counts_out)
+                    for row in site_rows:
+                        print("\t".join(row[c] for c in SITE_COUNT_COLUMNS), file=counts_out)
+        return states, mixed, reads_line
+
+    def reads_line(self, q, site_rows, mixed, local_done):
+        """the "Reads:" line of the result file of a read sample"""
+        """the median depth is over the sites with reads: with a distant reference many
+			sites have none, and a median over all of them hid the depth of the rest"""
+        depths = [int(row["depth"]) for row in site_rows if int(row["depth"]) > 0]
+        line = "Reads: platform={p} files={n} sites_with_reads={k}/{t} median_depth={d:g} mixed_sites={m}".format(
+            p=self.read_samples[q].platform,
+            n=len(self.query_files(q)),
+            k=len(depths),
+            t=len(site_rows),
+            d=statistics.median(depths) if depths else 0,
+            m=len(mixed),
+        )
+        if self.local_references:
+            conflicts = sum(1 for row in site_rows if row["state"] == "conflict")
+            line += (
+                " local_reference={g} local_node={n} screen_share={s:.2f} screens={k} local_rounds={r} conflicts={c}".format(
+                    g=local_done["genome"],
+                    n=local_done["node"],
+                    s=local_done["share"],
+                    k=local_done["screens"],
+                    r=local_done["rounds"],
+                    c=conflicts,
+                )
+                if local_done
+                else " local_reference=none"
+            )
+            if self.local_fetcher is not None:
+                line += " fetched={f}".format(f=self.sample_fetched)
+        return line
+
+    def call_sample(self, SNPS, SNP_info, called_snps):
+        """Walk the tree with the site states of the sample and call the final SNP. Returns a
+        SampleCall: the final SNP (NA without a call), the reason when there is none, the SNP path,
+        the derived canSNPs outside it, the support and the lines and rows of the result files.
+        Records the SNP path and the support of the sample."""
+        """If file export is requested the result of each SNP position is written to the two
+			result files after the call; the rows of the called SNPs are collected here"""
+        if self.export:
+            self.csnpdict = {snp[0]: snp for snp in SNP_info if snp[0] in called_snps}
+
+        """Color the tree with the states of the sample and call the final SNP"""
+        SNP = "NA"  ## Default message if SNP cannot be confirmed
+        tree_result = self.create_tree(
+            SNPS,
+            self.query_name,
+            called_snps,
+            self.save_tree,
+            min_required_hits=self.min_required_hits,
+            strictness=self.strictness,
+            snp_info=SNP_info,
+            outdir=self.results_dir,
+        )
+        if not isinstance(
+            tree_result, tuple
+        ):  ## create_tree returns None when it only draws a summary tree, no SNP call to consume
+            tree_result = (False, "No SNP call was produced.", [], [])
+        final_snp, message, called, no_data_snps = tree_result
+        """The SNP path of a confirmed call is the chain of the final SNP: the called SNPs from the
+			root of the tree down to the final SNP. Derived SNPs that were called outside that chain
+			(a competing branch) are not part of the path, they are listed in the dashboard
+			report for review. The table of called SNPs keeps one row for every called SNP.
+			Without a confirmed call (NA) the path lists all called SNPs, as before."""
+        called_names = [snp[1] for snp in called] if called else []
+        path_names = called_names
+        off_chain = []
+        if final_snp and final_snp[2][0] and len(final_snp) > 5:
+            chain = final_snp[5]
+            path_names = [name for name in chain if name in set(called_names)]
+            off_chain = sorted(name for name in called_names if name not in set(chain))
+        self.result_paths[self.query_name] = ";".join(path_names) if path_names else "NA"
+        """the support of a call: the derived SNPs on the SNP path out of the SNPs on it"""
+        support = "NA"
+        if final_snp:
+            SNP = final_snp[1]
+            if not final_snp[2][0]:  ## if snp was never confirmed print NA
+                SNP = "NA"
+            else:
+                support = "{found}/{n}".format(
+                    found=final_snp[2][1],
+                    n=final_snp[3] if len(final_snp) > 3 else int(final_snp[0]),
+                )
+            called_rows = [self.csnpdict[snp[1]] for snp in called] if self.export else []
+            final_line = "Final SNP: {snp} found/depth: {found}/{depth}".format(
+                snp=SNP, depth=int(final_snp[0]), found=final_snp[2][1]
+            )
+            """found/depth counts label nodes in the depth; the support of the call,
+				found/expected, follows it, so that scripts that read found/depth keep
+				working (#99)"""
+            if support != "NA":
+                final_line += " found/expected: {support}".format(support=support)
+            path_text = ";".join(path_names)
+            logger.info(final_line)
+        else:
+            """an NA sample used to write a snps file with nothing but the final
+				line: the SNPs that WERE called on the way to the failing point are
+				real information, and with them in this file the two result files
+				together list every evaluated position of the tree (issue #35)"""
+            called_ids = set(called_snps)
+            called_rows = [row for row in SNP_info if row[0] in called_ids]
+            final_line = "Final SNP: {snp}".format(snp=SNP)
+            path_text = ";".join(path_names) if path_names else "NA"
+            logger.info(message)
+        self.sample_supports[self.query_name] = support
+        return SampleCall(
+            snp=SNP,
+            message=message,
+            final_snp=final_snp,
+            no_data_snps=no_data_snps,
+            path_names=path_names,
+            off_chain=off_chain,
+            support=support,
+            final_line=final_line,
+            path_text=path_text,
+            called_rows=called_rows,
+        )
+
+    def write_result_files(self, q, call, SNP_info, called_snps, reads_line):
+        """<sample>_snps.txt and <sample>_not_called.txt"""
+        outputfile = self.sample_output(self.query_name, "_not_called.txt")
+        outputfile2 = self.sample_output(self.query_name, "_snps.txt")
+        """Both files start with the table, a header row and the rows; the lines on the
+			call and the input follow as # comment lines, so that a table reader that skips
+			comments (pandas.read_csv(comment="#")) reads the table. SNP positions of the tree
+			that no alignment carried a base for are listed in the not called file with an
+			N/A target base (issue #27)"""
+        with open(outputfile2, "w") as called_out:
+            print("\t".join(SNP_FILE_COLUMNS), file=called_out)
+            for row in call.called_rows:
+                print("\t".join(row), file=called_out)
+            for line in (
+                "SNP path: {path}".format(path=call.path_text),
+                call.final_line,
+                reads_line,
+                self.query_source_line(q),
+                self.settings_line(),
+            ):
+                if line is not None:
+                    print("# " + line, file=called_out)
+        logger.info("Printing SNP info of non called SNPs to {file}".format(file=outputfile))
+        if call.no_data_snps:
+            logger.info(
+                "Listing {n} SNP positions without any alignment data in {file}".format(
+                    n=len(call.no_data_snps), file=outputfile
+                )
+            )
+        with open(outputfile, "w") as snplist_out:
+            print("\t".join(SNP_FILE_COLUMNS), file=snplist_out)
+            for snp in SNP_info:
+                if snp[0] not in called_snps:
+                    print("\t".join(snp), file=snplist_out)
+            for snp in call.no_data_snps:
+                print("\t".join(snp), file=snplist_out)
+            for line in (self.query_source_line(q), self.settings_line()):
+                print("# " + line, file=snplist_out)
+
+    def record_outcome(self, call, SNPS, SNP_info, called_snps, mixed):
+        """Record the outcome of the sample (typed or not), its row of the results overview and
+        print the call"""
+        SNP = call.snp
+        """remember the outcome per sample: the exit code is decided from this
+			(issue #191)"""
+        if SNP != "NA":
+            self.typed[self.query_name] = SNP
+        else:
+            self.not_typed[self.query_name] = (
+                call.message
+            )  ## names the competing paths, or the unconfirmed SNP and why
+        called_path = call.path_names
+        edge_flags = set(row[0] for row in SNP_info if len(row) > EDGE_COLUMN and row[EDGE_COLUMN] == "edge")
+        path_missing = call.final_snp[4] if call.final_snp and len(call.final_snp) > 4 else []
+        severity, reasons = self.review_reasons(call, edge_flags, path_missing, mixed)
+        self.add_sample_report(
+            self.query_name,
+            severity,
+            SNP,
+            ";".join(called_path) if called_path else "NA",
+            reasons,
+            states=SNPS,
+            called=called_snps,
+            edge=sorted(s for s in edge_flags if s in set(called_snps)),
+            no_data=[row[0] for row in call.no_data_snps],
+            support=call.support,
+            path_no_data=path_missing if SNP != "NA" else [],
+            path_snps=path_details(called_path, SNP_info),
+        )
+        print(
+            "{query}: {SNP}".format(query=self.query_name, SNP=SNP)
+        )  ## the call is printed whether or not result files are written
+
+    def review_reasons(self, call, edge_flags, path_missing, mixed):
+        """the status of the sample in the results overview (clean, review, not called) and the
+        reasons a call needs a manual look: positions on the path with no alignment data, SNPs
+        flagged at an alignment edge, derived SNPs on another branch, mixed sites"""
+        SNP = call.snp
+        edge_on_path = [s for s in edge_flags if s in set(call.path_names)]
+        severity = "clean"
+        reasons = []
+        if SNP == "NA":
+            severity = "not called"
+            reasons.append(call.message)
+        if path_missing:
+            if severity == "clean":
+                severity = "review"
+            reasons.append(
+                "{k} SNP positions on the SNP path had no alignment data (the call leans on --strictness): {ids}".format(
+                    k=len(path_missing), ids=", ".join(path_missing)
+                )
+            )
+        if edge_on_path:
+            if severity == "clean":
+                severity = "review"
+            reasons.append(
+                "SNPs flagged at an alignment edge on the SNP path: {ids}".format(
+                    ids=", ".join(sorted(edge_on_path))
+                )
+            )
+        if call.off_chain and SNP != "NA":
+            if severity == "clean":
+                severity = "review"
+            reasons.append(
+                "{k} derived SNP(s) called outside the SNP path, on another branch: {ids}".format(
+                    k=len(call.off_chain), ids=", ".join(call.off_chain)
+                )
+            )
+        if len(mixed) >= self.mixed_sites and mixed:
+            """isolates are typed; reads that disagree at several canSNPs suggest a mixture"""
+            if severity == "clean":
+                severity = "review"
+            reasons.append(
+                "possibly mixed: at {k} canSNP sites no base reached the allele fraction: {ids}; a duplicated region of the sample (a copy the reference lacks) gives the same pattern, see the counts in the site count file".format(
+                    k=len(mixed), ids=", ".join(mixed[:20])
+                )
+            )
+            logger.warning(
+                "{sample} is possibly mixed: at {k} canSNP sites no base reached the allele fraction ({ids})".format(
+                    sample=self.query_name, k=len(mixed), ids=", ".join(mixed[:20])
+                )
+            )
+        return severity, reasons
+
+    def finish_run(self):
+        """The end of the run: the counts and the reason when nothing was typed, the summary,
+        the results overview and the clean-up of the temporary folder"""
         """the run has to say what it actually produced: an all NA run used to end with
 			"finished successfully" and exit code 0 (issue #191)"""
         if len(self.query) > 0:
