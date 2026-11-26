@@ -1,11 +1,11 @@
 #!/usr/bin/env python3 -c
 
-'''
+"""
 Read CanSNPer taxonomy holds a dictionary with taxonomy tree and name translation
 
 Ported from flextaxd.modules.ReadTaxonomy(CanSNPer) to remove the flextaxd
 dependency (ISSUES #22/#60), using CanSNPer2's own database functions.
-'''
+"""
 
 __version__ = "1.0"
 __author__ = "David Sundell"
@@ -20,275 +20,317 @@ from CanSNPer2.modules.DatabaseConnection import DatabaseFunctions, DatabaseWrit
 import logging
 import gzip
 import sys
+
 logger = logging.getLogger(__name__)
 
+
 class InputError(Exception):
-	"""Exception raised for errors in the input."""
-	def __init__(self, message):
-		#self.expression = expression
-		self.message = message
+    """Exception raised for errors in the input."""
+
+    def __init__(self, message):
+        # self.expression = expression
+        self.message = message
+
 
 class ImportFormatError(Exception):
-	def __init__(self, value):
-		self.value = value
-	def __str__(self):
-		return repr(self.value)
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return repr(self.value)
+
 
 class ReadTaxonomyBase(object):
-	"""docstring for ReadTaxonomy."""
-	def __init__(self, taxonomy_file=False, taxonomy_name=False, database=False,verbose=False,**kwargs):
-		super(ReadTaxonomyBase, self).__init__()
-		### Connect to or create database
-		if database:
-			self.database = DatabaseFunctions(database,verbose=verbose)
-		else:
-			raise InputError("No database was provided to ReadTaxonomy, abort!")
-		self.taxonomy_file = taxonomy_file
-		self.verbose = verbose
-		self.taxonomy = {}
-		self.rank = {}
-		self.levelDict = {}
-		self.sep = "\t"
-		self.length = 0
-		self.ids = 0
+    """docstring for ReadTaxonomy."""
 
-	def zopen(self, path,*args, **kwargs):
-		'''Redefine open to handle zipped files automatically; a file read as text is read
-			with open_source, so a byte order mark is dropped'''
-		if not kwargs and (not args or args == ("r",)):
-			return open_source(path)
-		if path.endswith(".gz"):
-			if str(*args) in ["r","w"] and sys.version_info.major >= 3:
-				## Python version three and above interprets binary formats as binary, add t (rt) to get text returned
-				args = (str(*args)+"t",)
-			else:
-				args = ("rt",)
-			return gzip.open(path,*args,**kwargs)
-		return open(path,*args,**kwargs)
+    def __init__(self, taxonomy_file=False, taxonomy_name=False, database=False, verbose=False, **kwargs):
+        super(ReadTaxonomyBase, self).__init__()
+        ### Connect to or create database
+        if database:
+            self.database = DatabaseFunctions(database, verbose=verbose)
+        else:
+            raise InputError("No database was provided to ReadTaxonomy, abort!")
+        self.taxonomy_file = taxonomy_file
+        self.verbose = verbose
+        self.taxonomy = {}
+        self.rank = {}
+        self.levelDict = {}
+        self.sep = "\t"
+        self.length = 0
+        self.ids = 0
 
-	def parse_taxonomy(self,treefile=False):
-		'''Parse taxonomy information'''
-		'''the base node and its self-link used to be created in __init__, which also gave every
+    def zopen(self, path, *args, **kwargs):
+        """Redefine open to handle zipped files automatically; a file read as text is read
+        with open_source, so a byte order mark is dropped"""
+        if not kwargs and (not args or args == ("r",)):
+            return open_source(path)
+        if path.endswith(".gz"):
+            if str(*args) in ["r", "w"] and sys.version_info.major >= 3:
+                ## Python version three and above interprets binary formats as binary, add t (rt) to get text returned
+                args = (str(*args) + "t",)
+            else:
+                args = ("rt",)
+            return gzip.open(path, *args, **kwargs)
+        return open(path, *args, **kwargs)
+
+    def parse_taxonomy(self, treefile=False):
+        """Parse taxonomy information"""
+        """the base node and its self-link used to be created in __init__, which also gave every
 			subclass an extra node named "root" above its own tree: ReadTaxonomyCanSNPer builds
 			its root from the source file and overrode parse_taxonomy, so the "root" node was
 			never even connected to the tree it sat above (issues #32, #34, and the
 			"#Node has no snp_annotation root" warning came from that orphan). The base node
 			creation belongs in parse_taxonomy, where the subclasses that build their own root
-			can skip it.'''
-		self.root = self.add_node("root")
-		self.add_rank("no rank")
-		self.add_link(child=1, parent=1,rank="no rank")
-		self.read_nodes(treefile=treefile)
+			can skip it."""
+        self.root = self.add_node("root")
+        self.add_rank("no rank")
+        self.add_link(child=1, parent=1, rank="no rank")
+        self.read_nodes(treefile=treefile)
 
-	def set_separator(self,sep):
-		'''Change separator from default (\t)'''
-		self.sep = sep
+    def set_separator(self, sep):
+        """Change separator from default (\t)"""
+        self.sep = sep
 
-	def written(self, result, what):
-		'''the query wrapper of the database only logs a failed insert and returns the exception,
-			so a tree, node or link that could not be written was left out of the database and
-			--create ended with exit status 0; such a result is raised as DatabaseWriteError'''
-		if isinstance(result, Exception):
-			raise DatabaseWriteError("The {what} could not be written to {db}: {error}".format(
-				what=what, db=self.database.database, error=result))
-		return result
+    def written(self, result, what):
+        """the query wrapper of the database only logs a failed insert and returns the exception,
+        so a tree, node or link that could not be written was left out of the database and
+        --create ended with exit status 0; such a result is raised as DatabaseWriteError"""
+        if isinstance(result, Exception):
+            raise DatabaseWriteError(
+                "The {what} could not be written to {db}: {error}".format(
+                    what=what, db=self.database.database, error=result
+                )
+            )
+        return result
 
-	def add_rank(self, rank,qiime=False):
-		'''Insert rank into database'''
-		try:
-			return self.rank[rank]
-		except KeyError:
-			pass
-		if rank:
-			if qiime:
-				rank_i = self.database.add_rank(self.levelDict.get(rank))
-			else:
-				rank_i = self.database.add_rank(rank)
-			self.written(rank_i, "rank {rank}".format(rank=rank))
-			self.rank[rank] = rank_i
-		else:
-			return False
-		return rank_i
+    def add_rank(self, rank, qiime=False):
+        """Insert rank into database"""
+        try:
+            return self.rank[rank]
+        except KeyError:
+            pass
+        if rank:
+            if qiime:
+                rank_i = self.database.add_rank(self.levelDict.get(rank))
+            else:
+                rank_i = self.database.add_rank(rank)
+            self.written(rank_i, "rank {rank}".format(rank=rank))
+            self.rank[rank] = rank_i
+        else:
+            return False
+        return rank_i
 
-	def add_link(self, child=None, parent=None,rank="no rank"):
-		'''Add relationship in tree'''
-		if not child and parent:
-			raise InputError("A link requires both a child and a parent!")
-		self.written(self.database.add_link(child=child,parent=parent,rank=self.rank[rank]),
-			"link from node {parent} to node {child}".format(parent=parent, child=child))
-		self.ids+=1
+    def add_link(self, child=None, parent=None, rank="no rank"):
+        """Add relationship in tree"""
+        if not child and parent:
+            raise InputError("A link requires both a child and a parent!")
+        self.written(
+            self.database.add_link(child=child, parent=parent, rank=self.rank[rank]),
+            "link from node {parent} to node {child}".format(parent=parent, child=child),
+        )
+        self.ids += 1
 
-	def add_node(self, description,id=False):
-		'''Add node to tree
-			extend databaseFunction add_node function using self.taxonomy
-			dict to keep track of which nodes were already added
-		'''
-		logger.debug("Node desc: {desc} id: {id}".format(desc=description,id=id))
-		self.taxid_base = self.written(self.database.add_node(description,id), "node {name}".format(name=description))
-		self.taxonomy[description] = self.taxid_base
-		return self.taxid_base
+    def add_node(self, description, id=False):
+        """Add node to tree
+        extend databaseFunction add_node function using self.taxonomy
+        dict to keep track of which nodes were already added
+        """
+        logger.debug("Node desc: {desc} id: {id}".format(desc=description, id=id))
+        self.taxid_base = self.written(
+            self.database.add_node(description, id), "node {name}".format(name=description)
+        )
+        self.taxonomy[description] = self.taxid_base
+        return self.taxid_base
 
-	def read_nodes(self, treefile=False):
-		'''Read a tab separated node file and store a dictionary with names in object'''
-		logger.info("Read nodes in taxonomy file {}".format(treefile))
-		swap = False
-		rank = "no rank"  #Base rank if rank is not used
-		if not treefile:
-			treefile = self.taxonomy_file
-		with self.zopen(treefile, "r") as _treefile:
-			headers = _treefile.readline().strip().split(self.sep)
-			if "parent" not in headers or "child" not in headers:
-				logger.debug("Headers:  {h} separator [{sep}]".format(h=headers,sep=self.sep))
-				raise InputError("Your input tree file does not contain the headers to specify child and parent!")
-			if headers[0] == "parent":
-				swap = True
-			logger.debug("Swap: {swap}".format(swap=swap))
-			for tree_row in _treefile:
-				data = tree_row.strip().split(self.sep)
-				logger.debug(data)
-				if data[0] == "":
-					'''Check for empty rows'''
-					continue
-				if len(data) < 2: ## a row must name both a child and a parent (issue #105/#106)
-					raise InputError("A row of the tree file {file} has no child and parent columns: '{row}'".format(
-						file=treefile, row=tree_row.strip()))
-				rank = "no rank"
-				if len(data) > 2:
-					rank = data.pop().strip()
-					if rank.strip() != "":
-						self.add_rank(rank)
-				if swap:
-					data[0],data[1] = data[1],data[0]
-				'''Add nodes into database'''
-				for node in data:
-					logger.debug(node)
-					node = node.strip()
-					try:
-						self.taxonomy[node]
-					except KeyError:
-						logger.debug("Add node: {node}".format(node=node))
-						self.taxonomy[node] = self.add_node(node)
-						self.ids +=1
-				self.add_link(child=self.taxonomy[data[0].strip()],parent=self.taxonomy[data[1].strip()],rank=rank)
-				self.length +=1
-			self.database.commit()
+    def read_nodes(self, treefile=False):
+        """Read a tab separated node file and store a dictionary with names in object"""
+        logger.info("Read nodes in taxonomy file {}".format(treefile))
+        swap = False
+        rank = "no rank"  # Base rank if rank is not used
+        if not treefile:
+            treefile = self.taxonomy_file
+        with self.zopen(treefile, "r") as _treefile:
+            headers = _treefile.readline().strip().split(self.sep)
+            if "parent" not in headers or "child" not in headers:
+                logger.debug("Headers:  {h} separator [{sep}]".format(h=headers, sep=self.sep))
+                raise InputError(
+                    "Your input tree file does not contain the headers to specify child and parent!"
+                )
+            if headers[0] == "parent":
+                swap = True
+            logger.debug("Swap: {swap}".format(swap=swap))
+            for tree_row in _treefile:
+                data = tree_row.strip().split(self.sep)
+                logger.debug(data)
+                if data[0] == "":
+                    """Check for empty rows"""
+                    continue
+                if len(data) < 2:  ## a row must name both a child and a parent (issue #105/#106)
+                    raise InputError(
+                        "A row of the tree file {file} has no child and parent columns: '{row}'".format(
+                            file=treefile, row=tree_row.strip()
+                        )
+                    )
+                rank = "no rank"
+                if len(data) > 2:
+                    rank = data.pop().strip()
+                    if rank.strip() != "":
+                        self.add_rank(rank)
+                if swap:
+                    data[0], data[1] = data[1], data[0]
+                """Add nodes into database"""
+                for node in data:
+                    logger.debug(node)
+                    node = node.strip()
+                    try:
+                        self.taxonomy[node]
+                    except KeyError:
+                        logger.debug("Add node: {node}".format(node=node))
+                        self.taxonomy[node] = self.add_node(node)
+                        self.ids += 1
+                self.add_link(
+                    child=self.taxonomy[data[0].strip()], parent=self.taxonomy[data[1].strip()], rank=rank
+                )
+                self.length += 1
+            self.database.commit()
 
 
 class ReadTaxonomyCanSNPer(ReadTaxonomyBase):
-	"""docstring for ReadTaxonomyCanSNPer."""
-	def __init__(self, taxonomy_file=False, database=".canSNPdb",  taxid_base=1,root_name=False,rank="family", cnp=True, verbose=False,**kwargs):
-		'''cnp defaults to True: the CanSNPer source files already carry their own tree root, adding a
-			"cellular organisms" node on top of it gave created databases one node more than the shipped
-			databases (issue #149); pass cnp=False to keep the old behaviour
-		'''
-		super(ReadTaxonomyCanSNPer, self).__init__(taxonomy_file=taxonomy_file, database=database,verbose=verbose,**kwargs)
-		self.input = taxonomy_file
-		self.taxonomy = {}
-		self.taxid_num = taxid_base
-		## Initiate database
-		logger.info(taxonomy_file)
-		logger.debug(root_name)
-		if not root_name:
-			logger.info("Fetching root name from file")
-			root_name = self.get_root_name(taxonomy_file)
-		if not cnp:
-			logger.info("Adding, cellular organism node")
-			c_i = self.add_node("cellular organisms")
-			logger.info("Adding root node {node}!".format(node=root_name))
-		root_i = self.add_node(root_name)
-		self.taxid_num =taxid_base ## reset
-		logger.debug("Adding ranks!")
-		if rank != "no rank":
-			self.add_rank("no rank")
-		self.add_rank(rank)
-		if root_name != "cellular organisms" and not cnp:
-			self.add_link(c_i,1)
-		if root_name != "root" and not cnp:
-			self.add_link(root_i,c_i,rank=rank) ## root is always added as top parent if not one force 1
-			self.taxonomy[root_i] = 1  ## Add local link to root
-		if cnp:
-			'''the CanSNPer source files already carry their own tree root and the shipped databases mark
+    """docstring for ReadTaxonomyCanSNPer."""
+
+    def __init__(
+        self,
+        taxonomy_file=False,
+        database=".canSNPdb",
+        taxid_base=1,
+        root_name=False,
+        rank="family",
+        cnp=True,
+        verbose=False,
+        **kwargs,
+    ):
+        """cnp defaults to True: the CanSNPer source files already carry their own tree root, adding a
+        "cellular organisms" node on top of it gave created databases one node more than the shipped
+        databases (issue #149); pass cnp=False to keep the old behaviour
+        """
+        super(ReadTaxonomyCanSNPer, self).__init__(
+            taxonomy_file=taxonomy_file, database=database, verbose=verbose, **kwargs
+        )
+        self.input = taxonomy_file
+        self.taxonomy = {}
+        self.taxid_num = taxid_base
+        ## Initiate database
+        logger.info(taxonomy_file)
+        logger.debug(root_name)
+        if not root_name:
+            logger.info("Fetching root name from file")
+            root_name = self.get_root_name(taxonomy_file)
+        if not cnp:
+            logger.info("Adding, cellular organism node")
+            c_i = self.add_node("cellular organisms")
+            logger.info("Adding root node {node}!".format(node=root_name))
+        root_i = self.add_node(root_name)
+        self.taxid_num = taxid_base  ## reset
+        logger.debug("Adding ranks!")
+        if rank != "no rank":
+            self.add_rank("no rank")
+        self.add_rank(rank)
+        if root_name != "cellular organisms" and not cnp:
+            self.add_link(c_i, 1)
+        if root_name != "root" and not cnp:
+            self.add_link(root_i, c_i, rank=rank)  ## root is always added as top parent if not one force 1
+            self.taxonomy[root_i] = 1  ## Add local link to root
+        if cnp:
+            """the CanSNPer source files already carry their own tree root and the shipped databases mark
 				that root with a link from the node to itself, adding the same link keeps created databases
-				structurally identical to the shipped ones (issue #149)'''
-			self.add_link(root_i,root_i,rank=rank)
-		self.names = {}
-		self.root = root_i
-		self.length = 0
-		self.ids = 0
+				structurally identical to the shipped ones (issue #149)"""
+            self.add_link(root_i, root_i, rank=rank)
+        self.names = {}
+        self.root = root_i
+        self.length = 0
+        self.ids = 0
 
-		self.database.commit()
-		logger.debug("Root: {root} link: [{base}]".format(root=self.root, base=self.taxid_num))
+        self.database.commit()
+        logger.debug("Root: {root} link: [{base}]".format(root=self.root, base=self.taxid_num))
 
-	def get_root_name(self,fin):
-		'''Get the root name of the CanSNP file unless root is specified'''
-		with self.zopen(fin) as f:
-			firstline = ""
-			for row in f:           ## blank lines before the root are skipped, as check_tree skips them
-				if row.strip():
-					firstline = row
-					break
-			firstline = firstline.strip().replace("\t",";")
-			root = [name.strip() for name in firstline.split(";")] ## Root should be either the leftmost annotation in the tree or the only annotation on that row
-			if isinstance(root,list):
-				root = root[0]
-		return root
+    def get_root_name(self, fin):
+        """Get the root name of the CanSNP file unless root is specified"""
+        with self.zopen(fin) as f:
+            firstline = ""
+            for row in f:  ## blank lines before the root are skipped, as check_tree skips them
+                if row.strip():
+                    firstline = row
+                    break
+            firstline = firstline.strip().replace("\t", ";")
+            root = [
+                name.strip() for name in firstline.split(";")
+            ]  ## Root should be either the leftmost annotation in the tree or the only annotation on that row
+            if isinstance(root, list):
+                root = root[0]
+        return root
 
-	def add_SNP(self,nodes,i):
-		'''Add name of node to database'''
-		'''Walk up the path from nodes[i] to the first parent that exists (or to the root), then
+    def add_SNP(self, nodes, i):
+        """Add name of node to database"""
+        """Walk up the path from nodes[i] to the first parent that exists (or to the root), then
 			add the missing nodes from the top down. This was a recursion, which failed with a
-			RecursionError for a path of about 1500 levels.'''
-		missing = []
-		j = i
-		while True:
-			missing.append(j)
-			logger.debug("Parent did not exit Add parent: {name}".format(name=nodes[j].strip()))
-			if j - 1 < -len(nodes): ## the parent chain is exhausted, the topmost listed node links to the root (issue #108)
-				parent_i = self.root
-				break
-			if nodes[j-1] in self.taxonomy:  ## check if current nodes parent exists
-				parent_i = self.taxonomy[nodes[j-1]]
-				break
-			j -= 1                           ## Parent did not exist, keep walking up the tree and add all parents until root!
-		node_i = None
-		for j in reversed(missing):
-			node_i = self.add_node(nodes[j].strip())  ## Add node
-			if node_i:
-				self.taxid_num += 1
-			self.add_link(node_i, parent_i)            ## Add link to next parent
-			parent_i = node_i
-		return node_i     ##  index of child
+			RecursionError for a path of about 1500 levels."""
+        missing = []
+        j = i
+        while True:
+            missing.append(j)
+            logger.debug("Parent did not exit Add parent: {name}".format(name=nodes[j].strip()))
+            if j - 1 < -len(
+                nodes
+            ):  ## the parent chain is exhausted, the topmost listed node links to the root (issue #108)
+                parent_i = self.root
+                break
+            if nodes[j - 1] in self.taxonomy:  ## check if current nodes parent exists
+                parent_i = self.taxonomy[nodes[j - 1]]
+                break
+            j -= 1  ## Parent did not exist, keep walking up the tree and add all parents until root!
+        node_i = None
+        for j in reversed(missing):
+            node_i = self.add_node(nodes[j].strip())  ## Add node
+            if node_i:
+                self.taxid_num += 1
+            self.add_link(node_i, parent_i)  ## Add link to next parent
+            parent_i = node_i
+        return node_i  ##  index of child
 
-	def parse_taxonomy(self):
-		'''Retrieve node description from CanSNPer formatted tree'''
-		logger.info("Parse CanSNP tree file")
-		with self.zopen(self.taxonomy_file,"r") as f:
-			for row in f:
-				row = row.strip().replace("\t",";")  ## Also accept tab separated tree files
-				if not row:
-					continue
-				nodes = [name.strip() for name in row.strip().split(";")]  ## get node and all its parents in a list, names are stripped as SourceCheck does
-				logger.debug(nodes)
-				child = nodes[-1]  ## get name of child node
-				if len(nodes) > 1 and child.strip() in self.taxonomy:
-					'''a path that is already known (a repeated line, or a line that ends at an inner
+    def parse_taxonomy(self):
+        """Retrieve node description from CanSNPer formatted tree"""
+        logger.info("Parse CanSNP tree file")
+        with self.zopen(self.taxonomy_file, "r") as f:
+            for row in f:
+                row = row.strip().replace("\t", ";")  ## Also accept tab separated tree files
+                if not row:
+                    continue
+                nodes = [
+                    name.strip() for name in row.strip().split(";")
+                ]  ## get node and all its parents in a list, names are stripped as SourceCheck does
+                logger.debug(nodes)
+                child = nodes[-1]  ## get name of child node
+                if len(nodes) > 1 and child.strip() in self.taxonomy:
+                    """a path that is already known (a repeated line, or a line that ends at an inner
 						node) added the node a second time, as a new node under the same name;
-						SourceCheck has made sure that a node has only one parent'''
-					continue
-				'''If the tree was not properly formatted an a parent is missing make sure that function works anyway by adding any parent node above child'''
-				try:
-					pname = nodes[-2].strip()
-					parent_i = self.taxonomy[pname]  ## Check if parent of child node exists
-				except KeyError: ## parent node does not exist, add parent
-					parent_i = self.add_SNP(nodes,-2)
-				except IndexError: ## Should be first row with only one node (parent)
-					self.taxonomy[child] = self.root
-					parent_i = self.root
-					continue
-				'''Now all parents exists, add new child node and add the link'''
-				child_i = self.add_node(child)
-				self.written(self.database.add_link(child_i,parent_i),
-					"link from node {parent} to node {child}".format(parent=parent_i, child=child))
-		self.database.commit()
-		self.length = self.taxid_num - self.root                ## Check number of new nodes added
-		logger.info("New taxonomy ids assigned {taxidnr}".format(taxidnr=self.length))
+						SourceCheck has made sure that a node has only one parent"""
+                    continue
+                """If the tree was not properly formatted an a parent is missing make sure that function works anyway by adding any parent node above child"""
+                try:
+                    pname = nodes[-2].strip()
+                    parent_i = self.taxonomy[pname]  ## Check if parent of child node exists
+                except KeyError:  ## parent node does not exist, add parent
+                    parent_i = self.add_SNP(nodes, -2)
+                except IndexError:  ## Should be first row with only one node (parent)
+                    self.taxonomy[child] = self.root
+                    parent_i = self.root
+                    continue
+                """Now all parents exists, add new child node and add the link"""
+                child_i = self.add_node(child)
+                self.written(
+                    self.database.add_link(child_i, parent_i),
+                    "link from node {parent} to node {child}".format(parent=parent_i, child=child),
+                )
+        self.database.commit()
+        self.length = self.taxid_num - self.root  ## Check number of new nodes added
+        logger.info("New taxonomy ids assigned {taxidnr}".format(taxidnr=self.length))

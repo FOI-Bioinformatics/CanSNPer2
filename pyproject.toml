@@ -31,6 +31,10 @@ dependencies = []
 [project.optional-dependencies]
 test = ["pytest"]
 
+[dependency-groups]
+# the ruff version that CI runs; install with pip install --group lint (pip 25.1 or later)
+lint = ["ruff==0.17.6"]
+
 [project.urls]
 Homepage = "https://github.com/FOI-Bioinformatics/CanSNPer2"
 Documentation = "https://github.com/FOI-Bioinformatics/CanSNPer2/tree/master/docs"
@@ -45,3 +49,35 @@ version = { attr = "CanSNPer2.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["CanSNPer2*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["build"]
+
+[tool.ruff.format]
+indent-style = "space"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle errors and warnings, and bugbear: the checks that find defects.
+# Ignored: E402 (tests and scripts set up sys.path before their imports), E731 and E741
+# (style), B904 (raise ... from inside except, a change of the tracebacks) and B905
+# (zip(strict=), a change of behavior where lengths differ).
+select = ["E4", "E7", "E9", "F", "W", "B"]
+ignore = ["E402", "E731", "E741", "B904", "B905"]
+
+[tool.coverage.run]
+# the test suite runs cansnper2 as a subprocess and in forked worker processes: both are
+# measured, each in its own data file, combined with coverage combine
+source = ["CanSNPer2"]
+parallel = true
+patch = ["subprocess"]
+concurrency = ["multiprocessing", "thread"]
+sigterm = true
+
+[tool.coverage.paths]
+# the tests import the installed package, and the subprocess tests the checkout
+source = ["CanSNPer2", "*/site-packages/CanSNPer2"]
+
+[tool.coverage.report]
+skip_empty = true

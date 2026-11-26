@@ -12,4 +12,3 @@ CanSNPer2-test are no longer installed in 2.6.0; the verbs above do the
 same jobs, with hyphenated spellings of the options.
 Run cansnper2 <command> --help for its arguments; examples in README.md.
 """
-

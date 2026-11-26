@@ -1,19 +1,32 @@
 import logging
+
 logger = logging.getLogger(__name__)
-from CanSNPer2.modules.DatabaseConnection import CreateDatabase, DatabaseFunctions, check_source_headers, GENOME_SOURCE_COLUMNS, CANSNP_SOURCE_COLUMNS, SNP_SOURCE_COLUMNS, TYPED_VALUES, annotation_columns, cansnp_row, SourceFileError, DatabaseWriteError, open_source
+from CanSNPer2.modules.DatabaseConnection import (
+    CreateDatabase,
+    DatabaseFunctions,
+    check_source_headers,
+    GENOME_SOURCE_COLUMNS,
+    TYPED_VALUES,
+    annotation_columns,
+    cansnp_row,
+    SourceFileError,
+    DatabaseWriteError,
+    open_source,
+)
 from CanSNPer2.modules.SourceCheck import check_sources, register_genome_names, split_row
 from CanSNPer2.modules.SchemeInfo import build_info, write_scheme_info
 from CanSNPer2.modules.SchemeGenomes import load_genomes
 from importlib import import_module
 from datetime import date
 
+
 def snp_annotation_sql(table="snp_annotation"):
-	'''the CREATE statement of the snp_annotation table of the current format; the conversion
-		of a database of an older format builds it under another name first.
-		A node has one row per canSNP, ranked within the node, and the canSNPs the scheme
-		types carry typed = 1. Typing reads those; the others are the alternatives of the
-		node, which an assay may use and which --export writes back'''
-	return """CREATE TABLE IF NOT EXISTS {table} (
+    """the CREATE statement of the snp_annotation table of the current format; the conversion
+    of a database of an older format builds it under another name first.
+    A node has one row per canSNP, ranked within the node, and the canSNPs the scheme
+    types carry typed = 1. Typing reads those; the others are the alternatives of the
+    node, which an assay may use and which --export writes back"""
+    return """CREATE TABLE IF NOT EXISTS {table} (
 									node_id INTEGER,
 									snp_id VARCHAR(6) ,
 									sequence VARCHAR(40),
@@ -32,30 +45,33 @@ def snp_annotation_sql(table="snp_annotation"):
 								);
 							""".format(table=table)
 
+
 def dynamic_import(abs_module_path, class_name):
-	module = import_module(".".join([abs_module_path,class_name]))
-	target_class = getattr(module, class_name)
-	return target_class
+    module = import_module(".".join([abs_module_path, class_name]))
+    target_class = getattr(module, class_name)
+    return target_class
+
 
 class CreateSNPDatabase(CreateDatabase):
-	'''
-		InitiateDatabase creates an empty CanSNPer2 database with all nessesary tables
-		Does not include any functionality for modifying or filling the database and is
-		written to be independend of other database object!
-		Extends CreateDatabase from FlexTaxD
-	'''
-	def __init__(self, database,create=False,verbose=False):
-		super().__init__(verbose=verbose)  ## This should create the batabase and all its tablestable
-		#self.database = database
-		'''If database does not exist create database, else nothing will happen'''
-		if create:
-			self.create_database(database)
-			logger.info("Create CanSNPer2 table")
-			self.create_cansnp_table()
+    """
+    InitiateDatabase creates an empty CanSNPer2 database with all nessesary tables
+    Does not include any functionality for modifying or filling the database and is
+    written to be independend of other database object!
+    Extends CreateDatabase from FlexTaxD
+    """
 
-	def create_cansnp_table(self):
-		sql_create_SNP_table = snp_annotation_sql()
-		sql_create_snp_references_table =  """CREATE TABLE IF NOT EXISTS snp_references (
+    def __init__(self, database, create=False, verbose=False):
+        super().__init__(verbose=verbose)  ## This should create the batabase and all its tablestable
+        # self.database = database
+        """If database does not exist create database, else nothing will happen"""
+        if create:
+            self.create_database(database)
+            logger.info("Create CanSNPer2 table")
+            self.create_cansnp_table()
+
+    def create_cansnp_table(self):
+        sql_create_SNP_table = snp_annotation_sql()
+        sql_create_snp_references_table = """CREATE TABLE IF NOT EXISTS snp_references (
 									id INTEGER PRIMARY KEY,
 									genome VARCHAR(6),
 									strain VARCHAR(200),
@@ -64,205 +80,248 @@ class CreateSNPDatabase(CreateDatabase):
 									assembly_name VARCHAR(200)
 								);
 							"""
-		logger.info("Add SNP table")
-		self.add_table(sql_create_SNP_table)
-		logger.info("Add SNP reference table")
-		self.add_table(sql_create_snp_references_table)
-		return
+        logger.info("Add SNP table")
+        self.add_table(sql_create_SNP_table)
+        logger.info("Add SNP reference table")
+        self.add_table(sql_create_snp_references_table)
+        return
+
 
 class CanSNPDatabase(DatabaseFunctions):
-	"""Class containing functions for Loading data into the database, inherits functions from the CanSNPer2 taxonomy database classes"""
-	def __init__(self,*args,**kwargs):
-		if kwargs["create"]:
-			'''the source files are checked before anything is written: the loaders used to store
+    """Class containing functions for Loading data into the database, inherits functions from the CanSNPer2 taxonomy database classes"""
+
+    def __init__(self, *args, **kwargs):
+        if kwargs["create"]:
+            """the source files are checked before anything is written: the loaders used to store
 				or silently drop rows that do not form a valid scheme, and connecting below
-				already creates the database file'''
-			problems = check_sources(tree=kwargs.get("tree"), annotation=kwargs.get("annotation"),
-				references=kwargs.get("references"))
-			if problems:
-				raise SourceFileError("The source files cannot be built into a database, {n} problem(s):\n  {list}".format(
-					n=len(problems), list="\n  ".join(problems)))
-		super().__init__(kwargs["database"],verbose=kwargs["verbose"])
-		logger.debug(kwargs)
-		'''Connect to database'''
-		if kwargs["create"]:
-			logger.debug("Create: {create}".format(create=kwargs["create"]))
-			'''the object is only created to run its side effect of making the database and its tables,
-				it is never used again and was kept in an attribute no other code read (issue #165)'''
-			CreateSNPDatabase(kwargs["database"],create=kwargs["create"],verbose=kwargs["verbose"])
-		else:
-			logger.debug("Connect to database {db}".format(db=kwargs["database"]))
-		source_type = kwargs["source_type"]
-		self.today = date.today()
-		'''load_annotation_file checks self.genomes before any reference file has been loaded, without
-			this it died with an AttributeError when only an annotation file was given'''
-		self.genomes = {}
-		if kwargs["tree"]:
-			logger.debug("Loading module ReadTaxonomy{type}".format(type=source_type))
-			read_module = dynamic_import("CanSNPer2.modules", "ReadTaxonomy{type}".format(type=source_type))
-			read_obj = read_module(kwargs["tree"], database=kwargs["database"],root_name=False,rank="family",verbose=kwargs["verbose"])
-			read_obj.verbose = kwargs["verbose"]                                                          ## Set verbose mode
-			logger.info("Parse taxonomy")
-			read_obj.parse_taxonomy()                                                           ## Parse taxonomy file
-		if kwargs["references"]:
-			logger.info("Load genome reference file!")
-			self.load_genome_annotation(kwargs["references"])
-		if kwargs["annotation"]:
-			logger.info("Load annotation file!")
-			self.load_cansnp_annotation(kwargs["annotation"])
-		if kwargs.get("genomes"):
-			'''the genomes of the scheme and their nodes, checked against the tree just loaded'''
-			logger.info("Load genomes file!")
-			load_genomes(self.conn, kwargs["genomes"])
-		if kwargs["create"]:
-			'''a new database records the format, the CanSNPer2 version and the date it was built,
-				and what is known of the scheme: scheme_info is a dict of the keys of SchemeInfo'''
-			write_scheme_info(self.conn, build_info(**(kwargs.get("scheme_info") or {})))
+				already creates the database file"""
+            problems = check_sources(
+                tree=kwargs.get("tree"),
+                annotation=kwargs.get("annotation"),
+                references=kwargs.get("references"),
+            )
+            if problems:
+                raise SourceFileError(
+                    "The source files cannot be built into a database, {n} problem(s):\n  {list}".format(
+                        n=len(problems), list="\n  ".join(problems)
+                    )
+                )
+        super().__init__(kwargs["database"], verbose=kwargs["verbose"])
+        logger.debug(kwargs)
+        """Connect to database"""
+        if kwargs["create"]:
+            logger.debug("Create: {create}".format(create=kwargs["create"]))
+            """the object is only created to run its side effect of making the database and its tables,
+				it is never used again and was kept in an attribute no other code read (issue #165)"""
+            CreateSNPDatabase(kwargs["database"], create=kwargs["create"], verbose=kwargs["verbose"])
+        else:
+            logger.debug("Connect to database {db}".format(db=kwargs["database"]))
+        source_type = kwargs["source_type"]
+        self.today = date.today()
+        """load_annotation_file checks self.genomes before any reference file has been loaded, without
+			this it died with an AttributeError when only an annotation file was given"""
+        self.genomes = {}
+        if kwargs["tree"]:
+            logger.debug("Loading module ReadTaxonomy{type}".format(type=source_type))
+            read_module = dynamic_import("CanSNPer2.modules", "ReadTaxonomy{type}".format(type=source_type))
+            read_obj = read_module(
+                kwargs["tree"],
+                database=kwargs["database"],
+                root_name=False,
+                rank="family",
+                verbose=kwargs["verbose"],
+            )
+            read_obj.verbose = kwargs["verbose"]  ## Set verbose mode
+            logger.info("Parse taxonomy")
+            read_obj.parse_taxonomy()  ## Parse taxonomy file
+        if kwargs["references"]:
+            logger.info("Load genome reference file!")
+            self.load_genome_annotation(kwargs["references"])
+        if kwargs["annotation"]:
+            logger.info("Load annotation file!")
+            self.load_cansnp_annotation(kwargs["annotation"])
+        if kwargs.get("genomes"):
+            """the genomes of the scheme and their nodes, checked against the tree just loaded"""
+            logger.info("Load genomes file!")
+            load_genomes(self.conn, kwargs["genomes"])
+        if kwargs["create"]:
+            """a new database records the format, the CanSNPer2 version and the date it was built,
+				and what is known of the scheme: scheme_info is a dict of the keys of SchemeInfo"""
+            write_scheme_info(self.conn, build_info(**(kwargs.get("scheme_info") or {})))
 
-	def add_annotation(self, data, id=False,genome_i=False):
-		'''Add one canSNP to the annotation table; data is a row of either annotation format
-			as cansnp_row() gives it'''
-		try:
-			data["date"]
-		except KeyError:
-			data["date"] = self.today.strftime("%d/%m/%y")
-		info = {
-				"snp_id":            data["node"],
-				"sequence":          data["sequence"],
-				"sequence_position": data["sequence_position"],
-				"ancestral_base":     data["ancestral_base"],
-				"derived_base":        data["derived_base"],
-				"reference":         data["reference"],
-				"date":             data["date"],
-				"genome_i":         genome_i,
-				"rank":             int(data["rank"]),
-				"score":            data["score"].strip() or None,
-				"typed":            TYPED_VALUES[data["typed"].strip().lower()]
-		}
-		### If ID is supplied skip autoincrement and add specific ID
-		if id is not False: ## the twin of issue #203 in the create path: an id of 0 is a real id
-			info["node_id"] = id
-		taxid_base = self.insert(info, table="snp_annotation")
-		if isinstance(taxid_base, Exception):
-			'''a failed insert was only logged as a warning, and --create then ended with exit
-				status 0 and a database that lacks the SNP'''
-			raise DatabaseWriteError("The canSNP {snp} (rank {rank}) could not be written to {db}: {error}".format(
-				snp=data["node"], rank=data["rank"], db=self.database, error=taxid_base))
-		return taxid_base
+    def add_annotation(self, data, id=False, genome_i=False):
+        """Add one canSNP to the annotation table; data is a row of either annotation format
+        as cansnp_row() gives it"""
+        try:
+            data["date"]
+        except KeyError:
+            data["date"] = self.today.strftime("%d/%m/%y")
+        info = {
+            "snp_id": data["node"],
+            "sequence": data["sequence"],
+            "sequence_position": data["sequence_position"],
+            "ancestral_base": data["ancestral_base"],
+            "derived_base": data["derived_base"],
+            "reference": data["reference"],
+            "date": data["date"],
+            "genome_i": genome_i,
+            "rank": int(data["rank"]),
+            "score": data["score"].strip() or None,
+            "typed": TYPED_VALUES[data["typed"].strip().lower()],
+        }
+        ### If ID is supplied skip autoincrement and add specific ID
+        if id is not False:  ## the twin of issue #203 in the create path: an id of 0 is a real id
+            info["node_id"] = id
+        taxid_base = self.insert(info, table="snp_annotation")
+        if isinstance(taxid_base, Exception):
+            """a failed insert was only logged as a warning, and --create then ended with exit
+				status 0 and a database that lacks the SNP"""
+            raise DatabaseWriteError(
+                "The canSNP {snp} (rank {rank}) could not be written to {db}: {error}".format(
+                    snp=data["node"], rank=data["rank"], db=self.database, error=taxid_base
+                )
+            )
+        return taxid_base
 
-	def add_genome(self,data):
-		'''Add genome annotation'''
-		logger.debug("Add genome")
-		logger.debug(data)
-		info = {
-				"genome":            data["genome"],
-				"strain":         data["strain"],
-				"genbank_id":     data["genbank_id"],
-				"refseq_id":        data["refseq_id"],
-				"assembly_name":         data["assembly_name"],
-				#"comment":             data["comment"]
-		}
-		genome_i = self.insert(info, table="snp_references")
-		if isinstance(genome_i, Exception):
-			raise DatabaseWriteError("The reference genome {genome} could not be written to {db}: {error}".format(
-				genome=data["genome"], db=self.database, error=genome_i))
-		return genome_i
+    def add_genome(self, data):
+        """Add genome annotation"""
+        logger.debug("Add genome")
+        logger.debug(data)
+        info = {
+            "genome": data["genome"],
+            "strain": data["strain"],
+            "genbank_id": data["genbank_id"],
+            "refseq_id": data["refseq_id"],
+            "assembly_name": data["assembly_name"],
+            # "comment":             data["comment"]
+        }
+        genome_i = self.insert(info, table="snp_references")
+        if isinstance(genome_i, Exception):
+            raise DatabaseWriteError(
+                "The reference genome {genome} could not be written to {db}: {error}".format(
+                    genome=data["genome"], db=self.database, error=genome_i
+                )
+            )
+        return genome_i
 
-	def load_genome_annotation_file(self,annotation_file):
-		self.genomes = {}
-		owners = {}
-		with open_source(annotation_file) as f:
-			headers = f.readline().lstrip("#").strip().split("\t")
-			#dataArr = []
-			logging.debug(headers)
-			check_source_headers(headers,GENOME_SOURCE_COLUMNS,annotation_file)
-			for row in f:
-				if row.strip() == "":
-					continue
-				## only the line end is removed: strip() also removed empty trailing fields, so a
-				## reference without an assembly name was skipped as a short row
-				data = split_row(row, len(headers))
-				if len(data) < len(headers): ## a short row would run out of values in the header zip below (issue #89)
-					logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
-					continue
-				ddict = {}
-				for i in range(len(headers)):
-					head,val = headers[i],data[i]
-					ddict[head] = val
-				register_genome_names(owners, ddict, annotation_file)
-				genome_i = self.add_genome(ddict)
-				for column in ("genome", "genbank_id", "refseq_id"):
-					if ddict[column]:
-						self.genomes[ddict[column]] = genome_i
-		self.conn.commit()
-		return self.genomes
+    def load_genome_annotation_file(self, annotation_file):
+        self.genomes = {}
+        owners = {}
+        with open_source(annotation_file) as f:
+            headers = f.readline().lstrip("#").strip().split("\t")
+            # dataArr = []
+            logging.debug(headers)
+            check_source_headers(headers, GENOME_SOURCE_COLUMNS, annotation_file)
+            for row in f:
+                if row.strip() == "":
+                    continue
+                ## only the line end is removed: strip() also removed empty trailing fields, so a
+                ## reference without an assembly name was skipped as a short row
+                data = split_row(row, len(headers))
+                if len(data) < len(
+                    headers
+                ):  ## a short row would run out of values in the header zip below (issue #89)
+                    logging.warning("Skipped short row in reference file: '{row}'".format(row=row.strip()))
+                    continue
+                ddict = {}
+                for i in range(len(headers)):
+                    head, val = headers[i], data[i]
+                    ddict[head] = val
+                register_genome_names(owners, ddict, annotation_file)
+                genome_i = self.add_genome(ddict)
+                for column in ("genome", "genbank_id", "refseq_id"):
+                    if ddict[column]:
+                        self.genomes[ddict[column]] = genome_i
+        self.conn.commit()
+        return self.genomes
 
-	def load_annotation_file(self,annotation_file):
-		'''Read the annotation source file'''
-		nodes = self.get_nodes()
-		logger.info(nodes)
-		logger.debug("nodes: {nnodes}".format(nnodes=len(nodes)/2))
-		if len(self.genomes) == 0:
-			self.genomes = {}
-			for genome_i, genome in self.conn.execute("SELECT id,genome FROM snp_references"):
-				self.genomes[genome] = genome_i
-		logger.debug(self.genomes)
-		with open_source(annotation_file) as af:
-			headers = af.readline().lstrip("#").strip().split("\t")
-			logging.debug(headers)
-			check_source_headers(headers,annotation_columns(headers),annotation_file)
-			'''a trailing free-text comment column is allowed in the snp annotation input, and a row
+    def load_annotation_file(self, annotation_file):
+        """Read the annotation source file"""
+        nodes = self.get_nodes()
+        logger.info(nodes)
+        logger.debug("nodes: {nnodes}".format(nnodes=len(nodes) / 2))
+        if len(self.genomes) == 0:
+            self.genomes = {}
+            for genome_i, genome in self.conn.execute("SELECT id,genome FROM snp_references"):
+                self.genomes[genome] = genome_i
+        logger.debug(self.genomes)
+        with open_source(annotation_file) as af:
+            headers = af.readline().lstrip("#").strip().split("\t")
+            logging.debug(headers)
+            check_source_headers(headers, annotation_columns(headers), annotation_file)
+            """a trailing free-text comment column is allowed in the snp annotation input, and a row
 				may leave that column out; only trailing columns named like a comment are optional,
-				so a row that is short in a real column is still a bad row (issue #22)'''
-			trailing_optional = 0
-			for head in reversed(headers):
-				if head.strip().lower().lstrip("#") in ("comment","comments","note","notes","free text","free_text"):
-					trailing_optional += 1
-				else:
-					break
-			dataArr = []
-			for row in af:
-				if row.strip() == "" or row.strip().startswith("#"):
-					'''# lines are comments in the annotation file (issue #22)'''
-					continue
-				data = split_row(row, len(headers))
-				if len(data) < len(headers) - trailing_optional: ## a short row would run out of values in the header zip below (issue #88)
-					logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
-					continue
-				data += [""] * (len(headers)-len(data)) ## rows may omit the optional trailing comment column (issue #22)
-				ddict = {}
-				for i in range(len(headers)):
-					head,val = headers[i],data[i]
-					ddict[head] = val
-				ddict = cansnp_row(ddict)
-				dataArr.append(ddict)
-				try:
-					_id = nodes[ddict["node"]]
-				except KeyError:
-					'''a SNP dropped with only a warning left a database without it and exit status 0'''
-					raise SourceFileError("{file}: node '{id}' does not appear in the tree, the canSNP would be left out of the database".format(
-						file=annotation_file, id=ddict["node"]))
-				try:
-					genome_i = self.genomes[ddict["genome"]]
-				except KeyError:
-					'''a SNP on a genome that is not in the references file was left out with a warning;
-						check_sources refuses it first, the loader does as well'''
-					raise SourceFileError("{file}: the canSNP of node '{id}' is on genome '{genome}', which is not in the references file".format(
-						file=annotation_file, id=ddict["node"], genome=ddict["genome"]))
-				if _id is not False: ## a looked up node id is checked against False, not for truth: an id of 0 is a real id (issue #202)
-					logger.debug("Add annotation: {dic}, {_id}, {gid}".format(dic=ddict,_id=_id,gid=genome_i))
-					self.add_annotation(ddict, id=_id, genome_i=genome_i)
-		### commit changes to database
-		self.conn.commit()
-		return dataArr
+				so a row that is short in a real column is still a bad row (issue #22)"""
+            trailing_optional = 0
+            for head in reversed(headers):
+                if head.strip().lower().lstrip("#") in (
+                    "comment",
+                    "comments",
+                    "note",
+                    "notes",
+                    "free text",
+                    "free_text",
+                ):
+                    trailing_optional += 1
+                else:
+                    break
+            dataArr = []
+            for row in af:
+                if row.strip() == "" or row.strip().startswith("#"):
+                    """# lines are comments in the annotation file (issue #22)"""
+                    continue
+                data = split_row(row, len(headers))
+                if (
+                    len(data) < len(headers) - trailing_optional
+                ):  ## a short row would run out of values in the header zip below (issue #88)
+                    logging.warning("Skipped short row in annotation file: '{row}'".format(row=row.strip()))
+                    continue
+                data += [""] * (
+                    len(headers) - len(data)
+                )  ## rows may omit the optional trailing comment column (issue #22)
+                ddict = {}
+                for i in range(len(headers)):
+                    head, val = headers[i], data[i]
+                    ddict[head] = val
+                ddict = cansnp_row(ddict)
+                dataArr.append(ddict)
+                try:
+                    _id = nodes[ddict["node"]]
+                except KeyError:
+                    """a SNP dropped with only a warning left a database without it and exit status 0"""
+                    raise SourceFileError(
+                        "{file}: node '{id}' does not appear in the tree, the canSNP would be left out of the database".format(
+                            file=annotation_file, id=ddict["node"]
+                        )
+                    )
+                try:
+                    genome_i = self.genomes[ddict["genome"]]
+                except KeyError:
+                    """a SNP on a genome that is not in the references file was left out with a warning;
+						check_sources refuses it first, the loader does as well"""
+                    raise SourceFileError(
+                        "{file}: the canSNP of node '{id}' is on genome '{genome}', which is not in the references file".format(
+                            file=annotation_file, id=ddict["node"], genome=ddict["genome"]
+                        )
+                    )
+                if (
+                    _id is not False
+                ):  ## a looked up node id is checked against False, not for truth: an id of 0 is a real id (issue #202)
+                    logger.debug(
+                        "Add annotation: {dic}, {_id}, {gid}".format(dic=ddict, _id=_id, gid=genome_i)
+                    )
+                    self.add_annotation(ddict, id=_id, genome_i=genome_i)
+        ### commit changes to database
+        self.conn.commit()
+        return dataArr
 
-	def load_cansnp_annotation(self,annotation_file):
-		'''Function that loads data into the cansnp annotation table'''
-		data = self.load_annotation_file(annotation_file)
-		logging.info("CanSNPer annotation loaded!")
+    def load_cansnp_annotation(self, annotation_file):
+        """Function that loads data into the cansnp annotation table"""
+        self.load_annotation_file(annotation_file)
+        logging.info("CanSNPer annotation loaded!")
 
-	def load_genome_annotation(self,annotation_file):
-		'''Function that loads genome data into the cansnp genome annotation table'''
-		data = self.load_genome_annotation_file(annotation_file)
-		logging.debug(data)
-		logging.info("Genome annotation loaded!")
+    def load_genome_annotation(self, annotation_file):
+        """Function that loads genome data into the cansnp genome annotation table"""
+        data = self.load_genome_annotation_file(annotation_file)
+        logging.debug(data)
+        logging.info("Genome annotation loaded!")

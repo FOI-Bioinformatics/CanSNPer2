@@ -68,6 +68,37 @@ Tests that need an external program or data are skipped when it is missing:
 A few tests of file permissions are skipped when they run as root. `pytest -rs` lists the
 skipped tests with their reasons.
 
+## Formatting and lint
+
+The code is formatted with ruff and checked with its linter; the settings are in
+`pyproject.toml` (line length 110, spaces for indentation) and the ruff version that CI runs is
+in the `lint` dependency group:
+
+```sh
+python -m pip install --group lint
+python -m ruff format .
+python -m ruff check .
+```
+
+The commit that reformatted the code from tabs to spaces is listed in `.git-blame-ignore-revs`.
+GitHub skips it in its blame view; for `git blame`, run once:
+
+```sh
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+## Test coverage
+
+Coverage is measured over the whole suite, including the runs of `cansnper2` that tests start as
+subprocesses (the settings are in `pyproject.toml`):
+
+```sh
+python -m pip install coverage
+python -m coverage run -m pytest -q tests
+python -m coverage combine
+python -m coverage report --sort=cover
+```
+
 `tests/test_docs.py` checks the documentation: every `cansnper2` command line in a `sh` code
 block of `README.md` and `docs/*.md` must parse with the current parsers (a line that shows an
 error on purpose ends with the comment `# fails`), relative links and anchors must resolve, the
@@ -77,13 +108,15 @@ commands and option spellings before 2.6.0 may appear only in `docs/upgrading.md
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every push to `master` and on every pull request, on Ubuntu
-24.04 with Python 3.11, 3.12, 3.13 and 3.14. It:
+24.04. The `lint` job runs `ruff check` and `ruff format --check` with Python 3.13. The `test`
+job runs with Python 3.11, 3.12, 3.13 and 3.14. It:
 
 1. checks out CanSNPer2 and CanSNPer2-data;
 2. installs progressiveMauve, minimap2 and samtools with `apt-get`, and MUMmer4 from Bioconda;
 3. installs CanSNPer2 with pip and runs `pip check`;
 4. runs `cansnper2 selftest` and the help of the main verbs;
-5. runs the unit tests, with `CANSNPER2_DATA` pointing to the CanSNPer2-data checkout;
+5. runs the unit tests, with `CANSNPER2_DATA` pointing to the CanSNPer2-data checkout; with
+   Python 3.13 under coverage, with the coverage table in the job summary;
 6. builds the `bacillus_anthracis` database from the scheme files, exports it, rebuilds it from
    the export and compares the two exports;
 7. builds the same scheme with `cansnper2 scheme get` and compares its export;
