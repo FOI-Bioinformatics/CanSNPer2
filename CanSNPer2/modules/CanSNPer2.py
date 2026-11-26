@@ -37,6 +37,7 @@ from CanSNPer2.modules.LocalReferences import (
 from CanSNPer2.modules.ParsePileup import PLATFORMS
 import subprocess
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
+from CanSNPer2.modules import ResultJSON
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
 from CanSNPer2 import __version__
@@ -218,6 +219,7 @@ class CanSNPer2(object):
         """per sample outcome for the summary.html dashboard: severity, reasons and the SNP
 			states the embedded tree paints when the sample is selected"""
         self.sample_reports = {}
+        self.sample_json = {}  ## samples/<sample>.json of each sample, relative to --outdir (#97)
         """the SNP path per sample, so the summary can print it for every sample (issue #24)"""
         self.result_paths = {}
         """the support of the call per sample, found/n SNPs on the SNP path, NA when not called"""
@@ -1886,6 +1888,55 @@ class CanSNPer2(object):
         if path_snps is not None:
             self.sample_reports[name]["path_snps"] = list(path_snps)
 
+    def relative_output(self, path):
+        """a path in --outdir, relative to it, as the JSON results give it"""
+        return os.path.relpath(path, self.outdir)
+
+    def write_sample_json(self, q, reads_line):
+        """samples/<sample>.json, from the sample report and the lines of the result files (#97)"""
+        name = self.query_name
+        path = self.sample_output(name, ".json")
+        result_files = {
+            "snps": self.relative_output(self.sample_output(name, "_snps.txt")),
+            "not_called": self.relative_output(self.sample_output(name, "_not_called.txt")),
+        }
+        if reads_line is not None:
+            result_files["site_counts"] = self.relative_output(self.sample_output(name, "_site_counts.tsv"))
+        document = ResultJSON.sample_document(
+            self.sample_reports[name],
+            self.run_info(),
+            self.settings_line(),
+            self.query_files(q),
+            self.query_sha256,
+            "reads" if self.is_read(q) else "assembly",
+            reads_line,
+            result_files,
+        )
+        ResultJSON.write_json(path, document)
+        self.sample_json[name] = self.relative_output(path)
+
+    def write_run_json(self):
+        """run.json: the run and one entry per sample, as summary.html lists them (#97); with
+        --summary also cansnper2_mqc.tsv, a MultiQC custom content table"""
+        reports = [self.sample_reports[name] for name in self.sample_reports]
+        sample_files = dict(self.sample_json)
+        for name in self.reused:
+            """a reused sample keeps the JSON file of the run that typed it"""
+            path = self.sample_output(name, ".json")
+            if os.path.isfile(path):
+                sample_files[name] = self.relative_output(path)
+        counts = {"samples": len(reports)}
+        for status in ("clean", "review", "not called", "failed", "reused"):
+            counts[status] = sum(1 for report in reports if report.get("severity") == status)
+        info = self.run_info()
+        ResultJSON.write_json(
+            os.path.join(self.outdir, "run.json"),
+            ResultJSON.run_document(info, reports, sample_files, counts),
+        )
+        if self.summary:
+            with open(os.path.join(self.outdir, "cansnper2_mqc.tsv"), "w") as out:
+                out.write(ResultJSON.mqc_table(reports))
+
     def write_dashboard(self):
         """summary.html: the results overview for runs with many samples. The samples sit in a
         table with the ones that need a manual look first (failed, not called, calls that
@@ -2034,6 +2085,8 @@ class CanSNPer2(object):
         if self.export:
             self.write_result_files(q, call, SNP_info, called_snps, reads_line)
         self.record_outcome(call, SNPS, SNP_info, called_snps, mixed)
+        if self.export:
+            self.write_sample_json(q, reads_line)
         """Clean references to aligned xmfa files between queries if several was supplied"""
         self.alignment_files = []
 
@@ -2443,6 +2496,7 @@ class CanSNPer2(object):
 			have to be found without reading every result file"""
         if len(self.query) > 0:
             self.write_dashboard()
+            self.write_run_json()
         """Finally clean up temporary folder when all alignments and trees has been printed!"""
         if not self.keep_temp:  ## a run without queries also removes its (empty) run directory
             self.cleanup()

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FOI-Bioinformatics/CanSNPer2/blob/master/docs/schemas/cansnper2-sample.schema.json",
+  "title": "CanSNPer2 sample result",
+  "description": "samples/<sample>.json, written by cansnper2 type for each typed sample; see docs/output-formats.md",
+  "type": "object",
+  "required": [
+    "format", "format_version", "cansnper2_version", "date", "sample", "input", "status", "final_snp",
+    "support", "snp_path", "path_snps", "reasons", "path_no_data", "edge_flagged", "derived_cansnps",
+    "no_data_cansnps", "site_states", "reads", "settings", "database", "result_files"
+  ],
+  "properties": {
+    "format": {"const": "cansnper2-sample"},
+    "format_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "cansnper2_version": {"type": "string"},
+    "date": {"type": "string", "description": "start of the run, YYYY-MM-DD HH:MM"},
+    "sample": {"type": "string"},
+    "input": {
+      "type": "object",
+      "required": ["kind", "files", "sha256"],
+      "properties": {
+        "kind": {"enum": ["assembly", "reads"]},
+        "files": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "status": {"enum": ["clean", "review", "not called"]},
+    "final_snp": {"type": ["string", "null"], "description": "null when the sample was not called"},
+    "support": {"$ref": "#/$defs/support"},
+    "snp_path": {"type": "array", "items": {"type": "string"}},
+    "path_snps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "pos": {"type": "string", "description": "<reference sequence>:<position>"},
+          "ancestral": {"type": "string"},
+          "derived": {"type": "string"},
+          "target": {"type": "string", "description": "the base of the sample"}
+        }
+      }
+    },
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "path_no_data": {"type": "array", "items": {"type": "string"}},
+    "edge_flagged": {"type": "array", "items": {"type": "string"}},
+    "derived_cansnps": {"type": "array", "items": {"type": "string"}},
+    "no_data_cansnps": {"type": "array", "items": {"type": "string"}},
+    "site_states": {
+      "type": "object",
+      "additionalProperties": {"enum": ["derived", "ancestral", "other_base", "no_data"]}
+    },
+    "reads": {
+      "description": "the # Reads: line of <sample>_snps.txt as key and value; null for an assembly",
+      "type": ["object", "null"],
+      "required": ["platform", "files", "sites_with_reads", "median_depth", "mixed_sites"]
+    },
+    "settings": {
+      "description": "the # Typing settings: line of <sample>_snps.txt as key and value",
+      "type": "object",
+      "required": ["min_required_hits", "strictness", "mask"]
+    },
+    "database": {"$ref": "#/$defs/database"},
+    "result_files": {
+      "type": "object",
+      "required": ["snps", "not_called"],
+      "additionalProperties": {"type": "string"}
+    }
+  },
+  "$defs": {
+    "support": {
+      "type": ["object", "null"],
+      "required": ["found", "expected"],
+      "properties": {
+        "found": {"type": "integer", "minimum": 0},
+        "expected": {"type": "integer", "minimum": 0}
+      }
+    },
+    "database": {
+      "type": "object",
+      "required": ["file", "sha256", "scheme", "scheme_status", "scheme_line", "reference_genomes", "notice"],
+      "properties": {
+        "file": {"type": "string"},
+        "sha256": {"type": ["string", "null"]},
+        "scheme": {"type": ["string", "null"]},
+        "scheme_status": {"type": ["string", "null"]},
+        "scheme_line": {"type": ["string", "null"]},
+        "reference_genomes": {"type": "array", "items": {"type": "string"}},
+        "notice": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

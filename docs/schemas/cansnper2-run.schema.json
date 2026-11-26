@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FOI-Bioinformatics/CanSNPer2/blob/master/docs/schemas/cansnper2-run.schema.json",
+  "title": "CanSNPer2 run",
+  "description": "run.json, written by cansnper2 type in --outdir for every run with samples; see docs/output-formats.md",
+  "type": "object",
+  "required": [
+    "format", "format_version", "cansnper2_version", "date", "database", "settings", "read_settings",
+    "counts", "samples"
+  ],
+  "properties": {
+    "format": {"const": "cansnper2-run"},
+    "format_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "cansnper2_version": {"type": "string"},
+    "date": {"type": "string"},
+    "database": {"$ref": "cansnper2-sample.schema.json#/$defs/database"},
+    "settings": {
+      "type": "object",
+      "required": ["min_required_hits", "strictness", "mask", "aligner"]
+    },
+    "read_settings": {
+      "description": "one entry per read platform of the run, as the # Read settings: lines of snps_summary.txt",
+      "type": "array",
+      "items": {"type": "object", "required": ["platform"]}
+    },
+    "counts": {
+      "type": "object",
+      "required": ["samples", "clean", "review", "not called", "failed", "reused"],
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sample", "status", "final_snp", "support", "snp_path", "reasons", "result"],
+        "properties": {
+          "sample": {"type": "string"},
+          "status": {"enum": ["clean", "review", "not called", "failed", "reused"]},
+          "final_snp": {"type": ["string", "null"]},
+          "support": {"$ref": "cansnper2-sample.schema.json#/$defs/support"},
+          "snp_path": {"type": "array", "items": {"type": "string"}},
+          "reasons": {"type": "array", "items": {"type": "string"}},
+          "result": {"type": ["string", "null"], "description": "samples/<sample>.json, relative to --outdir"}
+        }
+      }
+    }
+  }
+}

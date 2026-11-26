@@ -14,11 +14,14 @@ minimap2; paths are shortened.
 ```text
 results/                              --outdir (default results)
   summary.html                        overview of all samples (every run with a sample)
+  run.json                            the run and all samples, JSON (every run with a sample)
   snps_summary.txt                    table of all samples (--summary)
   summary_tree.html                   tree with the final SNPs of all samples (--summary)
+  cansnper2_mqc.tsv                   table of all samples for MultiQC (--summary)
   samples/
     <sample>_snps.txt                 derived canSNPs and the call
     <sample>_not_called.txt           all other canSNPs
+    <sample>.json                     the call and its details, JSON
     <sample>_site_counts.tsv          base counts per canSNP (reads only)
     <sample>_tree.html                tree of one sample (--save-tree)
 logs/                                 --log-dir (default logs)
@@ -28,8 +31,9 @@ logs/                                 --log-dir (default logs)
 
 `--outdir`, `--log-dir` and `--tmp-dir` are resolved against `--workdir` (default the current
 folder). The `samples` folder is created when the first per-sample file is written.
-`--no-snp-files` leaves out `<sample>_snps.txt`, `<sample>_not_called.txt` and
-`<sample>_site_counts.tsv`; the call is still printed and written to `summary.html`.
+`--no-snp-files` leaves out `<sample>_snps.txt`, `<sample>_not_called.txt`,
+`<sample>_site_counts.tsv` and `<sample>.json`; the call is still printed and written to
+`summary.html` and `run.json`.
 
 `summary.html` links to the files in `samples/` by relative paths; keep the folder together
 when it is moved.
@@ -244,6 +248,84 @@ follows when the scheme is not verified or the database was changed after it was
 
 `--summary` also writes `summary_tree.html`, the scheme tree with the final SNPs of all samples
 marked.
+
+## JSON results
+
+`samples/<sample>.json` and `run.json` give the results in a form that programs read without
+parsing the `#` lines of the text files. They are written from the same values as
+`<sample>_snps.txt`, `summary.html` and `snps_summary.txt`. Their layout is described by the JSON
+Schemas [cansnper2-sample.schema.json](schemas/cansnper2-sample.schema.json) and
+[cansnper2-run.schema.json](schemas/cansnper2-run.schema.json). `format_version` is `1.0`; a
+later 1.x version may add fields, and a field changes meaning or is removed only with a new
+major version.
+
+### samples/\<sample\>.json
+
+Written for each sample that was typed in the run, called or not, next to `<sample>_snps.txt`.
+A sample that failed has none, and a sample whose earlier result was reused keeps the file of
+the run that typed it.
+
+| Field | Content |
+|---|---|
+| `format`, `format_version` | `cansnper2-sample` and the version of this layout |
+| `cansnper2_version`, `date` | the CanSNPer2 version and the start of the run |
+| `sample` | the sample name |
+| `input` | `kind` (`assembly` or `reads`), the absolute paths of the input `files` and their `sha256`, as the `# Query file:` line |
+| `status` | `clean`, `review` or `not called`, as in `summary.html` |
+| `final_snp` | the final SNP, `null` when the sample was not called |
+| `support` | `found` and `expected`, as `found/expected:`; `null` when not called |
+| `snp_path` | the SNP path, as the `# SNP path:` line |
+| `path_snps` | for each canSNP of the path: `name`, `pos` (`<reference sequence>:<position>`), `ancestral`, `derived` and `target` (the base of the sample) |
+| `reasons` | the reasons for `review` or `not called`, as in `summary.html` |
+| `path_no_data`, `edge_flagged` | canSNPs on the path without data, and derived canSNPs flagged `edge` |
+| `derived_cansnps`, `no_data_cansnps` | all derived canSNPs, and the canSNPs without data |
+| `site_states` | the state of each canSNP: `derived`, `ancestral`, `other_base` or `no_data` |
+| `reads` | the `# Reads:` line as keys and values; `null` for an assembly |
+| `settings` | the `# Typing settings:` line as keys and values |
+| `database` | the database `file` and `sha256`, the `scheme`, its `scheme_status` and `scheme_line`, the `reference_genomes` and the `notice` of a scheme that is not verified |
+| `result_files` | the paths of `snps`, `not_called` and, for reads, `site_counts`, relative to `--outdir` |
+
+Excerpt (lists shortened):
+
+```json
+{
+  "format": "cansnper2-sample",
+  "format_version": "1.0",
+  "cansnper2_version": "2.6.0",
+  "date": "2026-11-27 00:41",
+  "sample": "GCA_000018925.1",
+  "input": {"kind": "assembly", "files": ["/data/genomes/GCA_000018925.1.fasta"], "sha256": "83179f50..."},
+  "status": "clean",
+  "final_snp": "M.1",
+  "support": {"found": 4, "expected": 4},
+  "snp_path": ["T/N.1", "T.1", "A/M.1", "M.1"],
+  "path_snps": [{"name": "T/N.1", "pos": "AJ749949.2:83976", "ancestral": "G", "derived": "A", "target": "A"}],
+  "reasons": [],
+  "site_states": {"A.1": "ancestral", "M.1": "derived"},
+  "reads": null,
+  "settings": {"min_required_hits": 3, "strictness": 0.7, "mask": 0, "aligner": "minimap2"},
+  "database": {"file": "francisella_tularensis.db", "scheme": "francisella_tularensis", "scheme_status": "verified"},
+  "result_files": {"snps": "samples/GCA_000018925.1_snps.txt", "not_called": "samples/GCA_000018925.1_not_called.txt"}
+}
+```
+
+### run.json
+
+Written in `--outdir` for every run with a sample, also with `--no-snp-files`. It holds
+`format` (`cansnper2-run`), `format_version`, `cansnper2_version`, `date`, `database` (as above),
+`settings` (`min_required_hits`, `strictness`, `mask`, `aligner`), `read_settings` (one entry
+per read platform of the run, as the `# Read settings:` lines of `snps_summary.txt`), `counts`
+(the number of `samples` and of each status: `clean`, `review`, `not called`, `failed`,
+`reused`) and `samples`. Each entry of `samples` gives `sample`, `status`, `final_snp`,
+`support`, `snp_path`, `reasons` and `result`, the path of `samples/<sample>.json` relative to
+`--outdir` or `null` when there is none.
+
+## MultiQC table (--summary)
+
+With `--summary`, `cansnper2_mqc.tsv` is a [MultiQC](https://multiqc.info) custom content table:
+a few `#` lines that name the section, followed by one row per sample with `Sample`, `Final SNP`,
+`Support` and `Status`. MultiQC finds it by its `_mqc.tsv` ending when it is run on the output
+folder.
 
 ## Tree pages (--save-tree)
 

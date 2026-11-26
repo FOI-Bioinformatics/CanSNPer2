@@ -29,7 +29,8 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest"]
+# jsonschema checks the JSON results against docs/schemas (tests/test_result_json.py)
+test = ["pytest", "jsonschema"]
 
 [dependency-groups]
 # the ruff version that CI runs; install with pip install --group lint (pip 25.1 or later)

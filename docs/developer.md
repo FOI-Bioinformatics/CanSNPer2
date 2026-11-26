@@ -22,6 +22,7 @@ Bug reports and pull requests are welcome on the
 | `CanSNPer2/modules/ParsePileup.py` | reader of `samtools mpileup` output for read typing; platform defaults |
 | `CanSNPer2/modules/ReadInput.py` | recognition of read files, pairing of mates, the samplesheet |
 | `CanSNPer2/modules/LocalReferences.py`, `LiftOver.py` | read typing with local references: choice of the genome and lift of the canSNP positions |
+| `CanSNPer2/modules/ResultJSON.py` | the JSON results (`samples/<sample>.json`, `run.json`) and the MultiQC table; their schemas are in `docs/schemas/` |
 | `CanSNPer2/modules/NewickTree.py` | the tree walk that decides the final SNP, the Newick tree and the HTML pages |
 | `CanSNPer2/modules/DatabaseConnection.py` | SQLite access, database checks, source file readers |
 | `CanSNPer2/modules/InitiateDatabase.py` | creation of a database from the scheme files |
