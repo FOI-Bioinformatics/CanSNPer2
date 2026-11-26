@@ -40,14 +40,15 @@ Bug reports and pull requests are welcome on the
 | `tools/gen_cli_docs.py` | generates `docs/cli.md` |
 | `docs/` | the documentation |
 | `.github/workflows/ci.yml` | continuous integration |
+| `pyproject.toml` | package metadata, the `cansnper2` command and the build settings |
 
 ## Run the tests
 
-Install CanSNPer2 in editable mode, together with pytest, and run the suite from the repository
-root:
+Install CanSNPer2 in editable mode, together with pytest (the `test` extra), and run the suite
+from the repository root:
 
 ```sh
-python -m pip install -e . pytest
+python -m pip install -e ".[test]"
 python -m pytest tests
 ```
 
@@ -129,7 +130,7 @@ and a test that runs the program, skipped when the program is not installed.
 
 ## Make a release
 
-1. Set the version in `CanSNPer2/__init__.py` (`__version__`); `setup.py` reads it from there.
+1. Set the version in `CanSNPer2/__init__.py` (`__version__`); `pyproject.toml` reads it from there.
 2. Move the entries under `[Unreleased]` in `CHANGELOG.md` to a section for the new version with
    its date, and update `version` and `date-released` in `CITATION.cff`.
 3. Regenerate `docs/cli.md` with Python 3.13 and run the test suite.

@@ -40,6 +40,8 @@ Git history.
   command line reference generated from the program (`docs/cli.md`), a description of the typing
   method, and pages on interpreting results, limitations and reproducibility.
 - The conda recipe was removed from this repository; it is maintained in bioconda-recipes.
+- The package metadata moved from `setup.py` to `pyproject.toml`. `pip install .` installs the
+  same files and the same `cansnper2` command.
 
 ## [2.4.0] - 2026-11-22 (tag v2.4.0)
 
