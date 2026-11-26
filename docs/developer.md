@@ -33,7 +33,6 @@ Bug reports and pull requests are welcome on the
 | `CanSNPer2/modules/FetchScheme.py` | reading schemes from GitHub or a local directory, manifest checks, `source.json` |
 | `CanSNPer2/modules/SchemeInfo.py`, `SchemeGenomes.py` | the `scheme_info` table and the genomes table of a database |
 | `CanSNPer2/modules/ReferenceCheck.py` | checks of reference genome files against the canSNPs of a database |
-| `CanSNPer2/modules/runMauve.py` | a stand-alone progressiveMauve runner (`RunMauve`) that aligns queries against a folder of references; not used by `cansnper2 type` |
 | `CanSNPer2/modules/LogSetup.py`, `TopLevel.py` | log files and console output; the handler of unexpected errors and its exit status |
 | `CanSNPer2/modules/FileMode.py` | permission bits of files written through temporary files |
 | `tests/` | the pytest suite; `tests/helpers.py` builds small databases and scheme files |
