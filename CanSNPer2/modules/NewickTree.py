@@ -1,7 +1,8 @@
-'''
+"""
 Module to read and write newick trees
 
-'''
+"""
+
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules import SchemeInfo
 from urllib.request import pathname2url
@@ -11,7 +12,8 @@ import json
 import os
 import re
 import logging
-'''the tree drawing used ete3 (issue #19: it silently lost its drawing classes when no Qt
+
+"""the tree drawing used ete3 (issue #19: it silently lost its drawing classes when no Qt
 	binding was installed, issues #27/#52: its node loop hid positions without alignment data)
 	and ete3 3.1.3 cannot even import on python >=3.13 (it imports cgi, removed in 3.13, issue
 	#184). ete4's replacement renderer needs PyQt6 or selenium+Chrome for static files, so the
@@ -19,80 +21,103 @@ import logging
 	already built and writes a self-contained html file (embedded JSON plus a plain javascript
 	SVG viewer). The file opens in any browser on any system, shows the same SNP colors, and
 	can toggle the branches without called SNPs - the dynamic view the ete pdfs never allowed.
-'''
+"""
 logger = logging.getLogger(__name__)
 
 
-_WARNED_NODES = set() ## nodes without a SNP that were already warned about in this process
+_WARNED_NODES = set()  ## nodes without a SNP that were already warned about in this process
 
 
 def load_annotations(path):
-	'''Read a tree annotation file: one annotation per line, tab separated
-		<snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]
-		"node" draws a colored badge under the SNP dot, "clade" draws a dashed box around the
-		whole subtree below it (a feature that one branch of the tree separates, like an
-		antibiotic resistance marker at the split of two lineages).
-		The rank is a free-text level carried by the annotation itself and is NEVER derived
-		from the depth in the tree: the database tree has uneven resolution, so B.1 and B.16
-		can both sit at subspecies level while standing at different depths.
-		Empty lines and lines starting with # are skipped; rank, label and color of the
-		header line ("snp", "snp_id", "node", "kind"...) are recognized and skipped.'''
-	annotations = []
-	first = True
-	with open(path) as handle:
-		for number, row in enumerate(handle, start=1):
-			row = row.strip()
-			if not row or row.startswith("#"):
-				continue
-			fields = row.split("\t")
-			if first and fields[0].lower() in ("snp", "snp_id", "node", "name") and len(fields) > 1:
-				first = False
-				continue
-			first = False
-			if len(fields) < 4:
-				raise ValueError("{path} line {n}: need <snp name>\\t<node|clade>\\t<rank>\\t<label>, found: {row}".format(
-						path=path, n=number, row=row))
-			kind = fields[1].strip().lower()
-			if kind not in ("node", "clade"):
-				raise ValueError("{path} line {n}: kind must be node or clade, found {kind}".format(
-						path=path, n=number, kind=fields[1]))
-			annotation = {"node": fields[0].strip(), "kind": kind, "rank": fields[2].strip(), "label": fields[3].strip()}
-			if len(fields) > 4 and fields[4].strip():
-				annotation["color"] = fields[4].strip()
-			annotations.append(annotation)
-	return annotations
+    """Read a tree annotation file: one annotation per line, tab separated
+    <snp name>\t<node|clade>\t<rank>\t<label>[\t<color>]
+    "node" draws a colored badge under the SNP dot, "clade" draws a dashed box around the
+    whole subtree below it (a feature that one branch of the tree separates, like an
+    antibiotic resistance marker at the split of two lineages).
+    The rank is a free-text level carried by the annotation itself and is NEVER derived
+    from the depth in the tree: the database tree has uneven resolution, so B.1 and B.16
+    can both sit at subspecies level while standing at different depths.
+    Empty lines and lines starting with # are skipped; rank, label and color of the
+    header line ("snp", "snp_id", "node", "kind"...) are recognized and skipped."""
+    annotations = []
+    first = True
+    with open(path) as handle:
+        for number, row in enumerate(handle, start=1):
+            row = row.strip()
+            if not row or row.startswith("#"):
+                continue
+            fields = row.split("\t")
+            if first and fields[0].lower() in ("snp", "snp_id", "node", "name") and len(fields) > 1:
+                first = False
+                continue
+            first = False
+            if len(fields) < 4:
+                raise ValueError(
+                    "{path} line {n}: need <snp name>\\t<node|clade>\\t<rank>\\t<label>, found: {row}".format(
+                        path=path, n=number, row=row
+                    )
+                )
+            kind = fields[1].strip().lower()
+            if kind not in ("node", "clade"):
+                raise ValueError(
+                    "{path} line {n}: kind must be node or clade, found {kind}".format(
+                        path=path, n=number, kind=fields[1]
+                    )
+                )
+            annotation = {
+                "node": fields[0].strip(),
+                "kind": kind,
+                "rank": fields[2].strip(),
+                "label": fields[3].strip(),
+            }
+            if len(fields) > 4 and fields[4].strip():
+                annotation["color"] = fields[4].strip()
+            annotations.append(annotation)
+    return annotations
 
 
 def database_provenance(path):
-	'''What a result page records about the database at path: the scheme name, status and
-		description from its scheme_info table (SchemeInfo.describe), the notice that
-		SchemeInfo.scheme_notice logs when the scheme is not verified (empty otherwise), the
-		database file name and its reference genomes'''
-	info = {"database": os.path.basename(str(path)), "scheme": "", "status": "", "scheme_line": "",
-		"notice": "", "references": []}
-	try:
-		scheme = SchemeInfo.read_scheme_info(path)
-		level, notice = SchemeInfo.scheme_notice(path)
-	except sqlite3.Error as e:
-		logger.debug("No scheme information read from {db}: {e}".format(db=path, e=e))
-		return info
-	info["scheme"] = scheme.get("scheme") or ""
-	info["status"] = scheme.get("status") or ""
-	info["scheme_line"] = SchemeInfo.describe(scheme) if scheme else SchemeInfo.MISSING_TEXT
-	if level >= logging.WARNING:
-		info["notice"] = notice
-	try:
-		conn = sqlite3.connect("file:{path}?mode=ro".format(path=pathname2url(os.path.abspath(str(path)))), uri=True)
-		try:
-			rows = conn.execute("SELECT genome, genbank_id, refseq_id FROM snp_references ORDER BY id").fetchall()
-		finally:
-			conn.close()
-	except sqlite3.Error:
-		rows = []
-	for genome, genbank, refseq in rows:
-		accession = genbank or refseq
-		info["references"].append("{genome} ({acc})".format(genome=genome, acc=accession) if accession else str(genome))
-	return info
+    """What a result page records about the database at path: the scheme name, status and
+    description from its scheme_info table (SchemeInfo.describe), the notice that
+    SchemeInfo.scheme_notice logs when the scheme is not verified (empty otherwise), the
+    database file name and its reference genomes"""
+    info = {
+        "database": os.path.basename(str(path)),
+        "scheme": "",
+        "status": "",
+        "scheme_line": "",
+        "notice": "",
+        "references": [],
+    }
+    try:
+        scheme = SchemeInfo.read_scheme_info(path)
+        level, notice = SchemeInfo.scheme_notice(path)
+    except sqlite3.Error as e:
+        logger.debug("No scheme information read from {db}: {e}".format(db=path, e=e))
+        return info
+    info["scheme"] = scheme.get("scheme") or ""
+    info["status"] = scheme.get("status") or ""
+    info["scheme_line"] = SchemeInfo.describe(scheme) if scheme else SchemeInfo.MISSING_TEXT
+    if level >= logging.WARNING:
+        info["notice"] = notice
+    try:
+        conn = sqlite3.connect(
+            "file:{path}?mode=ro".format(path=pathname2url(os.path.abspath(str(path)))), uri=True
+        )
+        try:
+            rows = conn.execute(
+                "SELECT genome, genbank_id, refseq_id FROM snp_references ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        rows = []
+    for genome, genbank, refseq in rows:
+        accession = genbank or refseq
+        info["references"].append(
+            "{genome} ({acc})".format(genome=genome, acc=accession) if accession else str(genome)
+        )
+    return info
 
 
 ## the drawing class of a SNP state: 1 derived, 2 ancestral, 3 another base, 0 no data
@@ -100,48 +125,61 @@ SNP_KINDS = {1: "derived", 2: "ancestral", 3: "other_base", 0: "no_data"}
 
 
 def path_details(path, snp_info, snplist=None):
-	'''The SNPs of a SNP path with what the result file gives for each: the reference sequence
-		and position, the ancestral and derived base and the base found in the query (target).
-		snp_info: rows in the columns of SNP_FILE_COLUMNS (CanSNPer2.py)'''
-	rows = {}
-	for row in snp_info or []:
-		if len(row) > 8:
-			rows.setdefault(row[0], row)
-	details = []
-	for name in path:
-		row = rows.get(name)
-		item = {"name": name}
-		if row:
-			item.update({"pos": "{seq}:{pos}".format(seq=row[2], pos=row[3]), "ancestral": row[6],
-				"derived": row[7], "target": row[8]})
-		details.append(item)
-	return details
+    """The SNPs of a SNP path with what the result file gives for each: the reference sequence
+    and position, the ancestral and derived base and the base found in the query (target).
+    snp_info: rows in the columns of SNP_FILE_COLUMNS (CanSNPer2.py)"""
+    rows = {}
+    for row in snp_info or []:
+        if len(row) > 8:
+            rows.setdefault(row[0], row)
+    details = []
+    for name in path:
+        row = rows.get(name)
+        item = {"name": name}
+        if row:
+            item.update(
+                {
+                    "pos": "{seq}:{pos}".format(seq=row[2], pos=row[3]),
+                    "ancestral": row[6],
+                    "derived": row[7],
+                    "target": row[8],
+                }
+            )
+        details.append(item)
+    return details
 
 
 def provenance_lines(info):
-	'''The run as "key: value" lines, in the order the result pages and snps_summary.txt
-		show them; keys that info does not hold are left out'''
-	info = info or {}
-	lines = []
-	if info.get("version"):
-		lines.append("CanSNPer2 version: {v}".format(v=info["version"]))
-	if info.get("date"):
-		lines.append("Date: {d}".format(d=info["date"]))
-	if info.get("database"):
-		lines.append("Database: {db}{sha}".format(db=info["database"],
-			sha=" sha256:" + info["database_sha256"] if info.get("database_sha256") else ""))
-	if info.get("scheme_line"):
-		lines.append("Scheme: {line}".format(line=info["scheme_line"]))
-	if info.get("references"):
-		lines.append("Reference genomes: {refs}".format(refs=", ".join(info["references"])))
-	if info.get("aligner"):
-		lines.append("Aligner: {a}".format(a=info["aligner"]))
-	if "min_required_hits" in info:
-		lines.append("Typing settings: min_required_hits={hits} strictness={strict} mask={mask}".format(
-			hits=info["min_required_hits"], strict=info.get("strictness"), mask=info.get("mask")))
-	if info.get("notice"):
-		lines.append("Note: {n}".format(n=info["notice"]))
-	return lines
+    """The run as "key: value" lines, in the order the result pages and snps_summary.txt
+    show them; keys that info does not hold are left out"""
+    info = info or {}
+    lines = []
+    if info.get("version"):
+        lines.append("CanSNPer2 version: {v}".format(v=info["version"]))
+    if info.get("date"):
+        lines.append("Date: {d}".format(d=info["date"]))
+    if info.get("database"):
+        lines.append(
+            "Database: {db}{sha}".format(
+                db=info["database"],
+                sha=" sha256:" + info["database_sha256"] if info.get("database_sha256") else "",
+            )
+        )
+    if info.get("scheme_line"):
+        lines.append("Scheme: {line}".format(line=info["scheme_line"]))
+    if info.get("references"):
+        lines.append("Reference genomes: {refs}".format(refs=", ".join(info["references"])))
+    if info.get("aligner"):
+        lines.append("Aligner: {a}".format(a=info["aligner"]))
+    if "min_required_hits" in info:
+        lines.append(
+            "Typing settings: min_required_hits={hits} strictness={strict} mask={mask}".format(
+                hits=info["min_required_hits"], strict=info.get("strictness"), mask=info.get("mask")
+            )
+        )
+    if info.get("notice"):
+        lines.append("Note: {n}".format(n=info["notice"]))
+    return lines
 
 
 __version__ = "2.0.1"
@@ -154,7 +192,7 @@ __date__ = "2019-06-07"
 __status__ = "Production"
 __partof__ = "CanSNPer2"
 
-'''The result pages (<sample>_tree.html, summary_tree.html and summary.html) share their style
+"""The result pages (<sample>_tree.html, summary_tree.html and summary.html) share their style
 	sheet (BASE_CSS) and the tree drawing (TREE_JS); render_template puts both into a page
 	template. The colored tree arrives as JSON in __PAYLOAD__, everything else is plain
 	javascript drawing an svg, no libraries, no network, so the html files work the same on any
@@ -171,8 +209,8 @@ __partof__ = "CanSNPer2"
 	follows the longest SNP name and a collapsed branch keeps its triangle inside the one to
 	three rows it is given, so labels and triangles do not overlap.
 	The templates are raw strings and the javascript holds no backslash: in a normal string
-	Python unescaped them (\\" became "), which once blanked both pages.'''
-BASE_CSS = r''':root { --ink: #1f2937; --muted: #4b5563; --faint: #6b7280; --line: #e3e6e9; --panel: #fbfcfd;
+	Python unescaped them (\\" became "), which once blanked both pages."""
+BASE_CSS = r""":root { --ink: #1f2937; --muted: #4b5563; --faint: #6b7280; --line: #e3e6e9; --panel: #fbfcfd;
         --accent: #2563eb; --amber-bg: #fff7e6; --amber-line: #f0c36d; --amber-ink: #7a4a00; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; background: #fff; }
@@ -230,9 +268,9 @@ ol.path li.final .snp { color: #1f6b43; }
   #main { display: block; }
   #tree { height: 17cm; border: 1px solid #999; page-break-inside: avoid; }
 }
-'''
+"""
 
-TREE_JS = r'''var C = DATA.colors, INFO = DATA.info || {};
+TREE_JS = r"""var C = DATA.colors, INFO = DATA.info || {};
 var ROW = 22, MARGIN = 24, OVERVIEW_LEAVES = 60, CHAR = 6.6, MAXSCALE = 1.3;
 var nodes = DATA.nodes;
 var ANN = DATA.annotations || [];
@@ -548,19 +586,19 @@ window.addEventListener("mouseup", function(){
 	if (drag && moved > 5) { suppressClick = true; }
 	drag = null;
 });
-'''
+"""
 
 
 def render_template(template):
-	'''a page template with the shared style sheet and tree drawing put in'''
-	return template.replace("__BASECSS__", BASE_CSS).replace("__TREEJS__", TREE_JS)
+    """a page template with the shared style sheet and tree drawing put in"""
+    return template.replace("__BASECSS__", BASE_CSS).replace("__TREEJS__", TREE_JS)
 
 
-'''The per-sample tree viewer written by NewickTree.write_tree_html: a header with the sample,
+"""The per-sample tree viewer written by NewickTree.write_tree_html: a header with the sample,
 	the scheme, the final SNP and the run, the SNP path as an ordered list (root to final SNP,
 	with the bases at each SNP) and the tree. The summary tree (--summary) shows the final SNPs
-	of the run instead.'''
-TREE_HTML_TEMPLATE = r'''<!doctype html>
+	of the run instead."""
+TREE_HTML_TEMPLATE = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -652,10 +690,10 @@ if (!svgEl) { window.onerror("the tree did not draw at all", "", 0); }
 </script>
 </body>
 </html>
-'''
+"""
 
 
-'''The results overview written by NewickTree.write_dashboard: one row per sample of the run
+"""The results overview written by NewickTree.write_dashboard: one row per sample of the run
 	in a side table, and the database tree embedded once next to it. The topology is the same
 	for every sample, so the file stores only the per-sample SNP states and clicking a row
 	repaints the tree with them. Samples that need a manual look (failed, not called, calls
@@ -664,8 +702,8 @@ if (!svgEl) { window.onerror("the tree did not draw at all", "", 0); }
 	is selected on open. The header records the scheme and the run, a scheme that is not
 	verified gets the notice of SchemeInfo.scheme_notice as a banner, and the table can be saved
 	as TSV and the tree as SVG. Self-contained like the tree viewer: plain javascript, no
-	server, no downloads'''
-DASHBOARD_HTML_TEMPLATE = r'''<!doctype html>
+	server, no downloads"""
+DASHBOARD_HTML_TEMPLATE = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -963,641 +1001,779 @@ if (document.querySelectorAll("#rows tr").length !== samples.length || !svgEl) {
 </script>
 </body>
 </html>
-'''
+"""
 
 NEWICK_SPECIAL = re.compile(r"[\s(),:;'\[\]]")
 
 
 def quote_newick(name):
-	'''A node name as it is written in a newick tree: a name with whitespace or one of ( ) , : ; [ ]
-		or a single quote is put in single quotes, and a quote inside the name is doubled.'''
-	if NEWICK_SPECIAL.search(name):
-		return "'" + name.replace("'", "''") + "'"
-	return name
+    """A node name as it is written in a newick tree: a name with whitespace or one of ( ) , : ; [ ]
+    or a single quote is put in single quotes, and a quote inside the name is doubled."""
+    if NEWICK_SPECIAL.search(name):
+        return "'" + name.replace("'", "''") + "'"
+    return name
 
 
 class NewickNode(object):
-	"""The NewickNode class stores the information of a taxonomy node
-			ID
-			name
-			children
-			parent
-		The purpose of this class is to allow a fast printout of a newick tree.
-		All nodes in a newick tree knows it's children and parent, so by selecting a
-		print option for the class objects can inheritly print all its children or the lineage (parents).
+    """The NewickNode class stores the information of a taxonomy node
+            ID
+            name
+            children
+            parent
+    The purpose of this class is to allow a fast printout of a newick tree.
+    All nodes in a newick tree knows it's children and parent, so by selecting a
+    print option for the class objects can inheritly print all its children or the lineage (parents).
 
-		main functions
-			add_child  ## Add a newick node object reference as a child of the node
-			set_print  ## Set the print type  (name, id, lineage or newick <- default)
-	"""
+    main functions
+            add_child  ## Add a newick node object reference as a child of the node
+            set_print  ## Set the print type  (name, id, lineage or newick <- default)
+    """
 
-	def __init__(self, id, name, parent=False):
-		super(NewickNode, self).__init__()
-		self.id         = id            	## Node id
-		self.name       = name          	## Node name
-		self.parent     = parent        	## Parent id False for root
-		self.children   = set()         	## Set of newick children
-		self.__class__.print_opt = "newick" ## The default behaviour of this class is to print out a
-											## 		newick tree from the given node (as root)
+    def __init__(self, id, name, parent=False):
+        super(NewickNode, self).__init__()
+        self.id = id  ## Node id
+        self.name = name  ## Node name
+        self.parent = parent  ## Parent id False for root
+        self.children = set()  ## Set of newick children
+        self.__class__.print_opt = "newick"  ## The default behaviour of this class is to print out a
+        ## 		newick tree from the given node (as root)
 
+    def __str__(self):
+        """The print function of NewickNode allows any node to print all its children in newick format or the lineage to root
+        There is also an option to print just the name of a node
+        """
+        if self.__class__.print_opt == "name":
+            return "{name}".format(name=self.name)
+        elif self.__class__.print_opt == "lineage":
+            if self.parent:
+                return "{parent};{name}".format(name=self.name, parent=self.parent)
+            else:
+                return "root"
+        elif self.__class__.print_opt == "newick":
+            return self.newick()
+        else:
+            return "{id}: {name}; children: {nchildren} ".format(
+                id=self.id, name=self.name, nchildren=len(self.children)
+            )
 
-	def __str__(self):
-		'''The print function of NewickNode allows any node to print all its children in newick format or the lineage to root
-			There is also an option to print just the name of a node
-		'''
-		if self.__class__.print_opt == "name":
-			return "{name}".format(name=self.name)
-		elif self.__class__.print_opt == "lineage":
-			if self.parent:
-				return "{parent};{name}".format(name=self.name, parent=self.parent)
-			else:
-				return "root"
-		elif self.__class__.print_opt == "newick":
-			return self.newick()
-		else:
-			return "{id}: {name}; children: {nchildren} ".format(id=self.id, name=self.name, nchildren = len(self.children))
+    def __repr__(self):
+        return "NewickNode()"
 
-	def __repr__(self):
-		return "NewickNode()"
+    def newick(self):
+        """The subtree of the node in newick format, written without recursion: a tree of several
+        thousand levels exceeded the recursion limit. Children are rendered in name order: the
+        children container is a set, and its iteration order changes between processes with the
+        python hash seed, which made the newick export (and with it the drawn trees and the
+        export comparisons) different from one run to the next. Names with characters
+        that are special in newick are written in single quotes."""
+        out = []
+        stack = [self]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str):
+                out.append(item)
+                continue
+            children = sorted(item.children, key=lambda child: child.name)
+            if not item.parent:  # Only the root node has this property
+                tail = ")" + quote_newick(item.name) + ")ROOT;"
+                head = "(("
+            elif children:
+                tail = ")" + quote_newick(item.name)
+                head = "("
+            else:
+                out.append(quote_newick(item.name))
+                continue
+            stack.append(tail)
+            for position, child in enumerate(reversed(children)):
+                if position:
+                    stack.append(",")
+                stack.append(child)
+            out.append(head)
+        return "".join(out)
 
-	def newick(self):
-		'''The subtree of the node in newick format, written without recursion: a tree of several
-			thousand levels exceeded the recursion limit. Children are rendered in name order: the
-			children container is a set, and its iteration order changes between processes with the
-			python hash seed, which made the newick export (and with it the drawn trees and the
-			export comparisons) different from one run to the next. Names with characters
-			that are special in newick are written in single quotes.'''
-		out = []
-		stack = [self]
-		while stack:
-			item = stack.pop()
-			if isinstance(item, str):
-				out.append(item)
-				continue
-			children = sorted(item.children, key=lambda child: child.name)
-			if not item.parent:  #Only the root node has this property
-				tail = ")" + quote_newick(item.name) + ")ROOT;"
-				head = "(("
-			elif children:
-				tail = ")" + quote_newick(item.name)
-				head = "("
-			else:
-				out.append(quote_newick(item.name))
-				continue
-			stack.append(tail)
-			for position, child in enumerate(reversed(children)):
-				if position:
-					stack.append(",")
-				stack.append(child)
-			out.append(head)
-		return "".join(out)
+    def add_child(self, child):
+        """Add a NewickNode object as child"""
+        self.children.add(child)
+        return
 
-	def add_child(self,child):
-		'''Add a NewickNode object as child'''
-		self.children.add(child)
-		return
-
-	def set_print(self,_type):
-		'''Set the variable that controls the print style
-			name
-			newick - the complete subtree in newick format
-			lineage
-		'''
-		self.__class__.print_opt = _type
+    def set_print(self, _type):
+        """Set the variable that controls the print style
+        name
+        newick - the complete subtree in newick format
+        lineage
+        """
+        self.__class__.print_opt = _type
 
 
 class NewickTree(object):
-	"""The NewickTree class parses a CanSNP or a FlexTaxD database and prints the database as a newick tree
+    """The NewickTree class parses a CanSNP or a FlexTaxD database and prints the database as a newick tree
 
-		print styles
-			name
-			newick - the complete subtree in newick format
-			lineage - prints all parents of a node up to root
+    print styles
+            name
+            newick - the complete subtree in newick format
+            lineage - prints all parents of a node up to root
 
-	"""
+    """
 
-	def __init__(self, database,name="newick",outdir="./",min_required_hits=3,strictness=0.7):
-		super(NewickTree, self).__init__()
-		self.database = CanSNPdbFunctions(database) ## Initiate database connection with CanSNPdbFunctions
-		self.database_path = database
-		self.nodeDict = {}							## Dictionary to store references to all newick nodes
-		self.c_p_set = set()
-		self.tree_file = "{outdir}/{name}_tree.html".format(outdir=outdir.rstrip("/"),name=name) ## output file
-		self.min_required_hits = min_required_hits
-		self.strictness = strictness
-		## Build the newick tree
-		self.newickTree = str(self.build_tree())
-		## Tree colors
-		self.snp_colors = {
-			"derived": "#2e8b57", 			## green, also the line of the SNP path
-			"ancestral": "#a3a3a3", 		## neutral grey
-			"non_aligned": "#ffffff", 		## open circle (white fill) ...
-			"outline": "#6b7280", 			## ... with a grey outline: no alignment data
-			"other_base": "#2166ac",		## blue
-			"derived_text": "#1f6b43"		## the label of the final SNP
-		}
+    def __init__(self, database, name="newick", outdir="./", min_required_hits=3, strictness=0.7):
+        super(NewickTree, self).__init__()
+        self.database = CanSNPdbFunctions(database)  ## Initiate database connection with CanSNPdbFunctions
+        self.database_path = database
+        self.nodeDict = {}  ## Dictionary to store references to all newick nodes
+        self.c_p_set = set()
+        self.tree_file = "{outdir}/{name}_tree.html".format(
+            outdir=outdir.rstrip("/"), name=name
+        )  ## output file
+        self.min_required_hits = min_required_hits
+        self.strictness = strictness
+        ## Build the newick tree
+        self.newickTree = str(self.build_tree())
+        ## Tree colors
+        self.snp_colors = {
+            "derived": "#2e8b57",  ## green, also the line of the SNP path
+            "ancestral": "#a3a3a3",  ## neutral grey
+            "non_aligned": "#ffffff",  ## open circle (white fill) ...
+            "outline": "#6b7280",  ## ... with a grey outline: no alignment data
+            "other_base": "#2166ac",  ## blue
+            "derived_text": "#1f6b43",  ## the label of the final SNP
+        }
 
-	def __repr__(self):
-		return "NewickTree()"
+    def __repr__(self):
+        return "NewickTree()"
 
-	def close(self):
-		'''close the database connection; one tree is made per sample, and the connections stayed
-			open until the garbage collector freed them'''
-		try:
-			self.database.disconnect()
-		except Exception:
-			pass
+    def close(self):
+        """close the database connection; one tree is made per sample, and the connections stayed
+        open until the garbage collector freed them"""
+        try:
+            self.database.disconnect()
+        except Exception:
+            pass
 
-	def print(self):
-		print(self.newickTree)
+    def print(self):
+        print(self.newickTree)
 
-	def get_tree(self,table="tree"):
-		'''Function that returns the whole tree in the database the script expects
-			the tree to be rooted at the lowest value and that the root has itself as parent'''
-		SELECT = "SELECT parent,child FROM {table} ORDER BY child ASC".format(table=table)
-		return self.database.query(SELECT).fetchall()
+    def get_tree(self, table="tree"):
+        """Function that returns the whole tree in the database the script expects
+        the tree to be rooted at the lowest value and that the root has itself as parent"""
+        SELECT = "SELECT parent,child FROM {table} ORDER BY child ASC".format(table=table)
+        return self.database.query(SELECT).fetchall()
 
-	def get_nodes(self,table="nodes"):
-		'''Function that returns all nodes in the database'''
-		nt = {}
-		## the typed filter belongs in the ON clause: in a WHERE it would turn the LEFT JOIN into
-		## an inner join and drop the nodes that carry no canSNP, which are the label nodes
-		SELECT = ("SELECT id,name,snp_id FROM {table} LEFT JOIN snp_annotation on "
-			"(snp_annotation.node_id = {table}.id AND snp_annotation.typed = 1)").format(table=table)
-		for id,name,snp_id in self.database.query(SELECT).fetchall():
-			if snp_id != None:
-				nt[id] = snp_id
-			else:
-				'''the tree is read once per sample and again for the dashboard: warn once per node'''
-				if name not in _WARNED_NODES:
-					_WARNED_NODES.add(name)
-					logger.warning("#Node has no snp_annotation {node}".format(node=name))
-				nt[id] = "-"+name+"-"
-		return nt
+    def get_nodes(self, table="nodes"):
+        """Function that returns all nodes in the database"""
+        nt = {}
+        ## the typed filter belongs in the ON clause: in a WHERE it would turn the LEFT JOIN into
+        ## an inner join and drop the nodes that carry no canSNP, which are the label nodes
+        SELECT = (
+            "SELECT id,name,snp_id FROM {table} LEFT JOIN snp_annotation on "
+            "(snp_annotation.node_id = {table}.id AND snp_annotation.typed = 1)"
+        ).format(table=table)
+        for id, name, snp_id in self.database.query(SELECT).fetchall():
+            if snp_id != None:
+                nt[id] = snp_id
+            else:
+                """the tree is read once per sample and again for the dashboard: warn once per node"""
+                if name not in _WARNED_NODES:
+                    _WARNED_NODES.add(name)
+                    logger.warning("#Node has no snp_annotation {node}".format(node=name))
+                nt[id] = "-" + name + "-"
+        return nt
 
-	def get_parent(self,name):
-		'''return parent'''
-		#QUERY = '''SELECT parent,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
-		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE child = ?'''
-		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
-		return res
+    def get_parent(self, name):
+        """return parent"""
+        # QUERY = '''SELECT parent,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
+        QUERY = """SELECT parent,child,rank_i FROM tree WHERE child = ?"""
+        res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
+        return res
 
-	def get_child(self,name):
-		'''return child'''
-		#QUERY = '''SELECT child,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
-		QUERY = '''SELECT parent,child,rank_i FROM tree WHERE parent = ?'''
-		res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
-		return res
+    def get_child(self, name):
+        """return child"""
+        # QUERY = '''SELECT child,child,rank FROM tree LEFT JOIN rank on (tree.rank_i = rank.rank_i) WHERE child = "{node}"'''.format(node=name)
+        QUERY = """SELECT parent,child,rank_i FROM tree WHERE parent = ?"""
+        res = self.database.query(QUERY, insert_val=(name,), getres=True).fetchone()
+        return res
 
-	def _attach(self,child,nodes,parent):
-		'''Add the node of child below the node of parent, raises KeyError when the parent has no node yet'''
-		if len(self.c_p_set & set([(child,parent)])) == 0:
-			node = NewickNode(child, nodes[child], self.nodeDict[parent])  		## this works also for root as root has itself as child
-			'''Make sure link to parent was not made before'''
-			self.c_p_set |= set([(child,parent)])
-			self.c_p_set |= set([(parent,child)])
-			self.nodeDict[child] = node
-		else:
-			logger.debug("Link {child}-{parent} already exists, retrieve node!".format(child=child,parent=parent))
-			node = self.nodeDict[child]										## add a reference to the node so that children can be added
-		pnode = self.nodeDict[parent]										## add child to the parent node
-		pnode.add_child(node)
-		logger.debug("NewickNode p:{parent} c: {child} added".format(parent=parent,child=child))
+    def _attach(self, child, nodes, parent):
+        """Add the node of child below the node of parent, raises KeyError when the parent has no node yet"""
+        if len(self.c_p_set & set([(child, parent)])) == 0:
+            node = NewickNode(
+                child, nodes[child], self.nodeDict[parent]
+            )  ## this works also for root as root has itself as child
+            """Make sure link to parent was not made before"""
+            self.c_p_set |= set([(child, parent)])
+            self.c_p_set |= set([(parent, child)])
+            self.nodeDict[child] = node
+        else:
+            logger.debug(
+                "Link {child}-{parent} already exists, retrieve node!".format(child=child, parent=parent)
+            )
+            node = self.nodeDict[child]  ## add a reference to the node so that children can be added
+        pnode = self.nodeDict[parent]  ## add child to the parent node
+        pnode.add_child(node)
+        logger.debug("NewickNode p:{parent} c: {child} added".format(parent=parent, child=child))
 
-	def new_node(self,child,nodes,parent):
-		'''Function that adds a new node to the newick tree. A parent that has no node yet is added
-			first, walking up the tree table without recursion (a tree of thousands of levels whose
-			ids run against the order of the levels exceeded the recursion limit)'''
-		pending = [(child,parent)]
-		waiting = set([child])
-		while pending:
-			current,current_parent = pending[-1]
-			try:
-				self._attach(current,nodes,current_parent)
-				pending.pop()
-				continue
-			except KeyError:
-				logger.debug("Error in adding NewickNode parent: {parent} does not exist, trying to add parent".format(parent=current_parent))
-			parent_link = self.get_parent(current_parent)
-			if parent_link is None:	## parent has no link in the tree table, node can not be attached
-				logger.warning("Not adding node {child}: parent {parent} does not exist and has no parent link in the tree table".format(child=current,parent=current_parent))
-				return
-			t_parent,t_child,rank = parent_link
-			if t_child in waiting:
-				logger.warning("Not adding node {child}: the tree table links {node} to itself through its parents".format(child=current,node=t_child))
-				return
-			logger.debug("Adding parent: {parent} of parent: {child}".format(parent=t_parent,child=t_child))
-			waiting.add(t_child)
-			pending.append((t_child,t_parent))
+    def new_node(self, child, nodes, parent):
+        """Function that adds a new node to the newick tree. A parent that has no node yet is added
+        first, walking up the tree table without recursion (a tree of thousands of levels whose
+        ids run against the order of the levels exceeded the recursion limit)"""
+        pending = [(child, parent)]
+        waiting = set([child])
+        while pending:
+            current, current_parent = pending[-1]
+            try:
+                self._attach(current, nodes, current_parent)
+                pending.pop()
+                continue
+            except KeyError:
+                logger.debug(
+                    "Error in adding NewickNode parent: {parent} does not exist, trying to add parent".format(
+                        parent=current_parent
+                    )
+                )
+            parent_link = self.get_parent(current_parent)
+            if parent_link is None:  ## parent has no link in the tree table, node can not be attached
+                logger.warning(
+                    "Not adding node {child}: parent {parent} does not exist and has no parent link in the tree table".format(
+                        child=current, parent=current_parent
+                    )
+                )
+                return
+            t_parent, t_child, rank = parent_link
+            if t_child in waiting:
+                logger.warning(
+                    "Not adding node {child}: the tree table links {node} to itself through its parents".format(
+                        child=current, node=t_child
+                    )
+                )
+                return
+            logger.debug("Adding parent: {parent} of parent: {child}".format(parent=t_parent, child=t_child))
+            waiting.add(t_child)
+            pending.append((t_child, t_parent))
 
-	def build_tree(self):
-		'''Build newick tree from database
-			This function walks through a database of nodes and creates NewickNode objects
-			self-aware of their decending newick tree or their parent lineage,
-			Returns: The root of the tree, however all nodes are accesible from the
-						NewickTree nodeDict by their node name
-		'''
-		tree = self.get_tree()
-		nodes = self.get_nodes()
-		logger.debug("Nodes: {n} Links: {l}".format(n=len(nodes),l=len(tree)))
-		logger.debug([nodes,tree])
-		newickTree = None
-		for parent,child in tree:
-			if parent == child:  ## root
-				root = NewickNode(child, nodes[child], False)					## Create the root node
-				self.nodeDict[child] = root										## Add the root node to the node dictionary
-				self.nodeDict["root"] = root									## Also add this reference as "root"
-				newickTree = root 												## The master parent will contain the full tree
-				continue
-			self.new_node(child,nodes,parent)
-		if newickTree is None:
-			'''without the initialization a database with an empty tree table died with an
+    def build_tree(self):
+        """Build newick tree from database
+        This function walks through a database of nodes and creates NewickNode objects
+        self-aware of their decending newick tree or their parent lineage,
+        Returns: The root of the tree, however all nodes are accesible from the
+                                NewickTree nodeDict by their node name
+        """
+        tree = self.get_tree()
+        nodes = self.get_nodes()
+        logger.debug("Nodes: {n} Links: {l}".format(n=len(nodes), l=len(tree)))
+        logger.debug([nodes, tree])
+        newickTree = None
+        for parent, child in tree:
+            if parent == child:  ## root
+                root = NewickNode(child, nodes[child], False)  ## Create the root node
+                self.nodeDict[child] = root  ## Add the root node to the node dictionary
+                self.nodeDict["root"] = root  ## Also add this reference as "root"
+                newickTree = root  ## The master parent will contain the full tree
+                continue
+            self.new_node(child, nodes, parent)
+        if newickTree is None:
+            """without the initialization a database with an empty tree table died with an
 				UnboundLocalError here; the clear error lets callers decide whether the tree is
-				needed at all'''
-			raise ValueError("the tree table of the database contains no root row (parent == child), the tree cannot be built")
-		## The newickTree is the same as the master parent (containing the full tree, the root node is defined on row 135)
-		self.root = newickTree ## kept as an object so draw_tree can walk the tree without re-parsing the string
-		logger.debug("Tree complete, return newickTree")
-		#logger.debug(newickTree)
-		return newickTree
+				needed at all"""
+            raise ValueError(
+                "the tree table of the database contains no root row (parent == child), the tree cannot be built"
+            )
+        ## The newickTree is the same as the master parent (containing the full tree, the root node is defined on row 135)
+        self.root = (
+            newickTree  ## kept as an object so draw_tree can walk the tree without re-parsing the string
+        )
+        logger.debug("Tree complete, return newickTree")
+        # logger.debug(newickTree)
+        return newickTree
 
-	def _tree_entries(self):
-		'''Flatten the NewickNode tree into a list of dicts in preorder, shaped exactly like the
-			ete3 tree used to be parsed from the newick string: a "ROOT" wrapper above the
-			database root (NewickNode.__str__ renders the root as ")ROOT;"), every entry carrying
-			id, name, parent id and depth. Children are walked in name order as in __str__, so the
-			first entry of a name is the node search_nodes(name)[0] used to match (issue #78).'''
-		entries = []
-		def add(name, parent):
-			entry = {"id": len(entries),
-					 "name": name,
-					 "parent": parent,
-					 "depth": 0 if parent is None else entries[parent]["depth"] + 1}
-			entries.append(entry)
-			return entry["id"]
-		root_id = add("ROOT", None)
-		stack = [(self.root, root_id)]
-		while stack:  ## preorder without recursion, children in name order
-			node, parent = stack.pop()
-			entry_id = add(node.name, parent)
-			for child in sorted(node.children, key=lambda child: child.name, reverse=True):
-				stack.append((child, entry_id))
-		return entries
+    def _tree_entries(self):
+        """Flatten the NewickNode tree into a list of dicts in preorder, shaped exactly like the
+        ete3 tree used to be parsed from the newick string: a "ROOT" wrapper above the
+        database root (NewickNode.__str__ renders the root as ")ROOT;"), every entry carrying
+        id, name, parent id and depth. Children are walked in name order as in __str__, so the
+        first entry of a name is the node search_nodes(name)[0] used to match (issue #78)."""
+        entries = []
 
-	def _parent_snp(self,entry,entries):
-		'''name of the nearest SNP above the entry, skipping "-name-" label nodes; None at the top'''
-		entry = entries[entry["parent"]]
-		while entry["name"] != "ROOT":
-			if not (entry["name"].startswith("-") and entry["name"].endswith("-")):
-				return entry["name"]
-			entry = entries[entry["parent"]]
-		return None
+        def add(name, parent):
+            entry = {
+                "id": len(entries),
+                "name": name,
+                "parent": parent,
+                "depth": 0 if parent is None else entries[parent]["depth"] + 1,
+            }
+            entries.append(entry)
+            return entry["id"]
 
-	def _chain_names(self,entry,entries):
-		'''the SNP names from the root of the tree down to the entry, the entry included; "-name-" label
-			nodes and the ROOT wrapper are not SNPs and are left out'''
-		names = []
-		while entry["name"] != "ROOT":
-			name = entry["name"]
-			if not (name.startswith("-") and name.endswith("-")):
-				names.append(name)
-			entry = entries[entry["parent"]]
-		return names[::-1]
+        root_id = add("ROOT", None)
+        stack = [(self.root, root_id)]
+        while stack:  ## preorder without recursion, children in name order
+            node, parent = stack.pop()
+            entry_id = add(node.name, parent)
+            for child in sorted(node.children, key=lambda child: child.name, reverse=True):
+                stack.append((child, entry_id))
+        return entries
 
-	def _confirm_path(self,entry,entries,called_snps,snplist):
-		'''Confirm the ACTUAL ancestor chain of the node, from the root of the tree down to the
-			node itself (issue #25). Every SNP on the chain is one of:
-			  called    derived in the query, counts as a hit;
-			  no data   no alignment covered the position, or the query has a gap or N there
-			            (state 0): there is no evidence either way, so it is a gap in the path;
-			  against   ancestral (2) or a third base (3): the walk down the tree should have left
-			            the branch here, so the chain is broken and the node cannot be called.
-			"-name-" label nodes (a database root without snp_annotation) are not SNPs and are
-			skipped. The node is confirmed when the chain is not broken, at least min_required_hits
-			SNPs are called, the called fraction of the SNPs on the chain is at least strictness,
-			and the SNP directly above the node is called: without that last rule one stray derived
-			SNP on a neighbouring branch, whose parent had no data, outranked the real lineage.
-			A single unaligned SNP near the root used to break every chain below it, so the sample
-			was NA however many SNPs on its path were derived, and --strictness had no effect.
-			Returns (confirmed, called, snps_on_chain, [SNPs without data]).'''
-		logger.debug("Confirm path of {node}".format(node=entry["name"]))
-		start = entry
-		count = 0
-		on_chain = 0
-		missing = []
-		called = set(called_snps)
-		while entry["name"] != "ROOT":
-			name = entry["name"]
-			entry = entries[entry["parent"]]
-			if name.startswith("-") and name.endswith("-"):
-				continue
-			on_chain += 1
-			state = snplist.get(name,0)
-			if name in called and state != 2:
-				count +=1
-			elif state in (2,3):
-				logger.debug("SNP path broken at {node} ({state}), {count} called SNPs below it".format(
-						node=name,state="ancestral" if state == 2 else "other base",count=count))
-				return False,count,on_chain,missing
-			else:
-				missing.append(name)
-		quota = float(count)/on_chain if on_chain else 0
-		'''the SNP right above the node is the second SNP of the chain, counted from the node'''
-		parent_missing = on_chain > 1 and self._parent_snp(start,entries) in missing
-		if parent_missing:
-			logger.debug("Path not confirmed: the SNP directly above {node} has no data".format(node=start["name"]))
-			return False,count,on_chain,missing
-		if count >= self.min_required_hits and quota >= self.strictness:
-			logger.info("Confirm path: {count}/{n} SNPs called (strictness {strictness}, min required hits {minhit}){gaps}".format(
-					count=count,n=on_chain,strictness=self.strictness,minhit=self.min_required_hits,
-					gaps=", without data: "+", ".join(missing) if missing else ""))
-			return True,count,on_chain,missing
-		logger.debug("Path not confirmed: {count}/{n} SNPs called (strictness {strictness}, min required hits {minhit})".format(
-				count=count,n=on_chain,strictness=self.strictness,minhit=self.min_required_hits))
-		return False,count,on_chain,missing
+    def _parent_snp(self, entry, entries):
+        """name of the nearest SNP above the entry, skipping "-name-" label nodes; None at the top"""
+        entry = entries[entry["parent"]]
+        while entry["name"] != "ROOT":
+            if not (entry["name"].startswith("-") and entry["name"].endswith("-")):
+                return entry["name"]
+            entry = entries[entry["parent"]]
+        return None
 
-	def draw_tree(self,snplist,called_snps=False,save_tree=True,summary=False,annotations=None,snp_info=None,run_info=None):
-		'''Colors the SNP tree with the states found in the query alignments, calls the final SNP
-			(_final_call) and writes the self-contained html viewer described in the module header.
-		Keyword arguments:
-		snplist -- a dict of the SNP names and their state
-		snp_info -- the SNP_info rows of the sample, for the target base of each SNP on the path
-		run_info -- what the page records about the run (CanSNPer2.run_info)
-		'''
-		logger.debug("Draw tree from snplist")
-		entries = self._tree_entries()
-		'''nodes of the tree that no alignment carried any base for: they have to be reported,
-			not left out of the viewer and out of both result files (issue #27)'''
-		no_data_nodes = set()
-		called_set = set(called_snps) if called_snps else set()
-		for entry in entries:
-			n = entry["name"]
-			entry["fill"] = self.snp_colors["non_aligned"]
-			entry["r"] = 5           ## ete3 "size" was a diameter: 10 drew as r=5, keep that scale
-			entry["line"] = "#DDDDDD"
-			entry["dash"] = True
-			entry["dot"] = True
-			entry["kind"] = "untested"
-			entry["called"] = n in called_set
-			if n == "ROOT" or (n.startswith("-") and n.endswith("-")):
-				'''ROOT and the "-name-" labels that get_nodes gives to nodes without any
+    def _chain_names(self, entry, entries):
+        """the SNP names from the root of the tree down to the entry, the entry included; "-name-" label
+        nodes and the ROOT wrapper are not SNPs and are left out"""
+        names = []
+        while entry["name"] != "ROOT":
+            name = entry["name"]
+            if not (name.startswith("-") and name.endswith("-")):
+                names.append(name)
+            entry = entries[entry["parent"]]
+        return names[::-1]
+
+    def _confirm_path(self, entry, entries, called_snps, snplist):
+        """Confirm the ACTUAL ancestor chain of the node, from the root of the tree down to the
+        node itself (issue #25). Every SNP on the chain is one of:
+          called    derived in the query, counts as a hit;
+          no data   no alignment covered the position, or the query has a gap or N there
+                    (state 0): there is no evidence either way, so it is a gap in the path;
+          against   ancestral (2) or a third base (3): the walk down the tree should have left
+                    the branch here, so the chain is broken and the node cannot be called.
+        "-name-" label nodes (a database root without snp_annotation) are not SNPs and are
+        skipped. The node is confirmed when the chain is not broken, at least min_required_hits
+        SNPs are called, the called fraction of the SNPs on the chain is at least strictness,
+        and the SNP directly above the node is called: without that last rule one stray derived
+        SNP on a neighbouring branch, whose parent had no data, outranked the real lineage.
+        A single unaligned SNP near the root used to break every chain below it, so the sample
+        was NA however many SNPs on its path were derived, and --strictness had no effect.
+        Returns (confirmed, called, snps_on_chain, [SNPs without data])."""
+        logger.debug("Confirm path of {node}".format(node=entry["name"]))
+        start = entry
+        count = 0
+        on_chain = 0
+        missing = []
+        called = set(called_snps)
+        while entry["name"] != "ROOT":
+            name = entry["name"]
+            entry = entries[entry["parent"]]
+            if name.startswith("-") and name.endswith("-"):
+                continue
+            on_chain += 1
+            state = snplist.get(name, 0)
+            if name in called and state != 2:
+                count += 1
+            elif state in (2, 3):
+                logger.debug(
+                    "SNP path broken at {node} ({state}), {count} called SNPs below it".format(
+                        node=name, state="ancestral" if state == 2 else "other base", count=count
+                    )
+                )
+                return False, count, on_chain, missing
+            else:
+                missing.append(name)
+        quota = float(count) / on_chain if on_chain else 0
+        """the SNP right above the node is the second SNP of the chain, counted from the node"""
+        parent_missing = on_chain > 1 and self._parent_snp(start, entries) in missing
+        if parent_missing:
+            logger.debug(
+                "Path not confirmed: the SNP directly above {node} has no data".format(node=start["name"])
+            )
+            return False, count, on_chain, missing
+        if count >= self.min_required_hits and quota >= self.strictness:
+            logger.info(
+                "Confirm path: {count}/{n} SNPs called (strictness {strictness}, min required hits {minhit}){gaps}".format(
+                    count=count,
+                    n=on_chain,
+                    strictness=self.strictness,
+                    minhit=self.min_required_hits,
+                    gaps=", without data: " + ", ".join(missing) if missing else "",
+                )
+            )
+            return True, count, on_chain, missing
+        logger.debug(
+            "Path not confirmed: {count}/{n} SNPs called (strictness {strictness}, min required hits {minhit})".format(
+                count=count, n=on_chain, strictness=self.strictness, minhit=self.min_required_hits
+            )
+        )
+        return False, count, on_chain, missing
+
+    def draw_tree(
+        self,
+        snplist,
+        called_snps=False,
+        save_tree=True,
+        summary=False,
+        annotations=None,
+        snp_info=None,
+        run_info=None,
+    ):
+        """Colors the SNP tree with the states found in the query alignments, calls the final SNP
+                (_final_call) and writes the self-contained html viewer described in the module header.
+        Keyword arguments:
+        snplist -- a dict of the SNP names and their state
+        snp_info -- the SNP_info rows of the sample, for the target base of each SNP on the path
+        run_info -- what the page records about the run (CanSNPer2.run_info)
+        """
+        logger.debug("Draw tree from snplist")
+        entries = self._tree_entries()
+        """nodes of the tree that no alignment carried any base for: they have to be reported,
+			not left out of the viewer and out of both result files (issue #27)"""
+        no_data_nodes = set()
+        called_set = set(called_snps) if called_snps else set()
+        for entry in entries:
+            n = entry["name"]
+            entry["fill"] = self.snp_colors["non_aligned"]
+            entry["r"] = 5  ## ete3 "size" was a diameter: 10 drew as r=5, keep that scale
+            entry["line"] = "#DDDDDD"
+            entry["dash"] = True
+            entry["dot"] = True
+            entry["kind"] = "untested"
+            entry["called"] = n in called_set
+            if n == "ROOT" or (n.startswith("-") and n.endswith("-")):
+                """ROOT and the "-name-" labels that get_nodes gives to nodes without any
 					snp_annotation (the root of a database like that) are not SNPs: they are only
 					meant to be line junctions and a label node must not be drawn as a grey SNP
-					dot (issue #52, with #32 and #34)'''
-				entry["dot"] = False
-				entry["kind"] = "label"
-				continue
-			if len(snplist) > 0:
-				snpvalue = snplist.get(n)
-				entry["kind"] = SNP_KINDS.get(snpvalue, "no_data")
-				if snpvalue in (1, 2, 3):
-					entry["fill"] = self.snp_colors[entry["kind"]]
-					entry["line"] = "#000000"
-					entry["dash"] = False
-					if snpvalue != 2:
-						entry["r"] = 7.5
-				elif n not in snplist:
-					'''SNP not in list: no alignment covered this position at all. The node used
+					dot (issue #52, with #32 and #34)"""
+                entry["dot"] = False
+                entry["kind"] = "label"
+                continue
+            if len(snplist) > 0:
+                snpvalue = snplist.get(n)
+                entry["kind"] = SNP_KINDS.get(snpvalue, "no_data")
+                if snpvalue in (1, 2, 3):
+                    entry["fill"] = self.snp_colors[entry["kind"]]
+                    entry["line"] = "#000000"
+                    entry["dash"] = False
+                    if snpvalue != 2:
+                        entry["r"] = 7.5
+                elif n not in snplist:
+                    """SNP not in list: no alignment covered this position at all. The node used
 						to be skipped with a continue, which also skipped the style and left it at
-						the ete default size, invisible in the pdf (issue #27)'''
-					no_data_nodes.add(n)
-			elif called_snps:
-				### Only care about called SNPs (the final SNPs of the summary tree) and color them
-				if entry["called"]:
-					entry["fill"] = self.snp_colors["derived"]
-					entry["r"] = 7.5
-					entry["kind"] = "derived"
-				entry["line"] = "#000000"
-				entry["dash"] = False
-		'''the nodes without data are drawn as open circles, and their database annotation is
+						the ete default size, invisible in the pdf (issue #27)"""
+                    no_data_nodes.add(n)
+            elif called_snps:
+                ### Only care about called SNPs (the final SNPs of the summary tree) and color them
+                if entry["called"]:
+                    entry["fill"] = self.snp_colors["derived"]
+                    entry["r"] = 7.5
+                    entry["kind"] = "derived"
+                entry["line"] = "#000000"
+                entry["dash"] = False
+        """the nodes without data are drawn as open circles, and their database annotation is
 			returned as well, so the per sample files can list them instead of hiding that they
-			were never compared at all (issue #27)'''
-		no_data_info = []
-		if no_data_nodes:
-			'''a per sample warning about positions that were never compared: it stays in the
+			were never compared at all (issue #27)"""
+        no_data_info = []
+        if no_data_nodes:
+            """a per sample warning about positions that were never compared: it stays in the
 				log and the terminal gets one summary line with the count, unless the run is
-				verbose (issue #27 kept it visible, the console noise is what changed)'''
-			logger.warning("{n} SNP positions in the tree had no alignment data at all, no reference block covered them or --mask dropped them: {ids}".format(
-					n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])),
-				extra={"quiet_console": True})
-			no_data_info = self.get_no_data_info(no_data_nodes)
-		if summary:
-			if save_tree:
-				self.write_tree_html(entries, annotations, page=self._summary_page(called_snps), run_info=run_info)
-			return
-		result = self._final_call(entries, snplist, called_snps, no_data_info)
-		## Write the tree viewer
-		if save_tree:
-			self.write_tree_html(entries, annotations, page=self._sample_page(result, snplist, called_snps, snp_info), run_info=run_info)
-		return result
+				verbose (issue #27 kept it visible, the console noise is what changed)"""
+            logger.warning(
+                "{n} SNP positions in the tree had no alignment data at all, no reference block covered them or --mask dropped them: {ids}".format(
+                    n=len(no_data_nodes), ids=", ".join(sorted(no_data_nodes)[:20])
+                ),
+                extra={"quiet_console": True},
+            )
+            no_data_info = self.get_no_data_info(no_data_nodes)
+        if summary:
+            if save_tree:
+                self.write_tree_html(
+                    entries, annotations, page=self._summary_page(called_snps), run_info=run_info
+                )
+            return
+        result = self._final_call(entries, snplist, called_snps, no_data_info)
+        ## Write the tree viewer
+        if save_tree:
+            self.write_tree_html(
+                entries,
+                annotations,
+                page=self._sample_page(result, snplist, called_snps, snp_info),
+                run_info=run_info,
+            )
+        return result
 
-	def _summary_page(self, final_snps):
-		'''the header of the summary tree: the final SNPs of the run'''
-		return {"sample": "summary", "summary": True, "finals": sorted(final_snps or [])}
+    def _summary_page(self, final_snps):
+        """the header of the summary tree: the final SNPs of the run"""
+        return {"sample": "summary", "summary": True, "finals": sorted(final_snps or [])}
 
-	def _sample_page(self, result, snplist, called_snps, snp_info):
-		'''the header of a sample tree: the final SNP, the support of the call and the SNP path
-			(as in <sample>_snps.txt) with the bases of each SNP on it'''
-		final_snp, _msg, called, _no_data = result
-		called_names = [snp[1] for snp in called] if called else []
-		path = called_names
-		final, support, missing = "NA", "NA", []
-		if final_snp and final_snp[2][0] and len(final_snp) > 5:
-			path = [name for name in final_snp[5] if name in set(called_names)]
-			final = final_snp[1]
-			support = "{found}/{n}".format(found=final_snp[2][1], n=final_snp[3])
-			missing = list(final_snp[4])
-		return {"sample": os.path.basename(self.tree_file)[:-len("_tree.html")], "summary": False,
-			"final": final, "support": support, "no_data": len(missing) if final != "NA" else "NA",
-			"path": path_details(path, snp_info, snplist)}
+    def _sample_page(self, result, snplist, called_snps, snp_info):
+        """the header of a sample tree: the final SNP, the support of the call and the SNP path
+        (as in <sample>_snps.txt) with the bases of each SNP on it"""
+        final_snp, _msg, called, _no_data = result
+        called_names = [snp[1] for snp in called] if called else []
+        path = called_names
+        final, support, missing = "NA", "NA", []
+        if final_snp and final_snp[2][0] and len(final_snp) > 5:
+            path = [name for name in final_snp[5] if name in set(called_names)]
+            final = final_snp[1]
+            support = "{found}/{n}".format(found=final_snp[2][1], n=final_snp[3])
+            missing = list(final_snp[4])
+        return {
+            "sample": os.path.basename(self.tree_file)[: -len("_tree.html")],
+            "summary": False,
+            "final": final,
+            "support": support,
+            "no_data": len(missing) if final != "NA" else "NA",
+            "path": path_details(path, snp_info, snplist),
+        }
 
-	def _final_call(self, entries, snplist, called_snps, no_data_info):
-		'''The final SNP call of the sample from the colored tree entries (see draw_tree)'''
-		dlist = []
-		logger.info("Called snps: {called}".format(called=called_snps))
-		if called_snps:
-			try:
-				node_index = {} ## first entry of every name, preorder, like search_nodes()[0]
-				for entry in entries:
-					node_index.setdefault(entry["name"], entry["id"])
-				'''Calculate the distance from all nodes to the root: every branch has unit length,
-					so the ete distance to the root is just the depth of the node'''
-				for tsnp in called_snps:
-					if tsnp in node_index:
-						dlist.append([entries[node_index[tsnp]]["depth"],tsnp])
-					elif tsnp == "T/N.1":
-						dlist.append([0,tsnp])
-					else:
-						logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
-				## Sort the list of distances from deepest
-				dlist = sorted(dlist,key=lambda l:l[0], reverse=True)
-				if len(dlist) < self.min_required_hits: ## the number of SNPs found is too small to be valid,
-					msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(min=self.min_required_hits)
-					logger.debug(msg)
-					return False,msg,[],no_data_info
-				'''The final SNP is the deepest called SNP whose ACTUAL ancestor chain in the tree, from the
+    def _final_call(self, entries, snplist, called_snps, no_data_info):
+        """The final SNP call of the sample from the colored tree entries (see draw_tree)"""
+        dlist = []
+        logger.info("Called snps: {called}".format(called=called_snps))
+        if called_snps:
+            try:
+                node_index = {}  ## first entry of every name, preorder, like search_nodes()[0]
+                for entry in entries:
+                    node_index.setdefault(entry["name"], entry["id"])
+                """Calculate the distance from all nodes to the root: every branch has unit length,
+					so the ete distance to the root is just the depth of the node"""
+                for tsnp in called_snps:
+                    if tsnp in node_index:
+                        dlist.append([entries[node_index[tsnp]]["depth"], tsnp])
+                    elif tsnp == "T/N.1":
+                        dlist.append([0, tsnp])
+                    else:
+                        logger.debug("Distance could non be calculated for {snp}".format(snp=tsnp))
+                ## Sort the list of distances from deepest
+                dlist = sorted(dlist, key=lambda l: l[0], reverse=True)
+                if len(dlist) < self.min_required_hits:  ## the number of SNPs found is too small to be valid,
+                    msg = "The number of SNPs found is too small (min {min}), Cannot call SNPs.".format(
+                        min=self.min_required_hits
+                    )
+                    logger.debug(msg)
+                    return False, msg, [], no_data_info
+                """The final SNP is the deepest called SNP whose ACTUAL ancestor chain in the tree, from the
 					root down to the node, is confirmed by _confirm_path: no ancestral or third base on it,
 					and enough of its SNPs called (min_required_hits, strictness). The old walk accepted SNPs
 					from branches it should have left: _check_start picked a start node by depth adjacency
 					in the flat sorted list and _confirm_path counted any called ancestor, so a node on
 					another branch could be final-called (issue #25).
 					When confirmed paths compete at the same depth no path is auto-picked: the sample stays NA
-					and the candidates are reported, leaving room for the calling policy of issue #47.'''
-				logger.debug("Calling SNP")
-				candidates = [] ## confirmed paths, all at the greatest confirmed depth
-				deepest = None ## deepest called SNP found in the tree, kept for the "not confirmed" report
-				for dist,tsnp in dlist: ## loop the called SNPs from deepest
-					if tsnp not in node_index: ## the node name from the db is not in the tree, cannot call (issue #78)
-						logger.debug("Called SNP {snp} was not found in the tree, cannot confirm it".format(snp=tsnp))
-						continue
-					ok,count,on_chain,missing = self._confirm_path(entries[node_index[tsnp]],entries,called_snps,snplist)
-					if not deepest:
-						deepest = [dist,tsnp,(False,count)]
-					if not ok:
-						continue
-					if not candidates:
-						candidates = [[dist,tsnp,count,on_chain,missing]]
-					elif dist == candidates[0][0]:
-						candidates.append([dist,tsnp,count,on_chain,missing])
-					else: ## a shallower confirmed path cannot beat the deepest confirmed one
-						break
-				dlist = sorted(dlist,key=lambda l:l[0], reverse=False)
-				if len(candidates) == 1:
-					dist,tsnp,count,on_chain,missing = candidates[0]
-					'''on_chain and missing are appended for the results dashboard: a call that
+					and the candidates are reported, leaving room for the calling policy of issue #47."""
+                logger.debug("Calling SNP")
+                candidates = []  ## confirmed paths, all at the greatest confirmed depth
+                deepest = None  ## deepest called SNP found in the tree, kept for the "not confirmed" report
+                for dist, tsnp in dlist:  ## loop the called SNPs from deepest
+                    if (
+                        tsnp not in node_index
+                    ):  ## the node name from the db is not in the tree, cannot call (issue #78)
+                        logger.debug(
+                            "Called SNP {snp} was not found in the tree, cannot confirm it".format(snp=tsnp)
+                        )
+                        continue
+                    ok, count, on_chain, missing = self._confirm_path(
+                        entries[node_index[tsnp]], entries, called_snps, snplist
+                    )
+                    if not deepest:
+                        deepest = [dist, tsnp, (False, count)]
+                    if not ok:
+                        continue
+                    if not candidates:
+                        candidates = [[dist, tsnp, count, on_chain, missing]]
+                    elif dist == candidates[0][0]:
+                        candidates.append([dist, tsnp, count, on_chain, missing])
+                    else:  ## a shallower confirmed path cannot beat the deepest confirmed one
+                        break
+                dlist = sorted(dlist, key=lambda l: l[0], reverse=False)
+                if len(candidates) == 1:
+                    dist, tsnp, count, on_chain, missing = candidates[0]
+                    """on_chain and missing are appended for the results dashboard: a call that
 						needed the strictness tolerance over positions without data must stand
 						out for manual review; the sixth item is the SNP chain from the root to the final SNP;
-						consumers that index 0-2 are unaffected'''
-					called = [dist,tsnp,(True,count),on_chain,missing,self._chain_names(entries[node_index[tsnp]],entries)]
-					msg = "Final SNP called: {snp} ({count}/{n} SNPs on the path called)".format(snp=tsnp,count=count,n=on_chain)
-					if missing:
-						'''a call that relies on the strictness tolerance says which SNPs had no data'''
-						msg += ", {k} without alignment data: {ids}".format(k=len(missing),ids=", ".join(missing))
-					logger.info(msg)
-				elif len(candidates) > 1:
-					paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1],n=c[2]) for c in candidates])
-					msg = "Two or more confirmed SNP paths compete at the same depth: {paths}; no final SNP is chosen, see the tree of the sample in summary.html".format(paths=paths)
-					logger.warning(msg)
-					called = deepest
-				elif deepest:
-					msg = ("{snp}, the deepest derived SNP, was not confirmed: its path has fewer than min_required_hits "
-						"({hits}) derived SNPs, a smaller fraction than strictness ({strict}), an ancestral or other base, "
-						"or no data directly above it").format(snp=deepest[1], hits=self.min_required_hits, strict=self.strictness)
-					called = deepest
-				else:
-					msg = "None of the called SNPs was found in the tree, cannot call SNPs."
-					logger.warning(msg)
-					return False,msg,[],no_data_info
-				logger.debug(dlist)
-			except KeyError as e:
-				logger.error("KeyError, {e}".format(e=e))
-				msg = "called_snps function failed, KeyError {e}".format(e=e)
-				logger.debug(msg)
-				return False,msg,[],no_data_info
-		else:
-			msg = "No SNPs were called."
-			logger.debug(msg)
-			return False,msg,[],no_data_info
-		return called,msg,dlist,no_data_info
+						consumers that index 0-2 are unaffected"""
+                    called = [
+                        dist,
+                        tsnp,
+                        (True, count),
+                        on_chain,
+                        missing,
+                        self._chain_names(entries[node_index[tsnp]], entries),
+                    ]
+                    msg = "Final SNP called: {snp} ({count}/{n} SNPs on the path called)".format(
+                        snp=tsnp, count=count, n=on_chain
+                    )
+                    if missing:
+                        """a call that relies on the strictness tolerance says which SNPs had no data"""
+                        msg += ", {k} without alignment data: {ids}".format(
+                            k=len(missing), ids=", ".join(missing)
+                        )
+                    logger.info(msg)
+                elif len(candidates) > 1:
+                    paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1], n=c[2]) for c in candidates])
+                    msg = "Two or more confirmed SNP paths compete at the same depth: {paths}; no final SNP is chosen, see the tree of the sample in summary.html".format(
+                        paths=paths
+                    )
+                    logger.warning(msg)
+                    called = deepest
+                elif deepest:
+                    msg = (
+                        "{snp}, the deepest derived SNP, was not confirmed: its path has fewer than min_required_hits "
+                        "({hits}) derived SNPs, a smaller fraction than strictness ({strict}), an ancestral or other base, "
+                        "or no data directly above it"
+                    ).format(snp=deepest[1], hits=self.min_required_hits, strict=self.strictness)
+                    called = deepest
+                else:
+                    msg = "None of the called SNPs was found in the tree, cannot call SNPs."
+                    logger.warning(msg)
+                    return False, msg, [], no_data_info
+                logger.debug(dlist)
+            except KeyError as e:
+                logger.error("KeyError, {e}".format(e=e))
+                msg = "called_snps function failed, KeyError {e}".format(e=e)
+                logger.debug(msg)
+                return False, msg, [], no_data_info
+        else:
+            msg = "No SNPs were called."
+            logger.debug(msg)
+            return False, msg, [], no_data_info
+        return called, msg, dlist, no_data_info
 
-	def _check_annotations(self, annotations, entries):
-		'''drop annotations whose SNP name is not in the tree, loudly: an annotation file
-			written against another database would otherwise silently draw nothing'''
-		if not annotations:
-			return []
-		names = set(entry["name"] for entry in entries)
-		kept = []
-		unknown = []
-		for annotation in annotations:
-			if annotation["node"] in names:
-				kept.append(annotation)
-			else:
-				unknown.append(annotation["node"])
-		if unknown:
-			logger.warning("{n} tree annotations name SNPs that are not in this database and were skipped: {ids}".format(
-					n=len(unknown), ids=", ".join(sorted(set(unknown)))))
-		return kept
+    def _check_annotations(self, annotations, entries):
+        """drop annotations whose SNP name is not in the tree, loudly: an annotation file
+        written against another database would otherwise silently draw nothing"""
+        if not annotations:
+            return []
+        names = set(entry["name"] for entry in entries)
+        kept = []
+        unknown = []
+        for annotation in annotations:
+            if annotation["node"] in names:
+                kept.append(annotation)
+            else:
+                unknown.append(annotation["node"])
+        if unknown:
+            logger.warning(
+                "{n} tree annotations name SNPs that are not in this database and were skipped: {ids}".format(
+                    n=len(unknown), ids=", ".join(sorted(set(unknown)))
+                )
+            )
+        return kept
 
-	def provenance(self, run_info=None):
-		'''what the pages record about the database (database_provenance) and the run (run_info,
-			CanSNPer2.run_info; optional, so other callers can leave it out)'''
-		info = database_provenance(self.database_path)
-		info.update(run_info or {})
-		return info
+    def provenance(self, run_info=None):
+        """what the pages record about the database (database_provenance) and the run (run_info,
+        CanSNPer2.run_info; optional, so other callers can leave it out)"""
+        info = database_provenance(self.database_path)
+        info.update(run_info or {})
+        return info
 
-	def write_tree_html(self,entries,annotations=None,page=None,run_info=None):
-		'''Write the self-contained viewer: the colored tree and its data are embedded in a single
-			html file, no server, no javascript downloads, opens in any browser on any OS'''
-		annotations = self._check_annotations(annotations or [], entries)
-		page = dict(page or {"sample": os.path.basename(self.tree_file)[:-len("_tree.html")], "path": []})
-		info = self.provenance(run_info)
-		payload = json.dumps({"colors": self.snp_colors, "nodes": entries, "annotations": annotations,
-			"page": page, "info": info, "provenance": provenance_lines(info)}, separators=(",", ":"))
-		'''The payload sits inside a <script> block, and json.dumps leaves "<" as it is, so a node
+    def write_tree_html(self, entries, annotations=None, page=None, run_info=None):
+        """Write the self-contained viewer: the colored tree and its data are embedded in a single
+        html file, no server, no javascript downloads, opens in any browser on any OS"""
+        annotations = self._check_annotations(annotations or [], entries)
+        page = dict(page or {"sample": os.path.basename(self.tree_file)[: -len("_tree.html")], "path": []})
+        info = self.provenance(run_info)
+        payload = json.dumps(
+            {
+                "colors": self.snp_colors,
+                "nodes": entries,
+                "annotations": annotations,
+                "page": page,
+                "info": info,
+                "provenance": provenance_lines(info),
+            },
+            separators=(",", ":"),
+        )
+        """The payload sits inside a <script> block, and json.dumps leaves "<" as it is, so a node
 			name from the database such as "B.1</script><script>..." closed the block and the rest
 			ran as script when the tree was opened. "<" only occurs inside json strings, where
 			\\u003c is the same character, so the data the viewer reads is unchanged.
 			The title names the sample and the scheme and is escaped as html text. Both
-			placeholders are filled in one pass, so a placeholder inside a name is not expanded.'''
-		title = "CanSNPer2 tree: {sample}".format(sample=page.get("sample") or os.path.basename(self.tree_file))
-		if info.get("scheme"):
-			title += " ({scheme})".format(scheme=info["scheme"])
-		values = {"TITLE": html.escape(title),
-				  "PAYLOAD": payload.replace("<", "\\u003c")}
-		page_html = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], render_template(TREE_HTML_TEMPLATE))
-		with open(self.tree_file, "w") as out:
-			out.write(page_html)
+			placeholders are filled in one pass, so a placeholder inside a name is not expanded."""
+        title = "CanSNPer2 tree: {sample}".format(
+            sample=page.get("sample") or os.path.basename(self.tree_file)
+        )
+        if info.get("scheme"):
+            title += " ({scheme})".format(scheme=info["scheme"])
+        values = {"TITLE": html.escape(title), "PAYLOAD": payload.replace("<", "\\u003c")}
+        page_html = re.sub(
+            r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], render_template(TREE_HTML_TEMPLATE)
+        )
+        with open(self.tree_file, "w") as out:
+            out.write(page_html)
 
-	def write_dashboard(self, reports, dashboard_file, annotations=None, run_info=None):
-		'''Write the results overview (DASHBOARD_HTML_TEMPLATE): the sample table and the
-			database tree embedded once, recolored per sample on click. Only the topology and
-			the per-sample SNP states are stored, so the file stays small even for 100+ samples.
-			run_info (CanSNPer2.run_info) is shown in the header; it is optional'''
-		entries = self._tree_entries()
-		annotations = self._check_annotations(annotations or [], entries)
-		nodes = [{"id": entry["id"], "name": entry["name"], "parent": entry["parent"], "depth": entry["depth"]} for entry in entries]
-		info = self.provenance(run_info)
-		payload = json.dumps({"colors": self.snp_colors, "nodes": nodes, "samples": reports, "annotations": annotations,
-			"info": info, "provenance": provenance_lines(info)}, separators=(",", ":"))
-		'''same "<" escaping as write_tree_html: a database name must not close the script block'''
-		title = "CanSNPer2 results"
-		if info.get("scheme"):
-			title += " ({scheme})".format(scheme=info["scheme"])
-		values = {"TITLE": html.escape(title), "PAYLOAD": payload.replace("<", "\\u003c")}
-		page = re.sub(r"__(TITLE|PAYLOAD)__", lambda match: values[match.group(1)], render_template(DASHBOARD_HTML_TEMPLATE))
-		with open(dashboard_file, "w") as out:
-			out.write(page)
-		return dashboard_file
+    def write_dashboard(self, reports, dashboard_file, annotations=None, run_info=None):
+        """Write the results overview (DASHBOARD_HTML_TEMPLATE): the sample table and the
+        database tree embedded once, recolored per sample on click. Only the topology and
+        the per-sample SNP states are stored, so the file stays small even for 100+ samples.
+        run_info (CanSNPer2.run_info) is shown in the header; it is optional"""
+        entries = self._tree_entries()
+        annotations = self._check_annotations(annotations or [], entries)
+        nodes = [
+            {"id": entry["id"], "name": entry["name"], "parent": entry["parent"], "depth": entry["depth"]}
+            for entry in entries
+        ]
+        info = self.provenance(run_info)
+        payload = json.dumps(
+            {
+                "colors": self.snp_colors,
+                "nodes": nodes,
+                "samples": reports,
+                "annotations": annotations,
+                "info": info,
+                "provenance": provenance_lines(info),
+            },
+            separators=(",", ":"),
+        )
+        """same "<" escaping as write_tree_html: a database name must not close the script block"""
+        title = "CanSNPer2 results"
+        if info.get("scheme"):
+            title += " ({scheme})".format(scheme=info["scheme"])
+        values = {"TITLE": html.escape(title), "PAYLOAD": payload.replace("<", "\\u003c")}
+        page = re.sub(
+            r"__(TITLE|PAYLOAD)__",
+            lambda match: values[match.group(1)],
+            render_template(DASHBOARD_HTML_TEMPLATE),
+        )
+        with open(dashboard_file, "w") as out:
+            out.write(page)
+        return dashboard_file
 
-	def get_no_data_info(self,snp_ids):
-		'''Look up the database annotation of the SNP nodes that no alignment carried a base for, in the
-			same columns as the SNP_info rows (Name, Reference, Sequence, Pos, QuerySeq, QueryPosition, Ancestral
-			base, Derived base, Target base, Edge flag), so the per sample output can list the positions
-			that were never compared instead of leaving them out of both result files (issue #27). The
-			target base is "N/A": there is no base there at all, which is different from a base that was
-			read and did not confirm the SNP; the query columns are N/A for the same reason (issue #23).'''
-		names = sorted(set(snp_ids))
-		if not names:
-			return []
-		rows = []
-		'''sqlite limits how many variables one statement may bind, so the lookup runs in chunks'''
-		for i in range(0, len(names), 400):
-			chunk = names[i:i+400]
-			QUERY = '''SELECT snp_annotation.snp_id, COALESCE(snp_references.genome, snp_annotation.reference),
+    def get_no_data_info(self, snp_ids):
+        """Look up the database annotation of the SNP nodes that no alignment carried a base for, in the
+        same columns as the SNP_info rows (Name, Reference, Sequence, Pos, QuerySeq, QueryPosition, Ancestral
+        base, Derived base, Target base, Edge flag), so the per sample output can list the positions
+        that were never compared instead of leaving them out of both result files (issue #27). The
+        target base is "N/A": there is no base there at all, which is different from a base that was
+        read and did not confirm the SNP; the query columns are N/A for the same reason (issue #23)."""
+        names = sorted(set(snp_ids))
+        if not names:
+            return []
+        rows = []
+        """sqlite limits how many variables one statement may bind, so the lookup runs in chunks"""
+        for i in range(0, len(names), 400):
+            chunk = names[i : i + 400]
+            QUERY = """SELECT snp_annotation.snp_id, COALESCE(snp_references.genome, snp_annotation.reference),
 							snp_annotation.sequence, snp_annotation.sequence_position, snp_annotation.ancestral_base,
 							snp_annotation.derived_base
 						FROM snp_annotation
 						LEFT JOIN snp_references ON (snp_references.id = snp_annotation.genome_i)
-						WHERE snp_annotation.snp_id IN ({marks}) AND snp_annotation.typed = 1'''.format(marks=",".join(["?"]*len(chunk)))
-			for snp_id,genome,sequence,position,ancestral,derived in self.database.query(QUERY,insert_val=tuple(chunk),getres=True).fetchall():
-				'''the empty last column keeps the rows in the shape of SNP_FILE_COLUMNS, whose
+						WHERE snp_annotation.snp_id IN ({marks}) AND snp_annotation.typed = 1""".format(
+                marks=",".join(["?"] * len(chunk))
+            )
+            for snp_id, genome, sequence, position, ancestral, derived in self.database.query(
+                QUERY, insert_val=tuple(chunk), getres=True
+            ).fetchall():
+                """the empty last column keeps the rows in the shape of SNP_FILE_COLUMNS, whose
 					edge flag cannot be computed for a position that no alignment carried; the
-					query columns are N/A for the same reason (issue #23)'''
-				rows.append([str(snp_id),str(genome),str(sequence),str(position),"N/A","N/A",str(ancestral),str(derived),"N/A",""])
-		found = set([row[0] for row in rows])
-		for name in names:
-			if name not in found:
-				'''a tree node without any annotation row: still a node the alignments never covered,
-					list it rather than hide it again'''
-				rows.append([name,"-","-","-","N/A","N/A","-","-","N/A",""])
-		return sorted(rows, key=lambda row: row[0])
+					query columns are N/A for the same reason (issue #23)"""
+                rows.append(
+                    [
+                        str(snp_id),
+                        str(genome),
+                        str(sequence),
+                        str(position),
+                        "N/A",
+                        "N/A",
+                        str(ancestral),
+                        str(derived),
+                        "N/A",
+                        "",
+                    ]
+                )
+        found = set([row[0] for row in rows])
+        for name in names:
+            if name not in found:
+                """a tree node without any annotation row: still a node the alignments never covered,
+					list it rather than hide it again"""
+                rows.append([name, "-", "-", "-", "N/A", "N/A", "-", "-", "N/A", ""])
+        return sorted(rows, key=lambda row: row[0])
