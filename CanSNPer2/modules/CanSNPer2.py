@@ -140,6 +140,20 @@ def ensure_directory(path, option):
         )
 
 
+def drain_queue(queue, batch=1000):
+    """take everything the queue holds right now instead of one item per round: a custom
+    database with thousands of SNPs per reference sends tens of thousands of items per
+    alignment through these queues, and picking a single item per check let the queue pipes
+    fill up until the workers blocked in put() (issue #41)"""
+    items = []
+    while len(items) < batch:
+        try:
+            items.append(queue.get_nowait())
+        except Empty:
+            break
+    return items
+
+
 @dataclass
 class SampleCall:
     """the call of one sample, as CanSNPer2.call_sample makes it: the final SNP (NA without a
@@ -1125,10 +1139,22 @@ class CanSNPer2(object):
     def find_snps_multiproc(self, xmfa_obj, xmfa_files, export=False, references=None):
         """Read the alignments in parallel, one process per alignment file. xmfa_obj is the
         AlignmentReader of the aligner, references the reference genome name of each file
-        (parallel to xmfa_files); without it the names are taken from the file names."""
+        (parallel to xmfa_files); without it the names are taken from the file names.
+        Returns the site states, the result rows and the derived canSNPs of all alignments."""
+        self.check_alignment_files(xmfa_files, references)
+        queues = {name: _MP_CTX.Queue() for name in ("SNPS", "SNP_info", "called_snps")}
+        jobs = self.start_snp_workers(xmfa_obj, xmfa_files, references, queues)
+        SNPS, SNP_info, called_snps, finish_signals, failed_reports, idle_timeout_hit = (
+            self.collect_snp_queues(jobs, len(xmfa_files), queues)
+        )
+        self.stop_snp_workers(jobs, idle_timeout_hit)
+        self.check_snp_reports(xmfa_files, finish_signals, failed_reports)
+        return SNPS, SNP_info, called_snps
+
+    def check_alignment_files(self, xmfa_files, references):
         """the alignments are checked before the workers start: ParseXMFA.read_xmfa swallows a
-			FileNotFoundError and simply returns no SNPs, so --skip_alignment against a wrong tmpdir
-			(or alignments that were moved away) typed every sample NA and exited 0 (issue #176)"""
+        FileNotFoundError and simply returns no SNPs, so --skip_alignment against a wrong tmpdir
+        (or alignments that were moved away) typed every sample NA and exited 0 (issue #176)"""
         missing = [xmfa for xmfa in xmfa_files if not os.path.isfile(xmfa)]
         if missing:
             raise FileNotFoundError(
@@ -1142,31 +1168,45 @@ class CanSNPer2(object):
                     n=len(references), m=len(xmfa_files)
                 )
             )
+
+    def start_snp_workers(self, xmfa_obj, xmfa_files, references, queues):
+        """one process per alignment file, each running find_snps into the three queues"""
         jobs = []
-        SNPS = {}
-        SNP_info = []
-        called_snps = []
-        result_queue = _MP_CTX.Queue()
-        export_queue = _MP_CTX.Queue()
-        called_queue = _MP_CTX.Queue()
         for enum, xmfa_file in enumerate(xmfa_files):
             reference = references[enum] if references is not None else None
             p = _MP_CTX.Process(
                 target=self.find_snps,
-                args=(xmfa_obj, xmfa_file, result_queue, export_queue, called_queue, reference),
+                args=(
+                    xmfa_obj,
+                    xmfa_file,
+                    queues["SNPS"],
+                    queues["SNP_info"],
+                    queues["called_snps"],
+                    reference,
+                ),
             )
             p.start()
             jobs.append(p)
             sleep(
                 0.05
             )  ## A short sleep to make sure all threads do not initiate access to the database file simultanously
+        return jobs
 
-        ## Parse output queues from jobs continuously
-        finish_signals = {
-            "SNPS": 0,
-            "SNP_info": 0,
-            "called_snps": 0,
-        }  # how many workers sent their finish signal per queue
+    def collect_snp_queues(self, jobs, n_files, queues):
+        """Parse output queues from jobs continuously, until every worker sent its finish signal
+        on every queue, all workers are gone, or the queues stayed silent for
+        queue_idle_timeout seconds. Returns the site states, the result rows, the derived
+        canSNPs, the finish signals per queue, the failure reports and whether the idle timeout
+        ended the loop."""
+        SNPS = {}
+        SNP_info = []
+        called_snps = []
+        sinks = {
+            "SNPS": lambda item: SNPS.__setitem__(item[0], item[1]),
+            "SNP_info": SNP_info.append,
+            "called_snps": called_snps.append,
+        }
+        finish_signals = {name: 0 for name in queues}  # how many workers sent their finish signal per queue
         failed_reports = []  ## workers that reported a failed SNP calling, they never count as finished (issue #50)
         idle_timeout_hit = (
             False  ## the loop ended because the queues went silent, see the join below (issue #51)
@@ -1178,80 +1218,29 @@ class CanSNPer2(object):
 			(the loop also used to spin at full core between the empty queue checks)"""
         max_idle_seconds = self.queue_idle_timeout  ## 5 minutes without a single queue item, by default
         last_activity = time()  # "tic-toc" clock-sound
-
-        def drain(queue, batch=1000):
-            """take everything the queue holds right now instead of one item per round: a
-            custom database with thousands of SNPs per reference sends tens of thousands of
-            items per alignment through these queues, and picking a single item per check
-            let the queue pipes fill up until the workers blocked in put() (issue #41)"""
-            items = []
-            while len(items) < batch:
-                try:
-                    items.append(queue.get_nowait())
-                except Empty:
-                    break
-            return items
-
         while True:
             queues_had_data = False
-            # check SNP queue
-            for tmp_data in drain(result_queue):
-                queues_had_data = True
-                if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
-                    failed_reports.append(tmp_data)
-                elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
-                    finish_signals["SNPS"] += 1
-                    logger.info(
-                        "Output queue for 'SNPS' finished for reference {reference}".format(
-                            reference=tmp_data.split("_")[-1]
+            for name, queue in queues.items():  ## SNPS, SNP_info and called_snps, in this order
+                for tmp_data in drain_queue(queue):
+                    queues_had_data = True
+                    if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
+                        failed_reports.append(tmp_data)
+                    elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
+                        finish_signals[name] += 1
+                        logger.info(
+                            "Output queue for '{name}' finished for reference {reference}".format(
+                                name=name, reference=tmp_data.split("_")[-1]
+                            )
                         )
-                    )
-                else:
-                    SNPS[tmp_data[0]] = tmp_data[1]
-            # /
-            # check SNP info queue
-            for tmp_data in drain(export_queue):
-                queues_had_data = True
-                if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
-                    failed_reports.append(tmp_data)
-                elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
-                    finish_signals["SNP_info"] += 1
-                    logger.info(
-                        "Output queue for 'SNP_info' finished for reference {reference}".format(
-                            reference=tmp_data.split("_")[-1]
-                        )
-                    )
-                else:
-                    SNP_info.append(tmp_data)
-            # /
-            # check called snps queue
-            for tmp_data in drain(called_queue):
-                queues_had_data = True
-                if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
-                    failed_reports.append(tmp_data)
-                elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
-                    finish_signals["called_snps"] += 1
-                    logger.info(
-                        "Output queue for 'called_snps' finished for reference {reference}".format(
-                            reference=tmp_data.split("_")[-1]
-                        )
-                    )
-                else:
-                    called_snps.append(tmp_data)
-            # /
+                    else:
+                        sinks[name](tmp_data)
             # check if finished (all xmfa files has returned the "finish worker" in all output queues)
-            finish_signals_called = []
-            for queue_name, signals in finish_signals.items():
-                if signals >= len(xmfa_files):
-                    finish_signals_called.append(queue_name)
-            if len(finish_signals) == len(finish_signals_called):
+            if all(signals >= n_files for signals in finish_signals.values()):
                 logger.info("All output queues finished!")
                 break
-            # /
             if queues_had_data:  ## still delivering, the clock restarts (issue #190)
                 last_activity = time()
                 continue
-            # /
             """nothing arrived this round: keep waiting while any worker is alive, and stop
 				either when they are all gone or when the queues have been silent too long"""
             alive = [job for job in jobs if job.is_alive()]
@@ -1266,16 +1255,17 @@ class CanSNPer2(object):
                 idle_timeout_hit = True
                 break
             sleep(0.1)
-            # /
-        ##/
-        ## Wait until processes terminated (their output should already have been processed in the queue's).
-        ## The wait is bounded: joining forever is what made the whole command hang when one SNP calling
-        ## worker stalled, which is what "software hang with a large custom SNP database" looked like
-        ## (issue #41). Stuck workers are stopped here, and the incomplete result check below turns the
-        ## run into a reported failure instead of a silent freeze.
-        ## Once the idle timeout had already called the run stuck, waiting the full join timeout on top
-        ## of the idle wait only made one stalled sample cost seven minutes before --keep_going moved on,
-        ## so the grace period after a silent queue is short (issue #51).
+        return SNPS, SNP_info, called_snps, finish_signals, failed_reports, idle_timeout_hit
+
+    def stop_snp_workers(self, jobs, idle_timeout_hit):
+        """Wait until processes terminated (their output should already have been processed in the
+        queues). The wait is bounded: joining forever is what made the whole command hang when one
+        SNP calling worker stalled, which is what "software hang with a large custom SNP database"
+        looked like (issue #41). Stuck workers are stopped here, and the incomplete result check
+        turns the run into a reported failure instead of a silent freeze. Once the idle timeout had
+        already called the run stuck, waiting the full join timeout on top of the idle wait only
+        made one stalled sample cost seven minutes before --keep_going moved on, so the grace period
+        after a silent queue is short (issue #51)."""
         join_grace = 10 if idle_timeout_hit else self.worker_join_timeout
         for job in jobs:
             job.join(timeout=join_grace)
@@ -1292,7 +1282,9 @@ class CanSNPer2(object):
                 job.join(timeout=10)
                 if job.is_alive():
                     job.kill()
-        ##/
+
+    def check_snp_reports(self, xmfa_files, finish_signals, failed_reports):
+        """the sample is refused when an alignment failed or did not report all its SNPs"""
         """a worker whose parse failed mid-alignment used to send normal finish signals, so the
 			sample was typed from a half-read alignment; the failure signal is its own report now
 			and the run refuses the sample instead (issue #50)"""
@@ -1303,7 +1295,6 @@ class CanSNPer2(object):
                     n=len(reports), m=len(xmfa_files), reports="; ".join(reports)
                 )
             )
-        ##/
         """a worker that died before sending its finish signals used to leave the sample typed
 			from whatever had arrived; an incomplete alignment set is an error now (issue #190)"""
         answered = min(finish_signals.values())
@@ -1315,7 +1306,6 @@ class CanSNPer2(object):
                     files=", ".join([os.path.basename(xmfa) for xmfa in xmfa_files[:3]]),
                 )
             )
-        return SNPS, SNP_info, called_snps
 
     def sample_name(self, path):
         """the sample name of a query file: its file name without the last extension, and without
