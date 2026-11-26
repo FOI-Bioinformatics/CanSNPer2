@@ -76,11 +76,14 @@ def test_save_tree_and_no_snpfiles_help_describe_the_behaviour():
 	assert "ETE3" not in text and "PDF" not in text
 	# the results overview carries every sample's tree, so the standalone page is opt-in
 	# again: --save_tree is the flag that carries the help, --no_save_tree stays accepted
-	# but hidden; the option line, not the first mention, since the comment above names both
-	option = [line for line in text.splitlines() if "add_argument('--save_tree'" in line]
-	assert len(option) == 1 and "html" in option[0] and "samples/" in option[0], option
-	hidden = [line for line in text.splitlines() if "add_argument('--no_save_tree'" in line]
-	assert len(hidden) == 1 and "SUPPRESS" in hidden[0], hidden
+	# but hidden; read from the parser, so that the layout of the source does not matter
+	import argparse
+
+	from CanSNPer2.CanSNPerTree import build_parser
+
+	actions = {a.dest: a for a in build_parser()._actions}
+	assert "html" in actions["save_tree"].help and "samples/" in actions["save_tree"].help
+	assert actions["no_save_tree"].help == argparse.SUPPRESS
 	assert "Don´t save" not in text
 
 
