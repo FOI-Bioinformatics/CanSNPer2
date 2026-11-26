@@ -24,6 +24,8 @@ Git history.
   file of a scheme (`--genomes`) and downloaded with `ref get --local-references` or during typing
   with `--fetch-local`.
 - An overview page of all samples (`summary.html`).
+- Assemblies can be given gzip-compressed (`.fna.gz`); they are decompressed into the temporary
+  folder before the alignment, and `x.fna.gz` is the sample `x`.
 
 ### Changed
 

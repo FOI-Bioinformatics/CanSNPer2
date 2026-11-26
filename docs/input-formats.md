@@ -26,7 +26,10 @@ and lists the files that are not reads.
 An assembly is one FASTA file per sample, with one or more sequences (complete genomes, or
 contigs of a draft assembly). The order of the sequences does not matter.
 
-- The file must not be gzip-compressed; decompress it first.
+- The file can be gzip-compressed (for example `GCA_000008985.1_ASM898v1_genomic.fna.gz` as
+  downloaded from NCBI). It is decompressed into the temporary folder before the alignment; a
+  damaged or truncated file stops the sample with `is a damaged or truncated gzip file`.
+  Reference genomes in `--ref-dir` must be uncompressed; `ref get` writes them so.
 - Each sequence is identified by the first word of its header line. These names must be set
   and unique within the file.
 - The file must hold at least one header and one sequence line.
@@ -118,7 +121,7 @@ Every result file, alignment file and row of the summary is named after the samp
 
 - An assembly is named after its file name without the last extension:
   `GCA_000018925.1.fasta` gives `GCA_000018925.1`, and `isolate.contigs.fna` gives
-  `isolate.contigs`.
+  `isolate.contigs`. A `.gz` ending is removed with it: `isolate.fna.gz` gives `isolate`.
 - A read sample is named as described above, or by the `sample` column of a samplesheet.
 
 Two different files that give the same sample name (for example `a/x.fasta` and `b/x.fasta`)

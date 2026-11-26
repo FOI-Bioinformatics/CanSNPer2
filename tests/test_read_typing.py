@@ -429,3 +429,21 @@ def test_the_summary_of_assemblies_has_no_read_settings(tmp_path):
     run(tmp_path, [str(genome)], db=db, summary=True, aligner="minimap2")
     notes = comments(tmp_path / "out" / "snps_summary.txt")
     assert notes and not [line for line in notes if line.startswith("Read settings")]
+
+
+def test_a_gzipped_assembly_is_typed_like_the_plain_one(tmp_path):
+    """the same call and the same site rows from x.fna and x.fna.gz (#95)"""
+    db, a, _ = make_scheme(tmp_path)
+    text = ">ga\n" + a + "\n"
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "gz").mkdir()
+    (tmp_path / "plain" / "ga.fna").write_text(text)
+    with gzip.open(tmp_path / "gz" / "ga.fna.gz", "wt") as out:
+        out.write(text)
+    plain = run(tmp_path, [str(tmp_path / "plain" / "ga.fna")], db=db, aligner="minimap2")
+    rows = open(tmp_path / "out" / "samples" / "ga_snps.txt").read()
+    packed = run(tmp_path, [str(tmp_path / "gz" / "ga.fna.gz")], db=db, aligner="minimap2", rerun=True)
+    assert packed.typed == plain.typed == {"ga": "A.3"}
+    again = open(tmp_path / "out" / "samples" / "ga_snps.txt").read()
+    strip = lambda text: [line for line in text.splitlines() if not line.startswith("# Query file:")]
+    assert strip(again) == strip(rows)
