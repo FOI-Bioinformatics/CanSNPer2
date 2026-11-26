@@ -495,13 +495,41 @@ def modify(args, logger):
 
 
 def run_command(args):
-    """everything after parsing, shared by CanSNPer2-database and the cansnper2 db verbs (2.6.0)"""
+    """everything after parsing, shared by CanSNPer2-database and the cansnper2 db verbs (2.6.0).
+    Each verb is a function below; each of them ends the command with its exit status, except
+    a database that db create built, which returns."""
     logger = get_logger(args)
     logger.debug(args)
     if not check_mode(args, logger):
         exit(1)
     args.export_format = args.export_format or "source"
-    scheme_options = [
+    scheme_info = scheme_options(args, logger)
+    if args.convert:
+        exit(convert(args, logger))
+    if args.do_import:
+        import_database(args, logger, scheme_info)
+    if not args.create:
+        open_existing_database(args, logger)
+    elif args.info:
+        logger.error("--info prints what an existing database records, it cannot be combined with --create!")
+        exit(1)
+    if args.remove:
+        remove_db_branch(args, logger)
+    if args.export:  ## Dump database to file
+        export_database(args, logger)
+    if not args.create:
+        modify_database(args, logger)
+    elif args.annotation or args.tree or args.references:
+        create_database(args, logger, scheme_info)
+    else:
+        logger.error("No datafile supplied, nothing to process!")
+        exit(1)
+
+
+def scheme_options(args, logger):
+    """--scheme-name, --scheme-status and --scheme-source: only with create and import, without
+    control characters, a known status. Returns the scheme information to record."""
+    given = [
         option
         for option, value in (
             ("--scheme-name", args.scheme_name),
@@ -510,11 +538,11 @@ def run_command(args):
         )
         if value is not None
     ]
-    if scheme_options and not (args.create or args.do_import):
+    if given and not (args.create or args.do_import):
         logger.error(
             "{options} {verb} recorded by --create and --import only, they cannot be "
             "used with an existing database".format(
-                options=", ".join(scheme_options), verb="is" if len(scheme_options) == 1 else "are"
+                options=", ".join(given), verb="is" if len(given) == 1 else "are"
             )
         )
         exit(1)
@@ -532,189 +560,199 @@ def run_command(args):
             )
         )
         exit(1)
-    scheme_info = {"scheme": args.scheme_name, "status": args.scheme_status, "source": args.scheme_source}
-    if args.convert:
-        exit(convert(args, logger))
-    if args.do_import:
-        """import is the counterpart of --export: it reads the source triple and writes a
-			current-format database, so it is handled before the database checks below,
-			which expect --database to be an existing database or a --create target"""
-        missing = [
-            name
-            for name, value in (
-                ("--tree", args.tree),
-                ("--cansnps", args.annotation),
-                ("--references", args.references),
-            )
-            if not value
-        ]
-        if missing:
-            logger.error(
-                "db import builds a database from the files db export writes and needs all "
-                "three source files; missing: {0}".format(", ".join(missing))
-            )
-            exit(1)
-        if not args.database:
-            logger.error("db import needs the new database to write; give it with -d/--database")
-            exit(1)
-        if not check_folder(args.database, logger):
-            exit(1)
-        try:
-            counts = import_from_sources(
-                args.tree,
-                args.annotation,
-                args.references,
-                args.database,
-                tmpdir=args.tmpdir,
-                verbose=args.verbose,
-                scheme_info=scheme_info,
-                genomes=args.genomes,
-            )
-        except DatabaseImportError as e:
-            logger.error(str(e))
-            exit(1)
-        print(
-            "Imported {tree}, {snp}, {references} into {dst} (current format)".format(
-                tree=args.tree, snp=args.annotation, references=args.references, dst=args.database
-            )
+    return {"scheme": args.scheme_name, "status": args.scheme_status, "source": args.scheme_source}
+
+
+def import_database(args, logger, scheme_info):
+    """db import"""
+    """import is the counterpart of --export: it reads the source triple and writes a
+		current-format database, so it is handled before the database checks below,
+		which expect --database to be an existing database or a --create target"""
+    missing = [
+        name
+        for name, value in (
+            ("--tree", args.tree),
+            ("--cansnps", args.annotation),
+            ("--references", args.references),
         )
-        print(
-            "{nodes} nodes, {tree} links, {snp_annotation} canSNPs ({typed} typed), "
-            "{snp_references} reference genomes".format(**counts)
+        if not value
+    ]
+    if missing:
+        logger.error(
+            "db import builds a database from the files db export writes and needs all "
+            "three source files; missing: {0}".format(", ".join(missing))
         )
+        exit(1)
+    if not args.database:
+        logger.error("db import needs the new database to write; give it with -d/--database")
+        exit(1)
+    if not check_folder(args.database, logger):
+        exit(1)
+    try:
+        counts = import_from_sources(
+            args.tree,
+            args.annotation,
+            args.references,
+            args.database,
+            tmpdir=args.tmpdir,
+            verbose=args.verbose,
+            scheme_info=scheme_info,
+            genomes=args.genomes,
+        )
+    except DatabaseImportError as e:
+        logger.error(str(e))
+        exit(1)
+    print(
+        "Imported {tree}, {snp}, {references} into {dst} (current format)".format(
+            tree=args.tree, snp=args.annotation, references=args.references, dst=args.database
+        )
+    )
+    print(
+        "{nodes} nodes, {tree} links, {snp_annotation} canSNPs ({typed} typed), "
+        "{snp_references} reference genomes".format(**counts)
+    )
+    exit()
+
+
+def open_existing_database(args, logger):
+    """the database of export, info, modify and remove must exist and be a database; db info
+    prints it here"""
+    """a wrong path let sqlite create an empty database and the modification or export only failed
+		later with "no such table" errors (issue #125)"""
+    if not args.database:
+        logger.error("A database is required; give it with -d/--database")
+        exit(1)
+    try:
+        check_database(args.database)
+    except ConnectionError as e:
+        logger.error(str(e))
+        exit(1)
+    if args.info:
+        print_info(args.database)
         exit()
-    if not args.create:
-        """a wrong path let sqlite create an empty database and the modification or export only failed
-			later with "no such table" errors (issue #125)"""
-        if not args.database:
-            logger.error("A database is required; give it with -d/--database")
+
+
+def print_info(database):
+    """db info: the scheme information and the size of the database"""
+    info = read_scheme_info(database)
+    if not info:
+        print(MISSING_TEXT)
+    for key in ordered_keys(info):
+        ## an empty value, such as known_issues of a scheme without any, is printed as none
+        print("{key}\t{value}".format(key=key, value=info[key] if info[key] not in (None, "") else "none"))
+    counts = database_counts(database)
+    if counts:
+        print("")
+        for key, value in counts:
+            print("{key}\t{value}".format(key=key, value=value))
+
+
+def remove_db_branch(args, logger):
+    """db remove"""
+    """--remove was documented but no code ever read the flag, so it silently did nothing (issue #147)"""
+    if args.create:
+        logger.error(
+            "--remove removes a branch from an existing database and cannot be combined with --create!"
+        )
+        exit(1)
+    if args.mod_file:
+        logger.error("--remove only needs the branch root given with --parent, it does not read --mod-file!")
+        exit(1)
+    if not args.parent:
+        logger.error("db remove needs the branch to remove; give its root node with --parent")
+        exit(1)
+    exit(modify(args, logger))
+
+
+def export_database(args, logger):
+    """db export"""
+    outdir = args.outdir or "."  ## without -o the export goes to the current directory (issue #132)
+    log_scheme_notice(args.database, logger)  ## the scheme_info table itself is not exported
+    if args.export_format == "newick":
+        logger.info("Export Newick tree!")
+        NT = NewickTree(args.database, outdir=outdir)
+        if args.outdir:
+            """-o is documented as the export folder, so write the tree to a file instead of only
+				printing it to stdout when it is given (issue #131)"""
+            newick_file = os.path.join(
+                args.outdir, "{db}_tree.nwk".format(db=os.path.basename(args.database).rsplit(".", 1)[0])
+            )
+            try:
+                write_outputs(
+                    {newick_file: "{tree}\n".format(tree=NT.newickTree)}
+                )  ## never overwrites, no partial file
+            except ExportError as e:
+                logger.error("The database cannot be exported: {error}".format(error=e))
+                exit(1)
+            logger.info("Newick tree written to {file}".format(file=newick_file))
+        else:
+            NT.print()
+    else:
+        try:
+            files = export_source(args.database, outdir)
+        except ExportError as e:
+            logger.error("The database cannot be exported: {error}".format(error=e))
             exit(1)
+        print("Exported to {files}".format(files=", ".join(files.values())))
+        print(
+            "Import back with: cansnper2 db import -d <new.db> --tree {tree} "
+            "--cansnps {snp} --references {references}".format(**files)
+            + (" --genomes {genomes}".format(**files) if "genomes" in files else "")
+        )
+    exit()
+
+
+def modify_database(args, logger):
+    """db modify"""
+    if not (args.mod_file or args.annotation or args.references):
+        logger.error(
+            "Nothing to do with {db}: give the changes to make with --mod-file, --cansnps or "
+            "--references".format(db=args.database)
+        )
+        exit(1)
+    """--annotation and --references need no --mod_file. A modification without any source is a usage error, not a crash (issue #150); a source
+		file without the expected columns is refused, not a crash in the loader (issue #154)"""
+    exit(modify(args, logger))
+
+
+def create_database(args, logger, scheme_info):
+    """db create; returns when the database was built"""
+    """a database can also be created from only a tree or only a reference list (issue #129)"""
+    if not args.database:
+        logger.error("db create needs the new database to write; give it with -d/--database")
+        exit(1)
+    if os.path.exists(args.database):
+        """--create into an existing file added the tree, the references and the SNPs a second
+			time; into a database from before 2.3.0 every SNP insert also failed and the
+			command still ended with exit status 0. An existing file is refused, as --import does,
+			and a database from before 2.3.0 is named as such with the conversion hint."""
         try:
             check_database(args.database)
         except ConnectionError as e:
             logger.error(str(e))
             exit(1)
-        if args.info:
-            info = read_scheme_info(args.database)
-            if not info:
-                print(MISSING_TEXT)
-            for key in ordered_keys(info):
-                ## an empty value, such as known_issues of a scheme without any, is printed as none
-                print(
-                    "{key}\t{value}".format(
-                        key=key, value=info[key] if info[key] not in (None, "") else "none"
-                    )
-                )
-            counts = database_counts(args.database)
-            if counts:
-                print("")
-                for key, value in counts:
-                    print("{key}\t{value}".format(key=key, value=value))
-            exit()
-    elif args.info:
-        logger.error("--info prints what an existing database records, it cannot be combined with --create!")
+        logger.error(
+            "The database {db} already exists; db create builds a new database, "
+            "choose a new name or remove the file first".format(db=args.database)
+        )
         exit(1)
-    if args.remove:
-        """--remove was documented but no code ever read the flag, so it silently did nothing (issue #147)"""
-        if args.create:
-            logger.error(
-                "--remove removes a branch from an existing database and cannot be combined with --create!"
-            )
-            exit(1)
-        if args.mod_file:
-            logger.error(
-                "--remove only needs the branch root given with --parent, it does not read --mod-file!"
-            )
-            exit(1)
-        if not args.parent:
-            logger.error("db remove needs the branch to remove; give its root node with --parent")
-            exit(1)
-        exit(modify(args, logger))
-    if args.export:  ## Dump database to file
-        outdir = args.outdir or "."  ## without -o the export goes to the current directory (issue #132)
-        log_scheme_notice(args.database, logger)  ## the scheme_info table itself is not exported
-        if args.export_format == "newick":
-            logger.info("Export Newick tree!")
-            NT = NewickTree(args.database, outdir=outdir)
-            if args.outdir:
-                """-o is documented as the export folder, so write the tree to a file instead of only
-					printing it to stdout when it is given (issue #131)"""
-                newick_file = os.path.join(
-                    args.outdir, "{db}_tree.nwk".format(db=os.path.basename(args.database).rsplit(".", 1)[0])
-                )
-                try:
-                    write_outputs(
-                        {newick_file: "{tree}\n".format(tree=NT.newickTree)}
-                    )  ## never overwrites, no partial file
-                except ExportError as e:
-                    logger.error("The database cannot be exported: {error}".format(error=e))
-                    exit(1)
-                logger.info("Newick tree written to {file}".format(file=newick_file))
-            else:
-                NT.print()
-        else:
-            try:
-                files = export_source(args.database, outdir)
-            except ExportError as e:
-                logger.error("The database cannot be exported: {error}".format(error=e))
-                exit(1)
-            print("Exported to {files}".format(files=", ".join(files.values())))
-            print(
-                "Import back with: cansnper2 db import -d <new.db> --tree {tree} "
-                "--cansnps {snp} --references {references}".format(**files)
-                + (" --genomes {genomes}".format(**files) if "genomes" in files else "")
-            )
-        exit()
-    if not args.create:
-        if not (args.mod_file or args.annotation or args.references):
-            logger.error(
-                "Nothing to do with {db}: give the changes to make with --mod-file, --cansnps or "
-                "--references".format(db=args.database)
-            )
-            exit(1)
-        """--annotation and --references need no --mod_file. A modification without any source is a usage error, not a crash (issue #150); a source
-			file without the expected columns is refused, not a crash in the loader (issue #154)"""
-        exit(modify(args, logger))
-    elif args.annotation or args.tree or args.references:
-        """a database can also be created from only a tree or only a reference list (issue #129)"""
-        if not args.database:
-            logger.error("db create needs the new database to write; give it with -d/--database")
-            exit(1)
+    if not check_folder(args.database, logger):
+        exit(1)
+    try:
+        CanSNPDatabase(scheme_info=scheme_info, **vars(args))
+    except (InputError, TreeFileError, SourceFileError, DatabaseWriteError, sqlite3.Error, OSError) as e:
+        """a tree, node, link, reference or SNP that could not be written ends the build"""
+        logger.error(str(e))
         if os.path.exists(args.database):
-            """--create into an existing file added the tree, the references and the SNPs a second
-				time; into a database from before 2.3.0 every SNP insert also failed and the
-				command still ended with exit status 0. An existing file is refused, as --import does,
-				and a database from before 2.3.0 is named as such with the conversion hint."""
-            try:
-                check_database(args.database)
-            except ConnectionError as e:
-                logger.error(str(e))
-                exit(1)
-            logger.error(
-                "The database {db} already exists; db create builds a new database, "
-                "choose a new name or remove the file first".format(db=args.database)
-            )
-            exit(1)
-        if not check_folder(args.database, logger):
-            exit(1)
-        try:
-            CanSNPDatabase(scheme_info=scheme_info, **vars(args))
-        except (InputError, TreeFileError, SourceFileError, DatabaseWriteError, sqlite3.Error, OSError) as e:
-            """a tree, node, link, reference or SNP that could not be written ends the build"""
-            logger.error(str(e))
-            if os.path.exists(args.database):
-                """the file did not exist before this run, so a database that was started is incomplete"""
-                os.remove(args.database)
-            exit(1)
-        except Exception:
-            """an unexpected error is reported by the top-level handler; the started database
-				is removed first, as for the known errors above"""
-            if os.path.exists(args.database):
-                os.remove(args.database)
-            raise
-    else:
-        logger.error("No datafile supplied, nothing to process!")
+            """the file did not exist before this run, so a database that was started is incomplete"""
+            os.remove(args.database)
         exit(1)
+    except Exception:
+        """an unexpected error is reported by the top-level handler; the started database
+			is removed first, as for the known errors above"""
+        if os.path.exists(args.database):
+            os.remove(args.database)
+        raise
 
 
 def command():
