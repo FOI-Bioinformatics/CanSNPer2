@@ -5,7 +5,6 @@ result file and the query fasta."""
 import gzip
 import os
 import sqlite3
-import threading
 
 import pytest
 

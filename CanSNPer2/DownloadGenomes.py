@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import sys, os
+import sys
+import os
 import textwrap
 import time
 import gzip
@@ -11,7 +12,7 @@ import http.client
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 
-import argparse, os
+import argparse
 
 try:
     import fcntl
@@ -498,7 +499,7 @@ class DownloadGenomes(object):
             p.start()
             threads.append(p)
         """each worker stops its own download at the deadline; the margin covers unpacking and checking"""
-        for p in join_workers(threads, DOWNLOAD_DEADLINE + 15 * 60):
+        for _p in join_workers(threads, DOWNLOAD_DEADLINE + 15 * 60):
             logger.error(
                 "A download process was still running after {minutes:g} minutes and was stopped".format(
                     minutes=(DOWNLOAD_DEADLINE + 15 * 60) / 60
@@ -718,7 +719,7 @@ def run_command(args, parser):
 
     def scheme_source():
         """where the schemes are read from: a local directory or a GitHub repository"""
-        from CanSNPer2.modules.FetchScheme import GitHubSchemeSource, LocalSchemeSource, DATA_REPO
+        from CanSNPer2.modules.FetchScheme import GitHubSchemeSource, LocalSchemeSource
 
         if args.data_dir:
             return LocalSchemeSource(args.data_dir)
@@ -747,7 +748,7 @@ def run_command(args, parser):
         exit()
 
     args.logs = args.logs.rstrip("/") + "/"
-    logpath = setup_logging(
+    setup_logging(
         args.logs, log_tag(parser.prog), level=logval
     )  ## own tag per verb: it used to append to the database log (issue #217)
     logger = logging.getLogger(__name__)

@@ -57,7 +57,6 @@ def test_whitespace_in_snp_and_references_fields_is_ignored(tmp_path):
 
 def test_loader_raises_for_a_snp_whose_node_is_not_in_the_tree(tmp_path):
     # a SNP dropped with a warning left a database without it and exit status 0
-    from CanSNPer2.modules.InitiateDatabase import CreateSNPDatabase
 
     files = write_sources(tmp_path)
     db = create(tmp_path, files)

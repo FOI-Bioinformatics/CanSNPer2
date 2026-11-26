@@ -3,16 +3,14 @@
 A file saved as "UTF-8 with BOM" starts with U+FEFF, which was read as part of the first
 header name or the root name and gave misleading errors."""
 
-import os
 import sqlite3
 
 import pytest
 
 import helpers
-from test_create_input_checks import REFERENCES, SNP_HEADER, SNP_ROWS, TREE, create, write_sources
+from test_create_input_checks import create, write_sources
 from test_db_build_and_inputs import annotation_file, build_db, modify_arguments, run_database_cli, tree_file
-from CanSNPer2.modules.DatabaseConnection import SourceFileError
-from CanSNPer2.modules.ImportDatabase import DatabaseImportError, import_from_sources
+from CanSNPer2.modules.ImportDatabase import import_from_sources
 from CanSNPer2.modules.SourceCheck import check_modification, check_sources
 
 BOM = b"\xef\xbb\xbf"

@@ -179,7 +179,6 @@ def test_export_leaves_nothing_when_a_write_fails(tmp_path, scheme, monkeypatch)
     db, _ = scheme
     o = tmp_path / "o"
     o.mkdir()
-    real = ExportDatabase.os.replace
     calls = []
 
     def failing(a, b):
@@ -195,11 +194,10 @@ def test_export_leaves_nothing_when_a_write_fails(tmp_path, scheme, monkeypatch)
 def test_export_snp_failure_leaves_no_tree(tmp_path, scheme, monkeypatch):
     db, _ = scheme
     o = tmp_path / "o"
-    real_print = print
     monkeypatch.setattr(
         ExportDatabase, "CANSNP_COLUMNS", None
     )  ## printing *None fails after the tree is written
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 (any error from the failing print)
         export_source(db, str(o))
     assert not os.path.exists(str(o)) or os.listdir(str(o)) == []
 

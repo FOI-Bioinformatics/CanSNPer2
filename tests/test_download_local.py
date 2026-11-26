@@ -3,7 +3,6 @@ a scheme are fetched into <outdir>/local/<accession>.fna. The genomes file names
 accession, so the assembly name of the NCBI path is read from the folder listing."""
 
 import gzip
-import os
 import sqlite3
 
 import helpers

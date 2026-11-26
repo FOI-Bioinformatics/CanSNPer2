@@ -120,7 +120,9 @@ def test_sites_bed(tmp_path):
     ],
 )
 def test_selftest_reports_read_typing(tmp_path, programs, line):
-    import os, subprocess, sys
+    import os
+    import subprocess
+    import sys
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

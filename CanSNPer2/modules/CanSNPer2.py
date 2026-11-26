@@ -40,7 +40,7 @@ from CanSNPer2 import __version__
 
 
 ## import standard python libraries for subprocess and multiprocess
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import Popen, STDOUT
 import multiprocessing
 from queue import Empty
 from time import sleep, time
@@ -826,7 +826,7 @@ class CanSNPer2(object):
         if self.checked_references[path]:
             raise CanSNPer2Error(self.checked_references[path])
 
-    def create_alignment_commands(self, query, references=[]):
+    def create_alignment_commands(self, query, references=()):
         """One alignment command per reference. Returns the commands, their log files and
         (reference, query) names; the alignment file and reference name of each command
         are stored in alignment_files and alignment_references."""
@@ -880,12 +880,12 @@ class CanSNPer2(object):
         as an option; it is passed as ./-x.fasta"""
         return os.path.join(".", path) if path.startswith("-") else path
 
-    def create_mauve_command(self, query, references=[]):
+    def create_mauve_command(self, query, references=()):
         """the name from the time progressiveMauve was the only aligner"""
         commands, logs, _names = self.create_alignment_commands(query, references)
         return commands, logs
 
-    def align(self, query, references=[]):
+    def align(self, query, references=()):
         """Align the query against the references with the selected aligner and return the
         alignment files, an empty list when the alignments failed with --keep_going"""
         """the name is set here, from the query actually being aligned, so that the commands
@@ -1148,9 +1148,9 @@ class CanSNPer2(object):
             # check SNP queue
             for tmp_data in drain(result_queue):
                 queues_had_data = True
-                if type(tmp_data) == str and tmp_data.find("XMFA_obj_failed_worker_") != -1:
+                if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
                     failed_reports.append(tmp_data)
-                elif type(tmp_data) == str and tmp_data.find("XMFA_obj_finish_worker_") != -1:
+                elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
                     finish_signals["SNPS"] += 1
                     logger.info(
                         "Output queue for 'SNPS' finished for reference {reference}".format(
@@ -1163,9 +1163,9 @@ class CanSNPer2(object):
             # check SNP info queue
             for tmp_data in drain(export_queue):
                 queues_had_data = True
-                if type(tmp_data) == str and tmp_data.find("XMFA_obj_failed_worker_") != -1:
+                if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
                     failed_reports.append(tmp_data)
-                elif type(tmp_data) == str and tmp_data.find("XMFA_obj_finish_worker_") != -1:
+                elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
                     finish_signals["SNP_info"] += 1
                     logger.info(
                         "Output queue for 'SNP_info' finished for reference {reference}".format(
@@ -1178,9 +1178,9 @@ class CanSNPer2(object):
             # check called snps queue
             for tmp_data in drain(called_queue):
                 queues_had_data = True
-                if type(tmp_data) == str and tmp_data.find("XMFA_obj_failed_worker_") != -1:
+                if isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_failed_worker_") != -1:
                     failed_reports.append(tmp_data)
-                elif type(tmp_data) == str and tmp_data.find("XMFA_obj_finish_worker_") != -1:
+                elif isinstance(tmp_data, str) and tmp_data.find("XMFA_obj_finish_worker_") != -1:
                     finish_signals["called_snps"] += 1
                     logger.info(
                         "Output queue for 'called_snps' finished for reference {reference}".format(

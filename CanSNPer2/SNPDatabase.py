@@ -4,7 +4,8 @@ CreateDatabase is a simple script to simplify the creation of a new database
 """
 
 # **** Imports ****
-import sys, os
+import sys
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -213,7 +214,7 @@ def get_logger(args):
     args.logs = args.logs.rstrip("/") + "/"
     action = getattr(args, "db_action", None)
     tag = "cansnper2-db-" + action if action else "CanSNPer2-database"
-    logpath = setup_logging(args.logs, tag, level=logval)  ## shared log naming for all commands (issue #217)
+    setup_logging(args.logs, tag, level=logval)  ## shared log naming for all commands (issue #217)
     return logging.getLogger(__name__)
 
 
@@ -693,7 +694,7 @@ def run_command(args):
         if not check_folder(args.database, logger):
             exit(1)
         try:
-            CanSNPDB = CanSNPDatabase(scheme_info=scheme_info, **vars(args))
+            CanSNPDatabase(scheme_info=scheme_info, **vars(args))
         except (InputError, TreeFileError, SourceFileError, DatabaseWriteError, sqlite3.Error, OSError) as e:
             """a tree, node, link, reference or SNP that could not be written ends the build"""
             logger.error(str(e))

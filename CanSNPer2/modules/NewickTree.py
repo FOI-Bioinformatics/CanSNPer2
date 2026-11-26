@@ -1168,7 +1168,7 @@ class NewickTree(object):
             "(snp_annotation.node_id = {table}.id AND snp_annotation.typed = 1)"
         ).format(table=table)
         for id, name, snp_id in self.database.query(SELECT).fetchall():
-            if snp_id != None:
+            if snp_id is not None:
                 nt[id] = snp_id
             else:
                 """the tree is read once per sample and again for the dashboard: warn once per node"""

@@ -135,7 +135,7 @@ def test_paired_reads_are_typed_like_the_genome(tmp_path, capsys):
 def test_the_median_depth_counts_only_sites_with_reads(tmp_path):
     # reads of the first half of the genome only: the B sites (11-17 kb) get none
     db, a, _ = make_scheme(tmp_path)
-    obj = run(tmp_path, write_pair(tmp_path, "half", [(a[:10000], 30, 15)]), db=db)
+    run(tmp_path, write_pair(tmp_path, "half", [(a[:10000], 30, 15)]), db=db)
     header = comments(tmp_path / "out" / "samples" / "half_snps.txt")
     reads_line = [line for line in header if line.startswith("Reads: ")][0]
     assert "sites_with_reads=3/6" in reads_line
@@ -305,7 +305,8 @@ def test_mask_does_not_apply_to_reads(tmp_path, caplog):
 
 
 def cli(tmp_path, *args):
-    import subprocess, sys
+    import subprocess
+    import sys
 
     return subprocess.run(
         [
@@ -341,7 +342,8 @@ def test_command_line_reads(tmp_path):
 
 
 def test_cansnper2_type_takes_max_reads(tmp_path):
-    import subprocess, sys
+    import subprocess
+    import sys
 
     db, a, _ = make_scheme(tmp_path)
     files = write_pair(tmp_path, "v1", [(a, 30, 20)])

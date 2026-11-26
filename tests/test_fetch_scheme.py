@@ -333,7 +333,8 @@ def test_data_dir_must_be_a_directory(tmp_path):
 
 
 def test_the_command_line_builds_a_local_scheme_and_refuses_mixed_options(tmp_path):
-    import subprocess, sys
+    import subprocess
+    import sys
 
     data = write_tree(tmp_path / "data", scheme_repo())
     env = dict(os.environ, PYTHONPATH=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -367,7 +368,8 @@ def test_the_command_line_builds_a_local_scheme_and_refuses_mixed_options(tmp_pa
 
 
 def test_a_scheme_folder_inside_a_larger_git_repository_reports_its_own_paths(tmp_path):
-    import shutil, subprocess
+    import shutil
+    import subprocess
 
     if not shutil.which("git"):
         pytest.skip("git is not installed")

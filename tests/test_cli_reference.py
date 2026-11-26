@@ -1,7 +1,6 @@
 """docs/cli.md, the command line reference, is generated from the cansnper2 parsers by
 tools/gen_cli_docs.py and has to stay current with them."""
 
-import argparse
 import importlib.util
 import pathlib
 import sys

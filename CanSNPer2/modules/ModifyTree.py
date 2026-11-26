@@ -8,10 +8,11 @@ using CanSNPer2's own database functions.
 """
 
 from CanSNPer2.modules.DatabaseConnection import ModifyFunctions, NameNotFoundError, open_source
-import logging, os
+import logging
+import os
 
 logger = logging.getLogger(__name__)
-import math, time
+import time
 # from .database.database import database
 
 
@@ -367,10 +368,8 @@ class ModifyTree(object):
                 if replace_parent:
                     if parent == change_root:
                         parent = self.parent
-                try:
-                    rank_i = self.rank[rank]
-                except KeyError:
-                    rank_i = self.add_rank(rank)
+                if rank not in self.rank:
+                    self.add_rank(rank)
                 if swap:
                     ## Make sure that the order between parent and child nodes are correct and consistent with the database
                     child, parent = parent, child
@@ -493,7 +492,7 @@ class ModifyTree(object):
                     "Replace parent option initiated,  change the name of parent in the database to allow merge"
                 )
                 with open_source(self.modfile) as f:
-                    headers = f.readline().strip().split(self.sep)
+                    f.readline()  ## the header line
                     branchroot = f.readline().strip().split(self.sep)
                     if (
                         not branchroot[0].strip()
@@ -580,7 +579,6 @@ class ModifyTree(object):
             logger.warning(
                 "{n} genome annotations skipped, listed in {file}".format(n=len(skipped), file=skipped_file)
             )
-        gid = self.taxonomydb.get_genomes()
         logger.info(
             "{added} added and {updated} genome annotations were updated!".format(
                 added=added, updated=updated
@@ -664,7 +662,6 @@ class ModifyTree(object):
         """Function that adds annotation of genome ids to nodes"""
         logger.info("Update node names in the database from {refdict}".format(refdict=refdict))
         updated = 0
-        added = 0
         with open_source(refdict) as f:
             for row in f:
                 try:
@@ -685,7 +682,7 @@ class ModifyTree(object):
 
         self.taxonomydb.commit()
         gid = self.taxonomydb.get_genomes()
-        logger.info("{updated} annotations were updated!".format(added=added, updated=updated))
+        logger.info("{updated} annotations were updated!".format(updated=updated))
         return gid
 
     def clean_database(self, ncbi=False):
@@ -749,7 +746,7 @@ class ModifyTree(object):
                 in addition to naively removing all missing genomes (datasets that are missing due to exhaustive import of taxonomy information)
         """
         logger.info("Entered purge_database")
-        if not type(genomes_list) == set:
+        if not isinstance(genomes_list, set):
             genomes_list = set(genomes_list)  # Convert input list to hashmap for lookup speed
         if genomes_list:
             logger.info(
@@ -757,14 +754,11 @@ class ModifyTree(object):
             )
             # Get nodes and genomes from database
             logger.info("Fetching id,genome from database")
-            genomes_nodes = self.taxonomydb.get_genomes(
+            self.taxonomydb.get_genomes(
                 table="genomes", cols="id,genome"
             )  # get_gnomes returns dict of "genome"->"id"
 
             nodes_keep = set()
-
-            if True:
-                remove_genome_keys = set(genomes_nodes) - genomes_list  ## Genomes missing and in database
 
             num_rows_before = self.taxonomydb.num_rows("genomes")
             self.taxonomydb.delete_genomes(nodes_keep, genomes=genomes_list, match_genome_only=True)
@@ -777,7 +771,7 @@ class ModifyTree(object):
 
     def keep_levels(self, links):
         parent_levels = {}
-        for c, p, l in links:
+        for _c, p, l in links:
             if self.rank[l] != 1:
                 parent_levels[p] = l
         return parent_levels

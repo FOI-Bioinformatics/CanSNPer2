@@ -48,7 +48,9 @@ from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count, log_t
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
 import logging
 import logging.config
-import os, sys, tempfile
+import os
+import sys
+import tempfile
 ## Basic config file
 
 """CanSNPer2 settings"""

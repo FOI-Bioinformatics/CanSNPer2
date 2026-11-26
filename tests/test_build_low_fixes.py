@@ -4,14 +4,12 @@ Positions above the range of an integer, empty or header-only source files, unsa
 names, repeated column names or accessions, a tree path of thousands of levels, Newick
 names with special characters, trailing tabs, and the node ids of a modification."""
 
-import re
 import sqlite3
 import sys
 
 import pytest
 
 import helpers
-from CanSNPer2.modules.DatabaseConnection import SourceFileError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.SourceCheck import check_sources
 from test_create_input_checks import REFERENCES, SNP_HEADER, SNP_ROWS, TREE, create, refused, write_sources

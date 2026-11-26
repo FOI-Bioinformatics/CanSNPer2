@@ -6,7 +6,6 @@ message about an empty modification source."""
 
 import sqlite3
 
-import pytest
 
 import helpers
 from test_db_build_and_inputs import annotation_file, build_db, run_database_cli, tree_file

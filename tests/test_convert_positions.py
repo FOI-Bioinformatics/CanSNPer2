@@ -146,7 +146,7 @@ def test_converts_database_and_types_the_same(tmp_path):
         ("chr1", 600): (base(600), "A", "A.3"),
     }
     assert positions == {"chr1": [10, 600], "chr2": [50]}
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 (any error: the check refuses the old database)
         check_database(source)  ## the old database is left as it was
 
 

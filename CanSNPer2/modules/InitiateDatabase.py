@@ -6,8 +6,6 @@ from CanSNPer2.modules.DatabaseConnection import (
     DatabaseFunctions,
     check_source_headers,
     GENOME_SOURCE_COLUMNS,
-    CANSNP_SOURCE_COLUMNS,
-    SNP_SOURCE_COLUMNS,
     TYPED_VALUES,
     annotation_columns,
     cansnp_row,
@@ -319,7 +317,7 @@ class CanSNPDatabase(DatabaseFunctions):
 
     def load_cansnp_annotation(self, annotation_file):
         """Function that loads data into the cansnp annotation table"""
-        data = self.load_annotation_file(annotation_file)
+        self.load_annotation_file(annotation_file)
         logging.info("CanSNPer annotation loaded!")
 
     def load_genome_annotation(self, annotation_file):

@@ -3,7 +3,6 @@ Every published scheme ships this file, but no database held it; read typing wit
 references takes its candidate genomes from it."""
 
 import os
-import sqlite3
 import subprocess
 import sys
 

@@ -18,7 +18,7 @@ import pytest
 
 import helpers
 from CanSNPer2.modules.InitiateDatabase import CanSNPDatabase, CreateSNPDatabase
-from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error
+from CanSNPer2.modules.CanSNPer2 import CanSNPer2
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 
 

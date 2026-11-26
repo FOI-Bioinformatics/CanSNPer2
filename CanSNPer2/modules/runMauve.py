@@ -170,8 +170,10 @@ class RunMauve(object):
                 shutil.copyfile(source, staged)
         return staged
 
-    def align(self, query, references=[]):
+    def align(self, query, references=None):
         """Run mauve as a subprocess"""
+        if references is None:
+            references = []
         commands = []  # store execute command
         logs = []  # store log filepath
         if (

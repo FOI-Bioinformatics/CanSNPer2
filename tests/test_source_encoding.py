@@ -5,12 +5,11 @@ header name or the root name and gave misleading errors. A file in another encod
 latin-1 ended the run with a bare UnicodeDecodeError that did not name the file."""
 
 import os
-import sqlite3
 
 import pytest
 
 import helpers
-from test_create_input_checks import REFERENCES, SNP_HEADER, SNP_ROWS, TREE, create, write_sources
+from test_create_input_checks import create, write_sources
 from test_db_build_and_inputs import annotation_file, build_db, modify_arguments, run_database_cli, tree_file
 from CanSNPer2.modules.DatabaseConnection import SourceFileError
 from CanSNPer2.modules.ImportDatabase import DatabaseImportError, import_from_sources

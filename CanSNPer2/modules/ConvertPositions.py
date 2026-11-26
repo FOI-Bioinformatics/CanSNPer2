@@ -367,7 +367,10 @@ def upgrade_table(source, target):
                     )
                 )
                 continue
-            value = lambda name, default="": fields[column[name]] if name in column else default
+
+            def value(name, default="", fields=fields, column=column):
+                return fields[column[name]] if name in column else default
+
             node = value("node") or value("snp_id")
             rank = value("rank", "1") or "1"
             row = [

@@ -4,7 +4,6 @@ Since 2.6.0 only the cansnper2 command is installed. A message that tells the us
 --allow_unverified or --mod_file names an option the verbs do not have, so every option named
 in a user-facing string of the package must exist in the cansnper2 parsers."""
 
-import argparse
 import ast
 import pathlib
 import re
@@ -125,7 +124,7 @@ def test_scheme_and_ref_verbs_take_the_shared_log_levels():
     _parser, parsers = build_parsers()
     for verb in ("scheme get", "ref get"):
         extra = ["NAME"] if verb == "scheme get" else []
-        parse = lambda *options: parsers[verb].parse_args(extra + list(options))
+        parse = lambda *options, verb=verb, extra=extra: parsers[verb].parse_args(extra + list(options))
         assert log_level(parse()) == logging.WARNING, verb
         assert log_level(parse("--quiet")) == logging.ERROR, verb
         assert log_level(parse("-v")) == logging.INFO, verb

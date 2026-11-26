@@ -14,7 +14,6 @@ each observed position back before it is recorded.
 # __name__="ParseXMFA"
 from CanSNPer2.modules.AlignmentReader import (
     AlignmentReader,
-    EDGE_MARGIN,
     SEQUENCES_SUFFIX,
     read_sequence_table,
 )  # noqa: F401 (EDGE_MARGIN is imported from here by callers)

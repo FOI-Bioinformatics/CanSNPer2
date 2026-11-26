@@ -1,4 +1,6 @@
-import sys, os, gzip
+import sys
+import os
+import gzip
 import sqlite3
 
 """
@@ -626,7 +628,7 @@ class CanSNPdbFunctions(DatabaseConnection):
         """This function deletes all links given in links"""
         QUERY = "DELETE FROM {table} WHERE parent = ? AND child = ?"
         for parent, child in links:
-            res = self.query(QUERY.format(table=table), insert_val=(parent, child), getres=True)
+            self.query(QUERY.format(table=table), insert_val=(parent, child), getres=True)
         ## Commit changes
         if not hold:
             self.commit()
@@ -635,7 +637,7 @@ class CanSNPdbFunctions(DatabaseConnection):
         """This function deletes all nodes given in nodes"""
         QUERY = "DELETE FROM {table} WHERE id = ?"
         for node in nodes:
-            res = self.query(QUERY.format(table=table), insert_val=(node,), getres=True)
+            self.query(QUERY.format(table=table), insert_val=(node,), getres=True)
         ## Commit changes
         if not hold:
             self.commit()
@@ -749,9 +751,7 @@ class TaxonomyDBConnection(CreateDatabase):
         if not os.path.exists(self.database):
             logger.info("Database {database} does not exist, creating it!".format(database=self.database))
             self.create_database(self.database)
-        try:  ## If database connection already exists
-            self.conn
-        except AttributeError:
+        if not hasattr(self, "conn"):  ## If database connection already exists
             logger.debug("Connecting to {database}".format(database=self.database))
             self.conn = self.create_connection(self.database)
         if self.conn is None:
@@ -840,11 +840,9 @@ class TaxonomyDBConnection(CreateDatabase):
 		""".format(table=table, set_column=data["set_column"], where_column=data["where_column"])
         udata = tuple([data["set_value"], data["where"]])
         logger.debug("{q} {d}".format(q=UPDATE_QUERY, d=udata))
-        res = self.query(UPDATE_QUERY, udata, error=True)
+        self.query(UPDATE_QUERY, udata, error=True)
         if self.rowcount() == 0:
-            res = self.insert(
-                {data["set_column"]: data["set_value"], data["where_column"]: data["where"]}, table
-            )
+            self.insert({data["set_column"]: data["set_value"], data["where_column"]: data["where"]}, table)
             return False
         return True
 
@@ -1047,7 +1045,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
         """Fetch the next incremental node from the current database"""
         QUERY = "SELECT MAX(id) AS max_id FROM nodes"
         res = self.query(QUERY).fetchone()[0]
-        if res == None:
+        if res is None:
             res = 1
         else:
             res += 1
@@ -1132,7 +1130,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
 
     def add_rank(self, rank, id=False):
         """Add node to tree"""
-        if rank == None:
+        if rank is None:
             raise AttributeError("Rank cannot be None")
         info = {"rank": rank}
         ### If ID is supplied skip autoincrement and add specific ID
@@ -1200,7 +1198,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
         logger.info("{links}".format(links=len(links)))
         for parent, child, rank in links:
             logger.debug("{}-{} rank: {} deleted!".format(parent, child, rank))
-            res = self.query(QUERY.format(table=table, parent=parent, child=child, rank_i=rank))
+            self.query(QUERY.format(table=table, parent=parent, child=child, rank_i=rank))
         ## Commit changes
         if not hold:
             logger.debug("Commit changes!")
@@ -1214,11 +1212,11 @@ class DatabaseFunctions(TaxonomyDBConnection):
         children = set()
         QUERY = "DELETE FROM {table} WHERE parent in ({parents}) AND child in ({children})"
         logger.debug("Deleting {nlinks} links!".format(nlinks=len(links)))
-        for parent, child, rank in links:
+        for parent, child, _rank in links:
             parents |= set([parent])
             children |= set([child])
         logger.debug(QUERY.format(table=table, parents=len(parents), children=len(children)))
-        res = self.query(
+        self.query(
             QUERY.format(
                 table=table,
                 parents=",".join(list(map(str, parents))),
@@ -1237,7 +1235,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
         QUERY = "DELETE FROM {table} WHERE parent in ({parents}) AND child in ({children})"
         logger.info("Attempting delete where parent&child in: ")
         logger.debug(str(nodes))
-        res = self.query(
+        self.query(
             QUERY.format(
                 table="tree",
                 parents=",".join(list(map(str, nodes))),
@@ -1255,7 +1253,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
         QUERY = "DELETE FROM {table} WHERE id in ({nodes})"
         logger.debug("Deleting {nnodes} nodes!".format(nnodes=len(nodes)))
         logger.debug(QUERY.format(table=table, nodes=""))
-        res = self.query(QUERY.format(table=table, nodes=",".join(list(map(str, nodes)))))
+        self.query(QUERY.format(table=table, nodes=",".join(list(map(str, nodes)))))
         ## Commit changes
         if not hold:
             logger.debug("Commit changes!")
@@ -1276,7 +1274,7 @@ class DatabaseFunctions(TaxonomyDBConnection):
         if genomes:
             if not match_genome_only:
                 logger.debug(QUERY.format(table=table, nodes="", genomes=""))
-                res = self.query(
+                self.query(
                     QUERY.format(
                         table=table,
                         nodes=",".join(list(map(str, nodes))),
@@ -1284,12 +1282,10 @@ class DatabaseFunctions(TaxonomyDBConnection):
                     )
                 )
             else:
-                res = self.query(
-                    QUERY.format(table=table, genomes='"' + '","'.join(list(map(str, genomes))) + '"')
-                )
+                self.query(QUERY.format(table=table, genomes='"' + '","'.join(list(map(str, genomes))) + '"'))
         else:
             logger.debug(QUERY.format(table=table, nodes=""))
-            res = self.query(QUERY.format(table=table, nodes=",".join(list(map(str, nodes)))))
+            self.query(QUERY.format(table=table, nodes=",".join(list(map(str, nodes)))))
 
         ## Commit changes
         if not hold:
@@ -1323,8 +1319,10 @@ class ModifyFunctions(DatabaseFunctions):
             rankDict[rank[1]] = rank[0]
         return rankDict
 
-    def get_children(self, parents, children=set(), level=0, maxdepth=50, selected=False):
+    def get_children(self, parents, children=None, level=0, maxdepth=50, selected=False):
         """Get all children from a parent"""
+        if children is None:
+            children = set()
         if level >= maxdepth:
             return children
         if not parents:
@@ -1366,8 +1364,10 @@ class ModifyFunctions(DatabaseFunctions):
             pret |= set([int(pc[1])])
         return pret
 
-    def get_parents(self, name, parents=set(), depth=0, find_all=False, simple=False, ncbi=False):
+    def get_parents(self, name, parents=None, depth=0, find_all=False, simple=False, ncbi=False):
         """Get all parents until root"""
+        if parents is None:
+            parents = set()
         ld = depth + 1
         lmax = 12
         if ncbi and depth == 0:
@@ -1466,7 +1466,6 @@ class XMFAFunctions(DatabaseConnection):
     functions to simplify data access related to the website, its a subclass of DatabaseConnection"""
 
     def __init__(self, database, verbose=False):
-        import time
 
         super().__init__(database, verbose)
         logging.info("Load XMFAFunctions")
@@ -1480,7 +1479,7 @@ class XMFAFunctions(DatabaseConnection):
         """Return {(sequence, position): (ancestral_base, derived_base, snp_id)} for the SNPs of reference"""
         SNPs = {}
         res = self.query(snp_string, (reference,), getres=True)
-        for genome, sequence, pos, tbase, rbase, SNP in res.fetchall():
+        for _genome, sequence, pos, tbase, rbase, SNP in res.fetchall():
             # a site is a position on one reference sequence; two SNPs on the same site cannot be told apart
             if (sequence, pos) in SNPs:
                 logger.error(

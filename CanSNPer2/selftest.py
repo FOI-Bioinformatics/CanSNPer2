@@ -19,7 +19,7 @@ def run_command():
 		(it imports cgi, removed in python 3.13, which capped the package below 3.13, issue #184).
 		Import the package itself to catch syntax/import breakage of the installed copy."""
     try:
-        import CanSNPer2.modules.NewickTree
+        import CanSNPer2.modules.NewickTree  # noqa: F401 (the import is the check)
     except ImportError as e:
         print("ERROR: CanSNPer2 could not be imported: {e}; reinstall CanSNPer2".format(e=e))
         sys.exit(1)
