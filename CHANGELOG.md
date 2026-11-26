@@ -43,6 +43,12 @@ Git history.
 - The package metadata moved from `setup.py` to `pyproject.toml`. `pip install .` installs the
   same files and the same `cansnper2` command.
 
+### Removed
+
+- `CanSNPer2/modules/runMauve.py`, a progressiveMauve runner that `cansnper2 type` did not use and
+  that no command installed (`python -m CanSNPer2.modules.runMauve`). Alignments for later typing
+  with `--skip-alignment` are made by `cansnper2 type --keep-temp`.
+
 ### Fixed
 
 - The `# Final SNP:` line of `<sample>_snps.txt` gives the support as `found/expected:` after
