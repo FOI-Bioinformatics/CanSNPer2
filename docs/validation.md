@@ -236,6 +236,146 @@ give `NA`.
 two reference distances. The depth series is drawn from one deep run per isolate, so it does not
 show the uneven coverage of a run that is shallow to begin with.
 
+## Read typing on real nanopore reads
+
+**Compared.** The final SNP and the canSNP states from real nanopore reads against the call of
+an assembly of the same isolate and against the call of its Illumina reads, on five schemes, at
+several depths, with two nanopore chemistries, and grouped by the homopolymer run around each
+canSNP position. The evaluation on simulated reads above used reads whose errors are close to
+random; this one uses runs from instruments.
+
+**Data.** 17 runs of seven isolates: *F. tularensis* holarctica FDC408 (PRJNA287971),
+*C. burnetii* Nine Mile II RSA439 (PRJNA541584), *Y. pestis* YP_80 (PRJNA1098581), *B.
+anthracis* 14RA5914 and 14RA5916, and *B. suis* 08RB3277 and 08RB3701 (PRJEB59317 and
+PRJEB94163, an evaluation of nanopore sequencing by one laboratory). Eleven nanopore runs, six
+Illumina runs of the same BioSamples. Four isolates were sequenced twice by that laboratory,
+with R9 and with R10.4.1 chemistry, which is where the chemistry comparison comes from. Five
+isolates have a complete or draft assembly in RefSeq (GCF_002102455.2, GCF_005280755.1,
+GCF_039640425.1, GCF_002277915.1, GCF_017963425.1); the two *B. suis* isolates have none.
+
+A nested depth series of 5x, 10x, 20x, 30x and 50x was drawn from each nanopore run, and the
+whole run was typed as well. The Illumina pairs were typed with every read mapped. Both
+comparisons are reported because neither is beyond question on its own: three of the complete
+genomes are hybrid or nanopore-polished assemblies of the same reads, so they are not
+independent of them, while the Illumina reads are independent but are reads as well.
+
+**Software and settings.** CanSNPer2 2.6.0 at commit 79ee2e8, minimap2 2.31-r1302, samtools
+1.25, sra-tools 3.4.1, Python 3.13.18. The platform defaults of 2.6.0, that is `--platform ont`
+with `--min-depth` 5 and `--min-allele-fraction` 0.7, except in the threshold table. The five
+schemes are from CanSNPer2-data master. The thresholds were varied afterwards by classifying
+the kept site counts again and walking the tree again, as in the measurement of the `clr`
+preset; the harness reproduced all 77 calls of the runs at the shipped thresholds.
+
+**Date.** 2026-11-27.
+
+**Results.** With the shipped settings no call was on another branch than the call of the
+assembly, at any depth. The call either matched, stopped higher on the same path, or was `NA`,
+over the seven samples that have an assembly to compare with:
+
+| | 5x | 10x | 20x | 30x | 50x | full |
+|---|---|---|---|---|---|---|
+| same call as the assembly | 0 of 7 | 3 of 7 | 6 of 7 | 7 of 7 | 7 of 7 | 7 of 7 |
+| stopped higher on the same path | | 2 of 7 | 1 of 7 | | | |
+| `NA` | 7 of 7 | 2 of 7 | | | | |
+
+The depth at which the assembly call first appeared differs by scheme: 10x for *C. burnetii*
+(11 canSNPs) and for the two *B. anthracis* isolates on R9, 20x for *Y. pestis* (97 canSNPs) and
+for the same two isolates on R10.4.1, and 30x for *F. tularensis* (328 canSNPs). At 10x
+*F. tularensis* stopped at `B.3` and *Y. pestis* at `VI`, both ancestors of the assembly call
+(`B.75` and `VII`). Simulated ONT reads reached the assembly call at 10x for 42 of 50 genomes;
+real runs need about 20x, and a deep scheme about 30x.
+
+The depth of the series is the depth over the genome, and the depth at the canSNP positions is
+lower: the median depth there was 2 to 5 at 5x, 5 to 9 at 10x, 9 to 19 at 20x, 13 to 27 at 30x
+and 23 to 45 at 50x, so about two thirds of the nominal depth after the mapping quality filter.
+This is why a 10x run sits at the `--min-depth` of 5 rather than above it.
+
+**canSNP states.** At the shipped thresholds no canSNP state from the nanopore reads differed
+from the comparison: 2,752 states against the assemblies and 2,754 against the Illumina reads,
+over all depths and both chemistries, none differing. One canSNP of one run was flagged as a
+mixed site: *F. tularensis* FDC408 at 30x, where `A.I.5` had 4 reads of the ancestral base and 2
+of a third base, so the most frequent base reached 0.67 and stayed under the allele fraction of
+0.7. The call of that run was the assembly call. The measurement of the `clr` preset found 4 to
+7 mixed sites per sample against a reference genome of another species; here every scheme
+reference is of the species of the sample, which is the difference.
+
+**Thresholds.** The two thresholds were varied over a grid, 3,577 results with 131,905 state
+comparisons. All 39 differing states are at `--min-depth` 1, and so is the only call on another
+branch. At `--min-depth` 3 and 5 no state differed and no call was off the path at any allele
+fraction from 0.5 to 0.9. Calls equal to the assembly call, at allele fraction 0.7:
+
+| `--min-depth` | 5x | 10x | 20x | 30x | 50x | full | off the path |
+|---|---|---|---|---|---|---|---|
+| 1 | 7 of 7 | 6 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | 1, at fraction 0.5 |
+| 3 | 1 of 7 | 6 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | none |
+| 5 (shipped) | 0 of 7 | 3 of 7 | 6 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | none |
+| 10 | 0 of 7 | 0 of 7 | 5 of 7 | 7 of 7 | 7 of 7 | 7 of 7 | none |
+| 20 | 0 of 7 | 0 of 7 | 0 of 7 | 1 of 7 | 6 of 7 | 7 of 7 | none |
+
+The one off-path call is *F. tularensis* at 5x with `--min-depth` 1 and `--min-allele-fraction`
+0.5, which called `B.21` instead of `B.75` after reading one canSNP of the path (`B.66`) wrong.
+The same reads give `NA` at the shipped thresholds.
+
+**Homopolymer context.** The canSNP positions were grouped by the longest run of identical bases
+that reaches the position or stops within one base of it, measured in the reference genome of
+the scheme. No state differed from the comparison in any group, at any depth, in any of the
+eleven nanopore runs. The groups are uneven, which is set by the schemes: of the 473 canSNPs of
+the five schemes, 376 sit in a run shorter than three, 82 in a run of three or four and 15 in a
+run of five or more, and all 15 are in the *F. tularensis* and *Y. pestis* schemes. At full
+depth those 15 positions were read correctly in both samples.
+
+**Chemistry.** The four isolates sequenced with both chemistries gave the same call from both,
+and no state differed from the Illumina comparison with either. From 20x both chemistries had
+usable data at the same number of canSNPs (13 of 13 for *B. anthracis*, 23 of 24 for *B. suis*).
+Below that the counts differ in both directions: at 10x R9 covered more canSNPs in the two
+*B. anthracis* isolates (12 and 11 against 9 and 10) and R10.4.1 more in the two *B. suis*
+isolates (23 and 22 against 20 and 20). With four isolates this is not a difference worth
+reading as one. The two *B. anthracis* isolates reached the assembly call at 10x on R9 and at
+20x on R10.4.1, which follows the same counts.
+
+**Platform detection.** `--platform auto` read the platform from the lengths and the base
+qualities of every one of the eleven nanopore files, and reported `ont` for seven of them and
+`hifi` for four. The four are the R10.4.1 runs of the one laboratory, basecalled with a `sup`
+model, whose mean base quality over the first 400 reads is 25.8 to 37.3, above the 25 at which
+long reads are taken for HiFi reads. The module description gives this as a known limit of the
+lengths and the qualities. The calls at 30x were the same as with `--platform ont` for all
+eleven files, since `map-hifi` and `map-ont` both map these reads and the deeper `hifi`
+thresholds were still met at that depth.
+
+The read names of these files still carry the nanopore read UUID, and in one case the
+basecalling model, but the SRA conversion puts the run accession first and the UUID form of
+`ReadPlatform.NAME_FORMS` is anchored at the start of the name, so the name signal was not used
+for any file. An unanchored form matches 400 of 400 names in each of the ten files that still
+have a UUID and none of the 400 names of either Illumina file. That is a candidate change for
+#119, in a release of its own since it changes what `--platform auto` reports; this evaluation
+measures the shipped behavior.
+
+**A scheme that does not cover the sample.** Neither *B. suis* isolate was called, from any
+input: 22 of the 23 canSNPs with data are ancestral and only the root is derived, from the
+Illumina reads at 129x as much as from the nanopore runs. The `brucella_classical` scheme has no
+node for these isolates, so `not called` is the right report, and the two isolates contribute
+only their canSNP states to this evaluation. See
+[limitations.md](limitations.md) on taxa outside the scheme.
+
+**Conclusion.** On real nanopore runs of four schemes the shipped `ont` settings gave the call
+of the assembly and of the Illumina reads with no call on another branch, and no canSNP state
+differed. About 20x over the genome is the depth to plan for, 30x for a scheme with many
+canSNPs, and a run below that should be expected to stop above its lineage or to give `NA`.
+Homopolymer context did not change a single state, which is the error the simulated reads could
+not cover, although only 15 canSNP positions of these schemes sit in a run of five or more
+bases. The errors that the thresholds hold back appear at `--min-depth` 1; the shipped 5 and the
+lower 3 were both without error here, and 3 would add the call at 10x for 6 of 7 samples instead
+of 3. Such a change belongs in a release of its own with the comparison in the CHANGELOG, as for
+the `clr` value.
+
+**Open.** Seven isolates, five schemes, two laboratories for the nanopore runs and one
+instrument type. The depth series is drawn from one deep run per isolate, so it does not show
+the uneven coverage of a run that is shallow to begin with. Twelve of the runs were taken from
+the NCBI Open Data bucket and converted with `fasterq-dump`, which drops the nanopore tags from
+the read names; the files ENA serves keep them, so the detection of the platform from read
+names is not covered by this data. R10.4.1 duplex reads and barcoded runs were not separated
+out. No PacBio HiFi run is included, which remains open together with the aligner comparison.
+
 ## Local references
 
 **Compared.** The final SNP from 50x Illumina reads mapped only to the scheme reference genome,
