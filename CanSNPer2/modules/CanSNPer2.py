@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 ## import CanSNPer2 specific modules
 from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, threads_per_mapping, write_sites_bed
-from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
+from CanSNPer2.modules.ParsePileup import AUTO, DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
 from CanSNPer2.modules.ReadInput import (
     ReadInputError,
     ReadSample,
@@ -31,6 +31,7 @@ from CanSNPer2.modules.ReadInput import (
     pair_read_files,
     read_samplesheet,
 )
+from CanSNPer2.modules.ReadPlatform import NO_BASEQ, describe, detect_platform, reads_line_fields
 from CanSNPer2.modules.LiftOver import lift
 from CanSNPer2.DownloadGenomes import LocalFetcher
 from CanSNPer2.modules.LocalReferences import (
@@ -307,6 +308,9 @@ class CanSNPer2(object):
         self.alignment_mappers = {}  ## the mapper of each platform for BAM and CRAM input (#96)
         self.alignment_input = set()  ## the read samples given as a BAM or CRAM file (#96)
         self.platform = kwargs.get("platform") or DEFAULT_PLATFORM
+        """the platform the reads of each file look like, read from the input and kept for the
+			warning and the "Reads:" line; with --platform auto it is the platform used (#119)"""
+        self.platform_detections = {}
         self.samplesheet = kwargs.get("samplesheet")
         """threads per sample, divided between the references a sample is mapped to at the same time"""
         self.threads = int(kwargs.get("threads") or 4)
@@ -1485,7 +1489,7 @@ class CanSNPer2(object):
             if queries:
                 raise CanSNPer2Error("Give the read files in --samplesheet or as query arguments, not both")
             try:
-                samples = read_samplesheet(self.samplesheet, self.platform)
+                samples = read_samplesheet(self.samplesheet, self.platform, self.detected_platform)
             except (ReadInputError, OSError) as e:
                 raise CanSNPer2Error(str(e))
         else:
@@ -1504,14 +1508,10 @@ class CanSNPer2(object):
 				paired; the samples keep the order of the query files"""
             fastq = [q for q in reads if kinds[q] == "reads"]
             try:
-                samples = pair_read_files(fastq, self.platform) if fastq else []
+                samples = pair_read_files(fastq, self.platform, self.detected_platform) if fastq else []
             except ReadInputError as e:
                 raise CanSNPer2Error(str(e))
-            samples += [
-                ReadSample(alignment_sample_name(q), [q], self.platform)
-                for q in reads
-                if kinds[q] == "alignment"
-            ]
+            samples += [self.alignment_sample(q) for q in reads if kinds[q] == "alignment"]
             position = {q: i for i, q in enumerate(queries)}
             samples.sort(key=lambda sample: position[sample.files[0]])
         self.alignment_input = set(self.check_alignment_input(samples))
@@ -1529,6 +1529,7 @@ class CanSNPer2(object):
                     platform=sample.platform, threads=self.threads, **options
                 )
         self.aligner = self.mapper_of(samples[0].files[0])
+        self.check_platforms(samples)
         for platform, mapper in sorted(self.read_mappers.items()):
             max_reads = int(mapper.setting("max_reads"))
             logger.info(
@@ -1545,6 +1546,52 @@ class CanSNPer2(object):
                 "--mask is not used for reads: it leaves out canSNPs near the ends of assembly alignments, while read ends are filtered by base quality"
             )
         return [sample.files[0] for sample in samples]
+
+    def detected_platform(self, path, kind=None):
+        """the platform the reads of a file look like (ReadPlatform), read once per file"""
+        if path not in self.platform_detections:
+            self.platform_detections[path] = detect_platform(path, kind or input_kind(path))
+        return self.platform_detections[path]
+
+    def alignment_sample(self, path):
+        """the read sample of a BAM or CRAM file: one file, and with --platform auto the
+        platform the file says it holds (#96, #119)"""
+        platform, detection = self.platform, None
+        if platform == AUTO:
+            detection = self.detected_platform(path, "alignment")
+            platform = detection.platform or DEFAULT_PLATFORM
+        return ReadSample(alignment_sample_name(path), [path], platform, detection)
+
+    def check_platforms(self, samples):
+        """the platform of each read sample against the platform its reads look like: the
+        platform in effect is not changed here, a sample whose reads disagree with it is
+        warned about, and a file without usable base qualities is pointed at --min-baseq (#119)"""
+        for sample in samples:
+            path = sample.files[0]
+            detection = self.detected_platform(path, "alignment" if path in self.alignment_input else "reads")
+            if detection.platform is None:
+                if self.platform == AUTO:
+                    logger.warning(
+                        "{name}: the platform of its reads could not be told from the file, "
+                        "{p} was used; give --platform to set it".format(name=sample.name, p=sample.platform)
+                    )
+                continue
+            if detection.platform != sample.platform:
+                logger.warning(
+                    "{name}: the reads look like {d} ({why}) but platform {p} is in effect, which "
+                    "maps them with another minimap2 preset and other thresholds; pass --platform {d}, "
+                    "or --platform auto to use the platform of each sample".format(
+                        name=sample.name, d=detection.platform, why=describe(detection), p=sample.platform
+                    )
+                )
+            min_baseq = int(self.mapper_of(path).setting("min_baseq"))
+            if detection.mean_baseq is not None and detection.mean_baseq < NO_BASEQ and min_baseq > 0:
+                logger.warning(
+                    "{name}: its reads carry no base qualities (mean {q:.1f}) and min_baseq={b} "
+                    "discards every base of them; pass --min-baseq 0".format(
+                        name=sample.name, q=detection.mean_baseq, b=min_baseq
+                    )
+                )
 
     def check_alignment_input(self, samples):
         """the samples given as a BAM or CRAM file: one file each, and not with --local-references,
@@ -2541,6 +2588,7 @@ class CanSNPer2(object):
             d=statistics.median(depths) if depths else 0,
             m=len(mixed),
         )
+        line += reads_line_fields(self.platform_detections.get(q))
         if self.local_references:
             conflicts = sum(1 for row in site_rows if row["state"] == "conflict")
             line += (

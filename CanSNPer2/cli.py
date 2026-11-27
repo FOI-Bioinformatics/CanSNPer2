@@ -15,7 +15,7 @@ import logging
 from CanSNPer2 import __version__
 from CanSNPer2.modules.TopLevel import run_main
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
-from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
+from CanSNPer2.modules.ParsePileup import PLATFORM_CHOICES, DEFAULT_PLATFORM
 
 import CanSNPer2.CanSNPerTree as typing_command
 import CanSNPer2.SNPDatabase as database_command
@@ -308,10 +308,11 @@ def add_read_options(parser):
     )
     reads.add_argument(
         "--platform",
-        choices=sorted(PLATFORMS),
+        choices=PLATFORM_CHOICES,
         default=DEFAULT_PLATFORM,
         help="sequencing platform: illumina (short reads, paired or single), "
-        "ont (Oxford Nanopore) or hifi (PacBio HiFi)",
+        "ont (Oxford Nanopore), hifi (PacBio HiFi) or clr (PacBio continuous long "
+        "reads); auto types each sample with the platform its reads look like",
     )
     reads.add_argument(
         "--samplesheet",
@@ -328,8 +329,8 @@ def add_read_options(parser):
         type=typing_command.positive_int,
         default=None,
         help="minimum number of A, C, G or T bases at a canSNP position, after the "
-        "mapping and base quality filters, for its state to be read (default: 5 "
-        "for all platforms)",
+        "mapping and base quality filters, for its state to be read (default: 5, "
+        "clr 10)",
     )
     reads.add_argument(
         "--min-allele-fraction",
@@ -339,7 +340,7 @@ def add_read_options(parser):
         default=None,
         help="minimum fraction of the reads that must carry one base for the "
         "site to take that state; below it the site is reported as mixed "
-        "(default: illumina 0.8, ont 0.7, hifi 0.8)",
+        "(default: illumina 0.8, ont 0.7, hifi 0.8, clr 0.7)",
     )
     reads.add_argument(
         "--min-mapq",
@@ -355,7 +356,8 @@ def add_read_options(parser):
         metavar="Q",
         type=typing_command.non_negative_int,
         default=None,
-        help="minimum base quality (default: illumina 20, ont 10, hifi 20)",
+        help="minimum base quality (default: illumina 20, ont 10, hifi 20, clr 0: the "
+        "quality lines of CLR reads carry no information)",
     )
     reads.add_argument(
         "--mixed-sites",

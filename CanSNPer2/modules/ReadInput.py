@@ -7,11 +7,16 @@ gzip-compressed or not. A sample is one read file, or two for paired-end reads. 
 files are found by their mate names (_R1/_R2, with or without the Illumina _001, or _1/_2);
 the sample is named after the file without the mate part and the file endings. A file that
 looks like one mate of a pair without the other is refused: typing half of a pair as
-single-end reads would go unnoticed. Long reads (ont, hifi) are never paired.
+single-end reads would go unnoticed. Long reads (ont, hifi, clr) are never paired.
 
 A samplesheet gives the samples explicitly, a tab separated file with the header
 sample, reads1 and optionally reads2 and platform; relative paths are read from the folder
 of the sheet.
+
+The platform of a sample is the one given, on the command line or in the samplesheet. With
+--platform auto it is the one its reads look like (ReadPlatform), which also decides whether
+the file takes part in mate matching; a file whose platform cannot be told is typed with the
+default platform rather than refused (#119).
 """
 
 import gzip
@@ -19,14 +24,16 @@ import os
 import re
 from collections import namedtuple
 
-from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
+from CanSNPer2.modules.ParsePileup import AUTO, PLATFORM_CHOICES, DEFAULT_PLATFORM
+from CanSNPer2.modules.ReadPlatform import detect_platform
 
 
 class ReadInputError(ValueError):
     """read input that cannot be typed, with the reason"""
 
 
-ReadSample = namedtuple("ReadSample", ["name", "files", "platform"])
+"""detected is the Detection of the reads of the sample, None when the platform was given"""
+ReadSample = namedtuple("ReadSample", ["name", "files", "platform", "detected"], defaults=(None,))
 
 READ_ENDINGS = re.compile(r"(\.(fastq|fq))?(\.gz)?$", re.IGNORECASE)
 MATE = re.compile(r"^(?P<stem>.+?)_(?:R(?P<r>[12])(?:_\d{3})?|(?P<n>[12]))$")
@@ -89,21 +96,31 @@ def read_sample_name(path):
 
 
 def _check_platform(platform, where):
-    if platform not in PLATFORMS:
+    if platform not in PLATFORM_CHOICES:
         raise ReadInputError(
             "{where}: platform {p} is not known, choose one of {known}".format(
-                where=where, p=platform, known=", ".join(sorted(PLATFORMS))
+                where=where, p=platform, known=", ".join(PLATFORM_CHOICES)
             )
         )
 
 
-def pair_read_files(paths, platform=DEFAULT_PLATFORM):
+def _resolve_platform(platform, path, detect):
+    """(the platform of a sample, the Detection of its reads): the platform as given, or with
+    --platform auto the one the reads look like, falling back to the default platform (#119)"""
+    if platform != AUTO:
+        return platform, None
+    detection = detect(path, input_kind(path))
+    return detection.platform or DEFAULT_PLATFORM, detection
+
+
+def pair_read_files(paths, platform=DEFAULT_PLATFORM, detect=detect_platform):
     """the samples of the read files, in the order of their first file"""
     _check_platform(platform, "--platform")
+    resolved = {path: _resolve_platform(platform, path, detect) for path in paths}
     groups = {}
     order = []
     for path in paths:
-        mate = _mate(path) if platform == "illumina" else None
+        mate = _mate(path) if resolved[path][0] == "illumina" else None
         name = mate[0] if mate else _stem(path)
         if name not in groups:
             groups[name] = {}
@@ -123,7 +140,7 @@ def pair_read_files(paths, platform=DEFAULT_PLATFORM):
     for name in order:
         files = groups[name]
         if 0 in files:
-            samples.append(ReadSample(name, (files[0],), platform))
+            samples.append(ReadSample(name, (files[0],), *resolved[files[0]]))
             continue
         if set(files) != {1, 2}:
             only = list(files.values())[0]
@@ -131,7 +148,7 @@ def pair_read_files(paths, platform=DEFAULT_PLATFORM):
                 "{f} is named as one mate of paired-end reads but its other mate was not given; give both files, "
                 "or a --samplesheet to type it as single-end reads".format(f=only)
             )
-        samples.append(ReadSample(name, (files[1], files[2]), platform))
+        samples.append(ReadSample(name, (files[1], files[2]), *resolved[files[1]]))
     return samples
 
 
@@ -139,7 +156,7 @@ def pair_read_files(paths, platform=DEFAULT_PLATFORM):
 SAMPLE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 
 
-def read_samplesheet(path, platform=DEFAULT_PLATFORM):
+def read_samplesheet(path, platform=DEFAULT_PLATFORM, detect=detect_platform):
     """the samples of a samplesheet (see the module description)"""
     folder = os.path.dirname(os.path.abspath(path))
     with open(path, encoding="utf-8-sig") as fin:
@@ -180,7 +197,7 @@ def read_samplesheet(path, platform=DEFAULT_PLATFORM):
                 raise ReadInputError("{where}: read file {f} was not found".format(where=where, f=f))
         sample_platform = row.get("platform") or platform
         _check_platform(sample_platform, where)
-        samples.append(ReadSample(name, tuple(files), sample_platform))
+        samples.append(ReadSample(name, tuple(files), *_resolve_platform(sample_platform, files[0], detect)))
     if not samples:
         raise ReadInputError("samplesheet {path} lists no samples".format(path=path))
     return samples

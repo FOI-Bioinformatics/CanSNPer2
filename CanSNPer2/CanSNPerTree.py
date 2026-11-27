@@ -42,7 +42,7 @@ __status__ = "Production"
 
 from CanSNPer2.modules.CanSNPer2 import CanSNPer2, CanSNPer2Error, RUN_MARKER, ensure_directory
 from CanSNPer2.modules.Aligners import ALIGNERS, DEFAULT_ALIGNER
-from CanSNPer2.modules.ParsePileup import PLATFORMS, DEFAULT_PLATFORM
+from CanSNPer2.modules.ParsePileup import PLATFORM_CHOICES, DEFAULT_PLATFORM
 from CanSNPer2.modules.DatabaseConnection import check_database, ConnectionError
 from CanSNPer2.modules.LogSetup import setup_logging, quiet_warning_count, log_tag
 from CanSNPer2.modules.SchemeInfo import log_scheme_notice
@@ -243,9 +243,9 @@ def build_parser():
     )
     read_options.add_argument(
         "--platform",
-        choices=sorted(PLATFORMS),
+        choices=PLATFORM_CHOICES,
         default=DEFAULT_PLATFORM,
-        help="Sequencing platform of the reads: illumina (short reads, paired or single), ont or hifi (default illumina)",
+        help="Sequencing platform of the reads: illumina (short reads, paired or single), ont, hifi, clr, or auto for the platform the reads of each sample look like (default illumina)",
     )
     read_options.add_argument(
         "--samplesheet",
@@ -257,13 +257,13 @@ def build_parser():
         "--min_depth",
         type=positive_int,
         default=None,
-        help="Reads needed at a canSNP for a call (default: illumina 5, ont 5, hifi 5)",
+        help="Reads needed at a canSNP for a call (default: illumina 5, ont 5, hifi 5, clr 10)",
     )
     read_options.add_argument(
         "--min_allele_fraction",
         type=fraction,
         default=None,
-        help="Fraction of the reads that must carry a base for the canSNP to be called as that base; below it the site is mixed and counts as no data (default: illumina 0.8, ont 0.7, hifi 0.8)",
+        help="Fraction of the reads that must carry a base for the canSNP to be called as that base; below it the site is mixed and counts as no data (default: illumina 0.8, ont 0.7, hifi 0.8, clr 0.7)",
     )
     read_options.add_argument(
         "--min_mapq",
@@ -275,7 +275,7 @@ def build_parser():
         "--min_baseq",
         type=non_negative_int,
         default=None,
-        help="Minimum base quality (default: illumina 20, ont 10, hifi 20)",
+        help="Minimum base quality (default: illumina 20, ont 10, hifi 20, clr 0)",
     )
     read_options.add_argument(
         "--mixed_sites",

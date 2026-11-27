@@ -66,8 +66,26 @@ PLATFORMS = {
         "min_allele_fraction": 0.8,
         "max_reads": 300000,
     },
+    ## PacBio continuous long reads (#119): their quality lines carry no information, often one
+    ## repeated character, so base quality filtering is off and the depth is raised instead.
+    ## These values have not been measured on CLR reads yet: the evaluation of #93 will give
+    ## them, and until then they are a starting point, not a validated setting
+    "clr": {
+        "preset": "map-pb",
+        "min_mapq": 20,
+        "min_baseq": 0,
+        "min_depth": 10,
+        "min_allele_fraction": 0.7,
+        "max_reads": 300000,
+    },
 }
 DEFAULT_PLATFORM = "illumina"
+
+"""--platform auto: each sample is typed with the platform its reads look like, which
+	ReadPlatform.detect_platform reads from the input. auto is not a platform of its own, so
+	every lookup of a preset still sees one of PLATFORMS (#119)"""
+AUTO = "auto"
+PLATFORM_CHOICES = sorted(PLATFORMS) + [AUTO]
 
 SITE_COUNT_COLUMNS = [
     "Name",

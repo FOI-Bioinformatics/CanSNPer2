@@ -64,10 +64,11 @@ usage: cansnper2 type [-h] [-d DB] [-o DIR] [--save-tree] [--no-snp-files]
                       [--aligner {minimap2,mummer4,progressiveMauve}]
                       [--alignment-timeout MINUTES] [--aligner-path PATH]
                       [--skip-alignment] [--keep-temp] [--tmp-dir DIR]
-                      [--platform {hifi,illumina,ont}] [--samplesheet FILE]
-                      [--min-depth N] [--min-allele-fraction FRACTION]
-                      [--min-mapq Q] [--min-baseq Q] [--mixed-sites N]
-                      [--max-reads N] [--local-references] [--local-rounds N]
+                      [--platform {clr,hifi,illumina,ont,auto}]
+                      [--samplesheet FILE] [--min-depth N]
+                      [--min-allele-fraction FRACTION] [--min-mapq Q]
+                      [--min-baseq Q] [--mixed-sites N] [--max-reads N]
+                      [--local-references] [--local-rounds N]
                       [--screen-reads N] [--fetch-local] [--log-dir DIR] [-v]
                       [--debug] [--quiet]
                       [query ...]
@@ -150,26 +151,28 @@ Read typing options:
   used when the queries are sequencing reads (minimap2 and samtools are
   required); thresholds that are not given take the defaults of --platform
 
-  --platform {hifi,illumina,ont}
+  --platform {clr,hifi,illumina,ont,auto}
                         sequencing platform: illumina (short reads, paired or
-                        single), ont (Oxford Nanopore) or hifi (PacBio HiFi)
-                        (default: illumina)
+                        single), ont (Oxford Nanopore), hifi (PacBio HiFi) or
+                        clr (PacBio continuous long reads); auto types each
+                        sample with the platform its reads look like (default:
+                        illumina)
   --samplesheet FILE    tab-separated file with the header columns sample,
                         reads1 and optionally reads2 and platform, one sample
                         per row; replaces the query arguments
   --min-depth N         minimum number of A, C, G or T bases at a canSNP
                         position, after the mapping and base quality filters,
-                        for its state to be read (default: 5 for all
-                        platforms)
+                        for its state to be read (default: 5, clr 10)
   --min-allele-fraction FRACTION
                         minimum fraction of the reads that must carry one base
                         for the site to take that state; below it the site is
                         reported as mixed (default: illumina 0.8, ont 0.7,
-                        hifi 0.8)
+                        hifi 0.8, clr 0.7)
   --min-mapq Q          minimum mapping quality of a read (default: 20 for all
                         platforms)
   --min-baseq Q         minimum base quality (default: illumina 20, ont 10,
-                        hifi 20)
+                        hifi 20, clr 0: the quality lines of CLR reads carry
+                        no information)
   --mixed-sites N       number of mixed canSNP sites from which a sample is
                         flagged as possibly mixed (default: 3)
   --max-reads N         number of reads mapped per sample, the first ones in
