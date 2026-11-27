@@ -416,8 +416,9 @@ examples:
 ## cansnper2 db export
 
 ```text
-usage: cansnper2 db export [-h] [-d DB] [--format {source,newick,tab}]
-                           [-o DIR] [--log-dir DIR] [-v] [--debug] [--quiet]
+usage: cansnper2 db export [-h] [-d DB] [--format {source,newick,tab,vcf}]
+                           [--ref-dir DIR] [-o DIR] [--log-dir DIR] [-v]
+                           [--debug] [--quiet]
 
 Write a database as text files: the scheme files that db import reads, or the
 tree in Newick format.
@@ -425,13 +426,16 @@ tree in Newick format.
 options:
   -h, --help            show this help message and exit
   -d, --database DB     the database; required
-  --format {source,newick,tab}
+  --format {source,newick,tab,vcf}
                         source: the tree, canSNP, reference genome and (when
                         the database has them) genomes files that db import
                         reads; newick: the tree only, to
                         <outdir>/<database>_tree.nwk, or to standard output
-                        without -o; tab: former name of source (default:
-                        source)
+                        without -o; vcf: the canSNPs as sites-only VCF files,
+                        <outdir>/<database>_<genome>.vcf for each reference
+                        genome; tab: former name of source (default: source)
+  --ref-dir DIR         the reference genome files <genome>.fna, for --format
+                        vcf (default: references)
   -o, --outdir DIR      folder for the exported files (default: the current
                         folder)
 
@@ -445,6 +449,7 @@ Logging options:
 examples:
   cansnper2 db export -d scheme.db -o export/
   cansnper2 db export -d scheme.db --format newick > scheme.nwk
+  cansnper2 db export -d scheme.db --format vcf --ref-dir references/ -o vcf/
 ```
 
 ## cansnper2 db info

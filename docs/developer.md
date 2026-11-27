@@ -26,7 +26,7 @@ Bug reports and pull requests are welcome on the
 | `CanSNPer2/modules/NewickTree.py` | the tree walk that decides the final SNP, the Newick tree and the HTML pages |
 | `CanSNPer2/modules/DatabaseConnection.py` | SQLite access, database checks, source file readers |
 | `CanSNPer2/modules/InitiateDatabase.py` | creation of a database from the scheme files |
-| `CanSNPer2/modules/ImportDatabase.py`, `ExportDatabase.py` | `db import` and `db export` |
+| `CanSNPer2/modules/ImportDatabase.py`, `ExportDatabase.py`, `ExportVCF.py` | `db import` and `db export` (`ExportVCF.py`: `--format vcf`) |
 | `CanSNPer2/modules/ModifyDatabase.py`, `ModifyTree.py` | `db modify` and `db remove` |
 | `CanSNPer2/modules/ReadTaxonomyCanSNPer.py` | reader of the tree file |
 | `CanSNPer2/modules/SourceCheck.py` | checks of the scheme files before a database is built or changed |
@@ -58,6 +58,7 @@ Tests that need an external program or data are skipped when it is missing:
 | --- | --- |
 | minimap2 | lift-over, PAF reading with real alignments, choice of local references |
 | minimap2 and samtools | read typing, local references, the read typing command line |
+| `bcftools` (or its path in the environment variable `BCFTOOLS`) | reading the VCF export with bcftools |
 | `nucmer` and `delta-filter` (MUMmer4) | delta reading with real alignments |
 | progressiveMauve | xmfa reading with real alignments |
 | `node` (Node.js) | the scripts of the HTML pages |
@@ -112,7 +113,7 @@ commands and option spellings before 2.6.0 may appear only in `docs/upgrading.md
 job runs with Python 3.11, 3.12, 3.13 and 3.14. It:
 
 1. checks out CanSNPer2 and CanSNPer2-data;
-2. installs progressiveMauve, minimap2 and samtools with `apt-get`, and MUMmer4 from Bioconda;
+2. installs progressiveMauve, minimap2, samtools and bcftools with `apt-get`, and MUMmer4 from Bioconda;
 3. installs CanSNPer2 with pip and runs `pip check`;
 4. runs `cansnper2 selftest` and the help of the main verbs;
 5. runs the unit tests, with `CANSNPER2_DATA` pointing to the CanSNPer2-data checkout; with

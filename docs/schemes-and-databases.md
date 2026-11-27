@@ -327,6 +327,33 @@ cansnper2 db export -d francisella_tularensis.db --format newick -o export/
 cansnper2 db export -d francisella_tularensis.db --format newick > francisella_tularensis.nwk
 ```
 
+`--format vcf` writes the canSNPs as sites-only VCF files (VCFv4.3), one per reference genome,
+`<outdir>/<db>_<genome>.vcf`, so that other variant callers can genotype the same sites. The
+reference genome files are read from `--ref-dir` (default `references`), as `ref get` writes
+them:
+
+```sh
+cansnper2 db export -d francisella_tularensis.db --format vcf --ref-dir references/ -o vcf/
+```
+
+Each file has a `##contig` line for every sequence of its reference genome, in file order, and
+`##cansnper2_database` and `##cansnper2_reference_genome` lines that name the database (with its
+sha256) and the genome. A record is one canSNP, every canSNP of a node included, sorted by
+sequence and position:
+
+| Column | Content |
+|---|---|
+| `CHROM`, `POS` | the reference sequence and the 1-based position of the canSNP |
+| `ID`, `QUAL`, `FILTER` | `.` |
+| `REF` | the base of the reference genome at the position |
+| `ALT` | the other allele of the canSNP: the derived base when the reference carries the ancestral one, the ancestral base when it carries the derived one |
+| `INFO` | `AA` the ancestral and `DA` the derived base, `NODE` the node, `RANK` the rank of the canSNP in its node and, for the canSNP the scheme types, the flag `TYPED` |
+
+Node names are percent-encoded where VCF requires it (for example `;` as `%3B`). The export is
+refused, and nothing is written, when a reference file is missing, a canSNP lies outside its
+sequence, or the reference base is neither allele of the canSNP. A reference genome without
+canSNPs gets no file. `--ref-dir` is accepted only with `--format vcf`.
+
 ### Import the files again
 
 `db import` builds a new database from the exported files. It runs the same checks as
