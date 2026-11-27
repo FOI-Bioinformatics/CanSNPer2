@@ -123,9 +123,10 @@ def add_type_subparser(subparsers):
         "query",
         nargs=argparse.ZERO_OR_MORE,
         metavar="query",
-        help="assemblies (FASTA) or sequencing reads (FASTQ, may be gzip-compressed) "
-        "to type, or one list file with one file path per line; paired read "
-        "files are recognized by their names (_R1/_R2, _1/_2)",
+        help="assemblies (FASTA) or sequencing reads (FASTQ, may be gzip-compressed; or "
+        "BAM/CRAM mapped to a reference genome of the scheme) to type, or one list file "
+        "with one file path per line; paired read files are recognized by their names "
+        "(_R1/_R2, _1/_2)",
     )
     required.add_argument("-d", "--database", metavar="DB", help="the scheme database (.db); required")
 

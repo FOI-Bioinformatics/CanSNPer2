@@ -13,6 +13,7 @@ coordinates the database uses (the reference sequence and the 1-based position o
 
 import os
 import shlex
+import subprocess
 import shutil
 import logging
 
@@ -401,6 +402,68 @@ class ReadMapper(Aligner):
             "-c",
             "{m} | {s} && {i} && {p}".format(m=mapping, s=sort, i=index, p=pileup),
         ]
+
+    def pileup_command(self, reference_file, alignment_file, output, sort=False, cram=False):
+        """the command for reads that are mapped already, a BAM or CRAM file (#96): sorted
+        first when it is not sorted by coordinate, then counted at the canSNP positions with
+        the same mpileup settings as reads this mapper maps"""
+        q = shlex.quote
+        reference = ["--reference", reference_file] if cram else []
+        steps = []
+        pileup_input = alignment_file
+        if sort:
+            pileup_input = output + ".bam"
+            steps.append(
+                " ".join(
+                    q(a)
+                    for a in [self.samtools, "sort", "-@", str(self.threads), "-o", pileup_input]
+                    + reference
+                    + [alignment_file]
+                )
+            )
+        steps.append(
+            " ".join(
+                q(a)
+                for a in [
+                    self.samtools,
+                    "mpileup",
+                    "-l",
+                    output + ".sites.bed",
+                    "-a",
+                    "-B",
+                    "-A",
+                    "-d",
+                    "0",
+                    "-q",
+                    str(self.setting("min_mapq")),
+                    "-Q",
+                    str(self.setting("min_baseq")),
+                ]
+                + (reference if cram and not sort else [])
+                + ["-o", output, pileup_input]
+            )
+        )
+        return ["bash", "-o", "pipefail", "-c", " && ".join(steps)]
+
+    def header(self, alignment_file):
+        """the sequences (name: length) and the sort order of a BAM or CRAM file, from its header"""
+        result = subprocess.run(
+            [self.samtools, "view", "-H", "--no-PG", alignment_file], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise ValueError(
+                "samtools cannot read the header of {path}: {error}".format(
+                    path=alignment_file, error=result.stderr.strip().splitlines()[-1:] or ""
+                )
+            )
+        sequences, order = {}, None
+        for line in result.stdout.splitlines():
+            fields = dict(f.split(":", 1) for f in line.split("\t")[1:] if ":" in f)
+            if line.startswith("@SQ") and "SN" in fields:
+                sequences[fields["SN"]] = int(fields.get("LN", 0))
+            elif line.startswith("@HD"):
+                order = fields.get("SO")
+        return sequences, order
 
     def reader(self, **kwargs):
         kwargs.setdefault("min_depth", self.setting("min_depth"))

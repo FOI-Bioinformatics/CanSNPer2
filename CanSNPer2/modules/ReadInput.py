@@ -46,9 +46,12 @@ def _head(path, size=4096):
 
 
 def input_kind(path):
-    """ "reads" for a FASTQ file, "fasta" for a FASTA file, None for anything else (a query
-    list, an empty or unreadable file)"""
+    """ "reads" for a FASTQ file, "alignment" for a BAM or CRAM file of mapped reads (#96),
+    "fasta" for a FASTA file, None for anything else (a query list, an empty or unreadable
+    file)"""
     head = _head(path)
+    if head.startswith((b"BAM\x01", b"CRAM")):  ## a BAM file is BGZF, read decompressed by _head
+        return "alignment"
     if head.startswith(b"\xef\xbb\xbf"):
         head = head[3:]
     head = head.lstrip()
@@ -57,6 +60,14 @@ def input_kind(path):
     if head.startswith(b">"):
         return "fasta"
     return None
+
+
+ALIGNMENT_ENDINGS = re.compile(r"\.(bam|cram)$", re.IGNORECASE)
+
+
+def alignment_sample_name(path):
+    """the sample name of a BAM or CRAM file: the file name without .bam or .cram"""
+    return ALIGNMENT_ENDINGS.sub("", os.path.basename(path))
 
 
 def _stem(path):
