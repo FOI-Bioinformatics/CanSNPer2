@@ -90,6 +90,10 @@ def test_platform_defaults():
     assert PLATFORMS["clr"]["preset"] == "map-pb"
     for p in PLATFORMS.values():
         assert {"min_mapq", "min_baseq", "min_depth", "min_allele_fraction"} <= set(p)
+    assert {p["min_depth"] for p in PLATFORMS.values()} == {5}, (
+        "every platform asks for the same depth at a canSNP: the depth was measured for the "
+        "long read platforms (#93) and nothing separates them"
+    )
 
 
 # PileupReader on mpileup output

@@ -111,7 +111,7 @@ def test_reads_without_base_qualities_are_typed_with_the_clr_preset(tmp_path, ca
     with caplog.at_level(logging.WARNING):
         obj = run(tmp_path, [reads], db=db, platform="clr")
     assert obj.typed == {"clr": "B.3"}
-    assert "platform=clr min_depth=10 min_allele_fraction=0.7" in settings_line(tmp_path, "clr")
+    assert "platform=clr min_depth=5 min_allele_fraction=0.7" in settings_line(tmp_path, "clr")
     assert "min_baseq=0" in settings_line(tmp_path, "clr")
     assert warnings_of(caplog) == []
     assert "detected=clr" in reads_line(tmp_path, "clr")

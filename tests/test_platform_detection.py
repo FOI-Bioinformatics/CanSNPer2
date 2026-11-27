@@ -49,7 +49,10 @@ def test_clr_is_a_platform_of_its_own():
     clr = PLATFORMS["clr"]
     assert clr["preset"] == "map-pb"
     assert clr["min_baseq"] == 0, "the qualities of CLR reads carry no information"
-    assert clr["min_depth"] >= PLATFORMS["hifi"]["min_depth"]
+    assert clr["min_depth"] == PLATFORMS["hifi"]["min_depth"], (
+        "measured on eight CLR read sets (#93): the depth of the other platforms gives the same "
+        "calls from 20x and adds calls at 10x, with no call on another branch"
+    )
     assert PLATFORMS["hifi"] == {
         "preset": "map-hifi",
         "min_mapq": 20,
