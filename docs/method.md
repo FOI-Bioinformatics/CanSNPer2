@@ -232,8 +232,10 @@ Options given on the command line replace the defaults.
 | `clr` | `map-pb` | 20 | 0 | 10 | 0.7 | 300000 |
 
 `clr` is for PacBio continuous long reads. Their quality lines carry no information, often one
-repeated character, so base quality filtering is off and the depth is raised instead; these
-values have not been measured on CLR reads yet (see [validation.md](validation.md)).
+repeated character, so base quality filtering is off and the depth is raised instead. The
+values were measured on eight PacBio CLR read sets
+([validation.md](validation.md#thresholds-of-the-clr-preset)): with them such reads need about
+30x at the canSNP positions, and a sample below 20x stops above its lineage or gives `NA`.
 
 ### Reading the platform from the input
 

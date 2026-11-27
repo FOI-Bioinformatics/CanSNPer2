@@ -38,8 +38,8 @@ Git history.
   mapping is left out and the reads are counted as mapped reads are.
 - `--platform clr` for PacBio continuous long reads: the minimap2 preset `map-pb`, no base
   quality filter (`--min-baseq` 0, since their quality lines carry no information) and
-  `--min-depth` 10. The values of the other platforms are unchanged. They have not been measured
-  on CLR reads yet, see `docs/validation.md`.
+  `--min-depth` 10. The values of the other platforms are unchanged. They were measured on eight
+  PacBio CLR read sets, see `docs/validation.md`.
 - The platform of a read sample is read from the input as well, from the first records of each
   file: the read lengths, the base qualities, the read names, and the `@RG PL:` tag of a BAM or
   CRAM file. A run whose reads do not look like the platform in effect warns and names both; the

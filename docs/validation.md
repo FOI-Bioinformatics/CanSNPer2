@@ -120,12 +120,121 @@ of the published assembly GCA_030518775.1. The same file with the default `illum
 warns twice, that the reads look like `clr` and that `min_baseq=20` discards every base of them,
 and gives `NA` as it did before.
 
-**Open.** The thresholds of the `clr` preset (`--min-baseq` 0, `--min-depth` 10,
-`--min-allele-fraction` 0.7) have not been measured: they are taken from the error profile of
-CLR reads, and one isolate at one depth does not fix them. Detection has not been checked on
-public HiFi runs, and no depth series was run for `clr`. Both belong to the validation on real
-long reads that is still open. `--platform` remains the setting to use when the platform is
-known, and the default is unchanged (`illumina`).
+The thresholds of the `clr` preset were measured afterwards; the next section reports it.
+
+**Open.** Detection has not been checked on public PacBio HiFi runs, which belongs to the
+validation on real long reads that is still open. `--platform` remains the setting to use when
+the platform is known, and the default is unchanged (`illumina`).
+
+## Thresholds of the clr preset
+
+**Compared.** The call and the canSNP states from PacBio CLR reads against the call CanSNPer2
+makes on the assembly of the same reads, over four minimap2 presets, six read depths and a grid
+of `--min-depth` and `--min-allele-fraction`.
+
+**Data.** The eight *B. anthropi* CLR runs of BioProject PRJNA991498 (Sequel II subreads,
+2.6-3.5 Gb per run, 500-700x of the 5.1 Mb genome, mean read length 10.4 kb, every quality
+value Phred 0). A nested depth series of 5x, 10x, 20x, 30x and 50x was drawn from each run with
+a seeded generator, so a read kept at one depth is kept at the deeper ones; the depths obtained
+are 4.9-50.1x. No length filter was applied. The full read sets were typed as well, with every
+read mapped (`--max-reads 0`).
+
+Two schemes, both drafts on the `dev` branch of CanSNPer2-data: `brucella_anthropi` (42
+canSNPs, reference genome *B. anthropi* ATCC 49188, the species of the samples) and
+`brucella_genus` (283 canSNPs, reference genome *B. melitensis* 16M, another species of the
+genus). The comparison is the Flye assembly of the same reads: all eight assemblies are called
+`Bant.anthropi.env.1.1.1.1.1.1` (8 of 8 canSNPs on the path, `clean`) and `BR.anthropi.1.1.1.1`
+(16 of 16, `review`, from derived canSNPs on `BR.classical.*` branches that follow from the
+reference genome). The published genome of the project, GCA_030518775.1, from another
+BioSample, gives the same two calls. The assemblies are made from the same reads, so this is
+not an independent truth; it is the comparison the sections above use.
+
+**Software and settings.** CanSNPer2 2.6.0 at commit b545d3d, minimap2 2.31-r1302, samtools
+1.25, `--min-required-hits` 3, `--strictness` 0.7. 146 typing runs. The base counts of a canSNP
+do not depend on `--min-depth` or `--min-allele-fraction`, which are applied to the counts
+afterwards, so the `<sample>_site_counts.tsv` of each run was classified again with
+`ParsePileup.classify_counts` and walked again with `NewickTree.draw_tree` at six values of
+`min_depth` and five of `min_allele_fraction`: 4,380 results. The harness reproduces the calls,
+the support and the site counts that CanSNPer2 recorded for the eight full-depth runs on
+2026-11-25, at those runs' own settings.
+
+**Date.** 2026-11-27.
+
+**Results, base quality.** With `--platform ont`, whose `min_baseq` is 10, the 50x file of one
+isolate gave a depth of zero at all 42 canSNPs and the call `NA`: a quality line of repeated
+`!` leaves no base. `min_baseq` 0 is a requirement of these files, not a preference.
+
+**Results, minimap2 preset.** At 30x, `min_depth` 10 and `min_allele_fraction` 0.7, medians
+over the eight isolates:
+
+| preset | canSNPs with reads of 42 | depth | the assembly call | canSNPs with reads of 283 | depth | the assembly call |
+|---|---|---|---|---|---|---|
+| `map-pb` (`clr`) | 42 | 26 | 8 of 8 | 276 | 20 | 5 of 8, 3 a node above |
+| `map-ont` | 42 | 26 | 8 of 8 | 277 | 22 | 5 of 8, 3 a node above |
+| `map-hifi` | 42 | 22 | 8 of 8 | 76 | 8 | 0 of 8, 8 NA |
+| `sr` | 42 | 5 | 0 of 8, 8 NA | 96 | 3 | 0 of 8, 8 NA |
+
+Against a reference genome of the same species every long-read preset reaches every canSNP.
+Against the reference genome of another species `map-hifi` keeps 76 of the 283 positions and
+`sr` 96, while `map-pb` and `map-ont` keep 276 and 277. `map-pb` is confirmed, `map-ont` is
+equivalent on these reads, and `map-hifi` is not a substitute for CLR reads.
+
+**Results, depth.** At the shipped thresholds (`min_depth` 10, `min_allele_fraction` 0.7).
+"a node above" is a node on the path from the root to the call of the assembly:
+
+| depth of the reads | depth at the canSNPs, the two schemes | brucella_anthropi | brucella_genus |
+|---|---|---|---|
+| 5x | 4, 3 | 8 NA | 8 NA |
+| 10x | 8, 7 | 8 NA | 2 a node above, 6 NA |
+| 20x | 18, 14 | 5 the assembly call, 3 above | 3 the assembly call, 5 above |
+| 30x | 26, 20 | 8 of 8 | 5 of 8, 3 above |
+| 50x | 43, 35 | 8 of 8 | 6 of 8, 2 above |
+| full | 523, 414 | 8 of 8 | 8 of 8 |
+
+With `min_depth` 5 the same calls arrive from 20x, and at 10x four of the eight isolates reach
+the assembly call with the dedicated scheme and five with the genus scheme; with `min_depth` 3,
+six and eight of eight at 10x. No value of `min_depth` gave a call on another branch at
+`min_allele_fraction` 0.7.
+
+**Results, allele fraction.** States compared with the assembly and states differing from it,
+over every depth of the `clr` arm and both schemes, and the calls at 30x of the 16 samples
+(eight isolates, two schemes) at `min_depth` 10:
+
+| `--min-allele-fraction` | states compared | states differing | the assembly call at 30x |
+|---|---|---|---|
+| 0.5 | 6,876 | 15 | 16 of 16 |
+| 0.6 | 6,833 | 4 | 16 of 16 |
+| 0.7 (`clr`) | 6,558 | 1 | 13 of 16 |
+| 0.8 | 5,704 | 1 | 8 of 16 |
+| 0.9 | 3,744 | 1 | 1 of 16 |
+
+Every state that differs from the assembly comes from 5x or 10x: 18 of 2,349 comparisons at 5x
+and 4 of 3,548 at 10x, and none of the 23,818 comparisons from 20x upward. One of the 4,380
+results was a call on another branch: at 5x with `min_depth` 5 and `min_allele_fraction` 0.5,
+one isolate was called `Bant.anthropi.T`, the branch beside `Bant.anthropi.env`, on 3 of 3
+canSNPs of that path while 21 of the 42 positions were below the depth threshold.
+
+**Results, mixed sites.** Against the reference genome of the same species no sample had a
+mixed site at 20x or above. Against 16M the median rose with depth, from 4 at 20x to 6 at 30x
+and 7 at 50x and at full depth, with 11 in one sample. Mixed canSNPs on the path are why
+several samples stop a node above the assembly call between 20x and 50x; at full depth all 16
+canSNPs of the path are derived in all eight samples. Single-pass long reads mapped to a
+reference genome of another species therefore give mixed sites that are not a mixture of
+strains.
+
+**Conclusion.** The values of the `clr` preset hold. `min_baseq` 0 is required, `map-pb` is the
+right preset, and `min_allele_fraction` 0.7 lies in the band that gave no call on another branch
+(0.6 and 0.7); 0.5 gave the one off-path call and most of the differing states, 0.8 and above
+lose calls that are correct. `min_depth` 10 is the conservative value: it asks for about 30x,
+where 5 gives the same calls from 20x and adds calls at 10x with no error in this data. That
+change would change calls, so it belongs in a release of its own with the comparison in the
+CHANGELOG (issue #93); the preset is unchanged. For a run of CLR reads this means about 30x at
+the canSNP positions, and a sample below 20x should be expected to stop above its lineage or to
+give `NA`.
+
+**Open.** One species, eight isolates of one experiment, two draft schemes, one instrument and
+two reference distances. The depth series is drawn from one deep run per isolate, so it does not
+show the uneven coverage of a run that is shallow to begin with.
 
 ## Local references
 
