@@ -29,6 +29,8 @@ Git history.
 - JSON results: `samples/<sample>.json` for each typed sample and `run.json` for the run, with
   JSON Schemas in `docs/schemas/`; with `--summary` also `cansnper2_mqc.tsv`, a MultiQC custom
   content table.
+- A sample left `NA` by confirmed paths at the same depth gets a `# Competing paths:` line in
+  `<sample>_snps.txt` and `competing_paths` in its JSON, with each candidate and its support.
 
 ### Changed
 

@@ -1128,6 +1128,7 @@ class NewickTree(object):
         )  ## output file
         self.min_required_hits = min_required_hits
         self.strictness = strictness
+        self.competing = []  ## the confirmed paths of the last call that competed at the same depth (#91)
         ## Build the newick tree
         self.newickTree = str(self.build_tree())
         ## Tree colors
@@ -1602,6 +1603,13 @@ class NewickTree(object):
                     logger.info(msg)
                 elif len(candidates) > 1:
                     paths = ", ".join(["{snp} ({n} SNPs)".format(snp=c[1], n=c[2]) for c in candidates])
+                    self.competing = sorted(
+                        (
+                            {"node": c[1], "found": c[2], "expected": c[3], "no_data": list(c[4])}
+                            for c in candidates
+                        ),
+                        key=lambda c: c["node"],
+                    )
                     msg = "Two or more confirmed SNP paths compete at the same depth: {paths}; no final SNP is chosen, see the tree of the sample in summary.html".format(
                         paths=paths
                     )

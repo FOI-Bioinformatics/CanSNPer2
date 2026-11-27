@@ -10,7 +10,7 @@ import zlib
 import shutil
 import hashlib
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import tempfile
 import logging
 import statistics
@@ -155,6 +155,16 @@ def drain_queue(queue, batch=1000):
     return items
 
 
+def competing_line(competing):
+    """the "Competing paths:" line of a sample left NA by confirmed paths at the same depth,
+    None when there were none (#91)"""
+    if not competing:
+        return None
+    return "Competing paths: " + "; ".join(
+        "{node} found/expected: {found}/{expected}".format(**path) for path in competing
+    )
+
+
 @dataclass
 class SampleCall:
     """the call of one sample, as CanSNPer2.call_sample makes it: the final SNP (NA without a
@@ -172,6 +182,7 @@ class SampleCall:
     final_line: str
     path_text: str
     called_rows: list
+    competing: list = field(default_factory=list)
 
 
 class CanSNPer2(object):
@@ -219,6 +230,7 @@ class CanSNPer2(object):
         """per sample outcome for the summary.html dashboard: severity, reasons and the SNP
 			states the embedded tree paints when the sample is selected"""
         self.sample_reports = {}
+        self.sample_competing = {}  ## the competing paths of each sample left NA by them (#91)
         self.sample_json = {}  ## samples/<sample>.json of each sample, relative to --outdir (#97)
         """the SNP path per sample, so the summary can print it for every sample (issue #24)"""
         self.result_paths = {}
@@ -1014,6 +1026,7 @@ class CanSNPer2(object):
             )
         finally:
             newickTree.close()
+        self.tree_competing = list(newickTree.competing)  ## confirmed paths at the same depth (#91)
         if save_tree:
             logger.info("{outdir}/{name}_tree.html".format(outdir=outdir, name=name))
         return final_snp
@@ -1911,6 +1924,7 @@ class CanSNPer2(object):
             "reads" if self.is_read(q) else "assembly",
             reads_line,
             result_files,
+            competing=self.sample_competing.get(name, []),
         )
         ResultJSON.write_json(path, document)
         self.sample_json[name] = self.relative_output(path)
@@ -2085,6 +2099,7 @@ class CanSNPer2(object):
         if self.export:
             self.write_result_files(q, call, SNP_info, called_snps, reads_line)
         self.record_outcome(call, SNPS, SNP_info, called_snps, mixed)
+        self.sample_competing[self.query_name] = call.competing
         if self.export:
             self.write_sample_json(q, reads_line)
         """Clean references to aligned xmfa files between queries if several was supplied"""
@@ -2340,6 +2355,7 @@ class CanSNPer2(object):
             final_line=final_line,
             path_text=path_text,
             called_rows=called_rows,
+            competing=list(getattr(self, "tree_competing", [])),
         )
 
     def write_result_files(self, q, call, SNP_info, called_snps, reads_line):
@@ -2358,6 +2374,7 @@ class CanSNPer2(object):
             for line in (
                 "SNP path: {path}".format(path=call.path_text),
                 call.final_line,
+                competing_line(call.competing),
                 reads_line,
                 self.query_source_line(q),
                 self.settings_line(),

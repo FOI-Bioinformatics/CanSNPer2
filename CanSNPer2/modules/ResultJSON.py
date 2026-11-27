@@ -74,11 +74,14 @@ def database_fields(info, sha256=None):
     }
 
 
-def sample_document(report, info, settings_line, query_files, query_sha256, kind, reads_line, result_files):
+def sample_document(
+    report, info, settings_line, query_files, query_sha256, kind, reads_line, result_files, competing=()
+):
     """samples/<sample>.json of one sample.
     report: the sample report of summary.html; info: the run information; settings_line and
     reads_line: the lines of the result file (reads_line None for an assembly); result_files:
-    the paths of the text result files, relative to the output folder"""
+    the paths of the text result files, relative to the output folder; competing: the
+    confirmed paths at the same depth of a sample left NA by them (#91)"""
     sha, settings = settings_fields(settings_line)
     final = report.get("final")
     states = report.get("states") or {}
@@ -103,6 +106,14 @@ def sample_document(report, info, settings_line, query_files, query_sha256, kind
         "edge_flagged": list(report.get("edge") or []),
         "derived_cansnps": list(report.get("called") or []),
         "no_data_cansnps": list(report.get("no_data") or []),
+        "competing_paths": [
+            {
+                "node": path["node"],
+                "support": {"found": path["found"], "expected": path["expected"]},
+                "path_no_data": list(path.get("no_data") or []),
+            }
+            for path in competing
+        ],
         "site_states": {snp: STATE_NAMES.get(state, "no_data") for snp, state in sorted(states.items())},
         "reads": fields(reads_line.split(":", 1)[1]) if reads_line else None,
         "settings": settings,

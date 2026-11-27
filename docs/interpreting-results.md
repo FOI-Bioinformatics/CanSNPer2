@@ -117,7 +117,9 @@ ones ancestral, blue ones an other base.
   deepest derived canSNP ("`<snp>`, the deepest derived SNP, was not confirmed: ...");
 - two confirmed paths at the same depth: CanSNPer2 does not choose between them. The reason
   names the candidates and the number of derived canSNPs on each path ("Two or more confirmed
-  SNP paths compete at the same depth: ..."). Look at the sample in the tree.
+  SNP paths compete at the same depth: ..."). The candidates and their support are also given in
+  the `# Competing paths:` line of `<sample>_snps.txt` and in `competing_paths` of
+  `samples/<sample>.json`. Look at the sample in the tree.
 
 `cansnper2 type` exits with status 1 when no sample of the run was typed. Lowering
 `--min-required-hits` or `--strictness` gives calls on less evidence; when it is done, record

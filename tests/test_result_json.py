@@ -185,3 +185,16 @@ def test_the_schema_check_rejects_a_document_that_does_not_match(tmp_path):
     del document["support"]
     with pytest.raises(jsonschema.ValidationError):
         validate(document, "cansnper2-sample")
+
+
+def test_the_sample_json_lists_competing_paths(tmp_path):
+    obj, q = typed(tmp_path, ["A.1", "B.1", "B.2"], {"A.1": 1, "B.1": 1, "B.2": 1})
+    document = load(os.path.join(obj.results_dir, "x.json"))
+    validate(document, "cansnper2-sample")
+    assert document["status"] == "not called" and document["final_snp"] is None
+    assert document["competing_paths"] == [
+        {"node": "B.1", "support": {"found": 2, "expected": 2}, "path_no_data": []},
+        {"node": "B.2", "support": {"found": 2, "expected": 2}, "path_no_data": []},
+    ]
+    called, _q = typed(tmp_path / "other", ["A.1", "B.1"], {"A.1": 1, "B.1": 1})
+    assert load(os.path.join(called.results_dir, "x.json"))["competing_paths"] == []

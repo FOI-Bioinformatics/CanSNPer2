@@ -85,6 +85,7 @@ After the table follow lines that start with `# `, so that a reader that skips c
 |---|---|
 | `# SNP path:` | The SNP path, `;`-separated, from the root to the final SNP. For a sample that was not called, all derived canSNPs, or `NA`. |
 | `# Final SNP:` | The final SNP, `found/depth:` and `found/expected:`. `found` is the number of derived canSNPs on the path; `depth` is the depth of the final node in the tree (the number of nodes from the top of the tree to it, both included, label nodes counted); `found/expected` is the support. `# Final SNP: NA` for a sample that was not called. See the note below the table. |
+| `# Competing paths:` | Only for a sample left `NA` because two or more confirmed paths ended at the same depth: each candidate node with its `found/expected:`, `;`-separated, for example `# Competing paths: B.1 found/expected: 2/2; B.2 found/expected: 2/2`. |
 | `# Reads:` | Read samples only; see [Reads line](#reads-line). |
 | `# Query file:` | Absolute path of the query file (both files of a read pair, space-separated) and `sha256:` of the query. For a read pair this is the sha256 of the two file sha256 values joined by a space. |
 | `# Typing settings:` | `database sha256:` of the database file and the settings that change a call; see [Typing settings line](#typing-settings-line). |
@@ -279,6 +280,7 @@ the run that typed it.
 | `reasons` | the reasons for `review` or `not called`, as in `summary.html` |
 | `path_no_data`, `edge_flagged` | canSNPs on the path without data, and derived canSNPs flagged `edge` |
 | `derived_cansnps`, `no_data_cansnps` | all derived canSNPs, and the canSNPs without data |
+| `competing_paths` | for a sample left `NA` by confirmed paths at the same depth: each candidate `node` with its `support` and the canSNPs on its path without data (`path_no_data`); empty otherwise |
 | `site_states` | the state of each canSNP: `derived`, `ancestral`, `other_base` or `no_data` |
 | `reads` | the `# Reads:` line as keys and values; `null` for an assembly |
 | `settings` | the `# Typing settings:` line as keys and values |
