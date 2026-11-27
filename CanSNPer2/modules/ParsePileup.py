@@ -68,8 +68,13 @@ PLATFORMS = {
     },
     ## PacBio continuous long reads (#119): their quality lines carry no information, often one
     ## repeated character, so base quality filtering is off and the depth is raised instead.
-    ## These values have not been measured on CLR reads yet: the evaluation of #93 will give
-    ## them, and until then they are a starting point, not a validated setting
+    ## Measured on the eight CLR read sets of PRJNA991498 against the calls of their assemblies,
+    ## 4380 results over four presets, six depths and a grid of the two thresholds (#93,
+    ## 2026-11-27): min_baseq 0 is required, map-pb and map-ont reach every canSNP while
+    ## map-hifi and sr lose most of them against a reference genome of another species, and no
+    ## call was on another branch at min_allele_fraction 0.6 or 0.7. min_depth 10 asks for about
+    ## 30x; 5 gives the same calls from 20x and would be the value to try next, in a release of
+    ## its own since it changes calls
     "clr": {
         "preset": "map-pb",
         "min_mapq": 20,

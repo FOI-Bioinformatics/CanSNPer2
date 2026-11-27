@@ -81,6 +81,13 @@ Two causes give this pattern:
 - the sample has a region twice where the reference genome has it once, so reads from both
   copies map to one place.
 
+Single-pass long reads give a third pattern: mapped to a reference genome of another species
+they produce mixed sites whose number rises with depth, 4 to 7 per sample in the measurement of
+the `clr` preset ([validation.md](validation.md#thresholds-of-the-clr-preset)), while the same
+reads against a reference genome of their own species gave none. These are not a mixture
+either. Whether `--local-references`, which maps the reads to the genome of the scheme closest
+to the sample, removes them was not measured.
+
 The counts of each canSNP in `<sample>_site_counts.tsv` show which applies at each site. A
 sample flagged as mixed should not be reported as a single lineage without this check.
 CanSNPer2 does not separate the strains of a mixture.
