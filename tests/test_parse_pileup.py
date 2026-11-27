@@ -83,10 +83,11 @@ def test_classify_counts_gives_the_dominant_base_and_fraction():
 
 
 def test_platform_defaults():
-    assert set(PLATFORMS) == {"illumina", "ont", "hifi"}
+    assert set(PLATFORMS) == {"illumina", "ont", "hifi", "clr"}
     assert PLATFORMS["illumina"]["preset"] == "sr"
     assert PLATFORMS["ont"]["preset"] == "map-ont"
     assert PLATFORMS["hifi"]["preset"] == "map-hifi"
+    assert PLATFORMS["clr"]["preset"] == "map-pb"
     for p in PLATFORMS.values():
         assert {"min_mapq", "min_baseq", "min_depth", "min_allele_fraction"} <= set(p)
 

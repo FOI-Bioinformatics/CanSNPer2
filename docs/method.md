@@ -229,6 +229,38 @@ Options given on the command line replace the defaults.
 | `illumina` (default) | `sr` | 20 | 20 | 5 | 0.8 | 300000 |
 | `ont` | `map-ont` | 20 | 10 | 5 | 0.7 | 300000 |
 | `hifi` | `map-hifi` | 20 | 20 | 5 | 0.8 | 300000 |
+| `clr` | `map-pb` | 20 | 0 | 10 | 0.7 | 300000 |
+
+`clr` is for PacBio continuous long reads. Their quality lines carry no information, often one
+repeated character, so base quality filtering is off and the depth is raised instead; these
+values have not been measured on CLR reads yet (see [validation.md](validation.md)).
+
+### Reading the platform from the input
+
+The platform in effect is the one given by `--platform` or by the `platform` column of a
+samplesheet. It is also read from the input, from the first 400 records of each read file: the
+median read length separates short from long reads, the mean base quality separates reads
+without usable qualities (`clr`) from `ont` and `ont` from `hifi`, the read names name the
+instrument when they are still the ones it wrote, and for a BAM or CRAM file the `@RG PL:` tag
+is used when it names a platform.
+
+When the two disagree, the run warns and types the sample with the platform in effect: nothing
+is overridden. `--platform auto` instead uses the platform read from the input, per sample,
+which also decides whether a file takes part in Illumina mate matching; a file whose platform
+cannot be read is typed with `illumina`. The platform read from the input is recorded in the
+`Reads:` line of the result file and in `samples/<sample>.json`.
+
+The read names are used first, because they name the instrument: a nanopore run of short
+fragments is still ONT, so a long read platform read from the names stands whatever the lengths
+are. When the names are gone, as SRA downloads leave them, the lengths and the base qualities
+decide, and they separate the platforms only roughly: ONT reads now reach the base quality of
+HiFi reads, so a file of long reads of high quality is reported as `hifi`, and a nanopore run of
+short fragments as `illumina`. `--platform` is therefore the setting to use when the platform is
+known.
+
+Checked on seven read files of four kinds (2026-11-27): Illumina with and without the original
+read names, PacBio CLR subreads (PRJNA991498) and three nanopore runs of short fragments, all
+reported correctly.
 
 ### Site state of a canSNP from its counts
 

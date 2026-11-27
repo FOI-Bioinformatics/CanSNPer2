@@ -4,7 +4,7 @@ CanSNPer2 assigns bacterial genomes to lineages of a canonical SNP (canSNP) typi
 scheme is a tree whose branches are defined by canSNPs. CanSNPer2 reads the state of each canSNP
 in a genome and reports the deepest node of the tree that the derived canSNPs support. It types
 assemblies, which are aligned to the reference genomes of the scheme, and sequencing reads
-(Illumina, Oxford Nanopore, PacBio HiFi), which are mapped to them. It also builds, exports and
+(Illumina, Oxford Nanopore, PacBio HiFi and CLR), which are mapped to them. It also builds, exports and
 modifies scheme databases, and fetches published schemes and their reference genomes.
 
 CanSNPer2 is intended for isolates of the organisms a scheme covers. It does not identify species,

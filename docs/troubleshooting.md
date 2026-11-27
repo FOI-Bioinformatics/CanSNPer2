@@ -131,6 +131,18 @@ These warnings appear in normal runs and do not change the exit status:
 - `X is given more than once, it is typed once`.
 - `S is possibly mixed: at N canSNP sites no base reached the allele fraction`: reads only; see
   [interpreting-results.md](interpreting-results.md).
+- `S: the reads look like P (...) but platform Q is in effect, ...`: the platform read from the
+  input is not the one given with `--platform` or in the samplesheet. The sample is typed with
+  the platform in effect; pass the platform the warning names, or `--platform auto` to use the
+  one read from each sample's reads. A sample whose read names were replaced, as SRA downloads
+  do, can be reported as `hifi` when it holds long ONT reads of high quality
+  ([method.md](method.md#reading-the-platform-from-the-input)).
+- `S: its reads carry no base qualities (mean Q) and min_baseq=B discards every base of them;
+  pass --min-baseq 0`: PacBio CLR files, and other files whose quality lines hold one repeated
+  character, give no information to the base quality filter. Use `--platform clr`, whose
+  `min_baseq` is 0, or pass `--min-baseq 0`.
+- `S: the platform of its reads could not be told from the file, P was used`: with
+  `--platform auto` only; give `--platform` for that sample.
 - `--mask is not used for reads`.
 
 ## Reporting a problem

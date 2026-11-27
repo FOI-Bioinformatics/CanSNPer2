@@ -95,6 +95,38 @@ the other 49 had at most 2. Mixtures of two genomes had 8 to 17 mixed sites at 5
 at 80/20 and 0 to 3 at 95/5. No mixture was called on another branch than its majority genome;
 the call stopped higher in the tree or was that of the majority genome.
 
+## Platform detection and the clr preset
+
+**Compared.** The platform read from the input (#119) against the platform of the file, and the
+call from PacBio CLR reads with the `clr` preset against the call recorded for the same reads
+with the earlier settings and against the published assembly.
+
+**Data.** Seven read files of four kinds: an Illumina run from the SRA with its read names
+replaced (SRR29342398), an Illumina run with the names the instrument wrote, two PacBio CLR
+subread files of PRJNA991498 and three nanopore runs of short fragments (median 217-343 bases).
+For the call, SRR29384771 of PRJNA991498 filtered to reads of at least 10 kb and subsampled to
+50x, against the draft brucella_anthropi scheme.
+
+**Date.** 2026-11-27.
+
+**Results.** All seven files were reported correctly. The nanopore runs are shorter than the
+threshold for long reads and were recognized by their read names; the two CLR files by their
+read lengths and the absence of base qualities.
+
+With `--platform auto` the CLR reads were typed with the `clr` preset (42 of 42 canSNP sites
+with reads, median depth 40, one mixed site) and gave `Bant.anthropi.env.1.1.1.1.1.1`, the call
+recorded for all eight isolates of the project with `--platform ont --min-baseq 0` and the call
+of the published assembly GCA_030518775.1. The same file with the default `illumina` platform
+warns twice, that the reads look like `clr` and that `min_baseq=20` discards every base of them,
+and gives `NA` as it did before.
+
+**Open.** The thresholds of the `clr` preset (`--min-baseq` 0, `--min-depth` 10,
+`--min-allele-fraction` 0.7) have not been measured: they are taken from the error profile of
+CLR reads, and one isolate at one depth does not fix them. Detection has not been checked on
+public HiFi runs, and no depth series was run for `clr`. Both belong to the validation on real
+long reads that is still open. `--platform` remains the setting to use when the platform is
+known, and the default is unchanged (`illumina`).
+
 ## Local references
 
 **Compared.** The final SNP from 50x Illumina reads mapped only to the scheme reference genome,

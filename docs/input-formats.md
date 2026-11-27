@@ -41,20 +41,27 @@ contigs of a draft assembly). The order of the sequences does not matter.
 ### FASTQ reads
 
 Reads are FASTQ files, plain or gzip-compressed. Read typing needs minimap2 and samtools in
-`PATH`. The sequencing platform is given with `--platform` (`illumina`, `ont` or `hifi`; default
-`illumina`) or per sample in a samplesheet.
+`PATH`. The sequencing platform is given with `--platform` (`illumina`, `ont`, `hifi`, `clr` or
+`auto`; default `illumina`) or per sample in a samplesheet. The platform sets the minimap2 preset
+and the pileup thresholds ([method.md](method.md#platform-defaults)).
+
+CanSNPer2 also reads the platform from the reads themselves and warns when it does not match the
+platform in effect, for instance when ONT reads are typed with the default `illumina` settings;
+the call is not changed by the warning. `--platform auto` uses the platform read from each
+sample's reads instead ([method.md](method.md#reading-the-platform-from-the-input)).
 
 A sample is one read file (single-end or long reads) or two (paired-end reads). Without a
 samplesheet, CanSNPer2 groups the files into samples by their names:
 
 1. The endings `.fastq`, `.fq` and `.gz` are removed (in any letter case).
-2. For `--platform illumina`, a name that ends in `_R1` or `_R2`, optionally followed by
+2. For `--platform illumina`, and for a file taken for Illumina reads with `--platform auto`,
+   a name that ends in `_R1` or `_R2`, optionally followed by
    `_001`, or in `_1` or `_2`, is one mate of a pair. The two mates with the same remaining
    name form one sample of that name.
 3. Any other file is a single-end sample named after the file without its endings.
 
-Long reads (`--platform ont` or `hifi`) are never paired: each file is one sample, and a mate
-suffix stays part of its name.
+Long reads (`--platform ont`, `hifi` or `clr`) are never paired: each file is one sample, and a
+mate suffix stays part of its name.
 
 | Files | Samples |
 |---|---|
@@ -99,8 +106,8 @@ cannot be given both.
   `reads1`. The columns `reads2` and `platform` are optional, and other columns are not read.
 - One sample per row. `sample` is the sample name; `reads1` is the read file of a single-end
   sample or the first mate of a pair; `reads2` the second mate.
-- `platform` is `illumina`, `ont` or `hifi`. An empty or missing value takes `--platform`.
-  A samplesheet may hold samples of several platforms.
+- `platform` is `illumina`, `ont`, `hifi`, `clr` or `auto`. An empty or missing value takes
+  `--platform`. A samplesheet may hold samples of several platforms.
 - Relative paths are read from the folder of the samplesheet, not from the current folder.
 - Blank lines are skipped and spaces around the values are removed.
 - A sample name may be listed only once, may contain only letters, digits, `.`, `_` and `-`,

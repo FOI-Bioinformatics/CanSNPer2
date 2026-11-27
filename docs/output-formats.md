@@ -153,6 +153,14 @@ For read samples, `<sample>_snps.txt` has a `# Reads:` line before the `# Query 
 | `sites_with_reads` | canSNP sites with at least one counted read, out of all canSNP sites. |
 | `median_depth` | Median depth over the sites with reads. |
 | `mixed_sites` | Number of sites at which no base reached `--min-allele-fraction`. |
+| `detected` | Platform the reads look like, read from the input ([method.md](method.md#reading-the-platform-from-the-input)); absent when the input does not say. |
+| `detected_from` | Where it was read: `reads` (lengths and base qualities), `read_names` or `read_group` (the `@RG PL:` tag of a BAM or CRAM file). |
+| `detected_median_length` | Median length of the records examined, in bases; absent with `detected_from=read_group`. |
+| `detected_mean_baseq` | Mean base quality of those records; absent when the file has none. |
+
+`detected` is a report, not a setting: `platform` is the platform the sample was typed with. The
+two differ when the reads do not look like the platform in effect, which the run also warns
+about.
 
 With `--local-references` the line adds `local_reference` (the genome used, or `none`),
 `local_node`, `screen_share`, `screens`, `local_rounds` and `conflicts`, and with `--fetch-local`
@@ -160,7 +168,7 @@ also `fetched`, the number of genomes downloaded for the sample. [method.md](met
 local references.
 
 ```text
-# Reads: platform=illumina files=2 sites_with_reads=324/328 median_depth=20 mixed_sites=0
+# Reads: platform=illumina files=2 sites_with_reads=324/328 median_depth=20 mixed_sites=0 detected=illumina detected_from=reads detected_median_length=151 detected_mean_baseq=35.4
 ```
 
 ## Site counts file (reads)
