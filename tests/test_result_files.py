@@ -203,3 +203,21 @@ def test_a_reused_result_gives_the_same_support_in_the_summary(tmp_path):
     second = table_rows(os.path.join(again.outdir, "snps_summary.txt"))
     assert second == first
     assert second[1][2] == "2/2"
+
+
+# competing paths (#91): B.1 and B.2 are both children of A.1, at the same depth
+
+
+def test_competing_paths_are_written_to_the_result_file(tmp_path):
+    obj, q = typed(tmp_path, ["A.1", "B.1", "B.2"], {"A.1": 1, "B.1": 1, "B.2": 1})
+    assert obj.not_typed["x"].startswith("Two or more confirmed SNP paths compete")
+    notes = comments(os.path.join(obj.results_dir, "x_snps.txt"))
+    assert "# Final SNP: NA found/depth: 2/3" in notes
+    assert "# Competing paths: B.1 found/expected: 2/2; B.2 found/expected: 2/2" in notes
+    assert notes.index("# Competing paths: B.1 found/expected: 2/2; B.2 found/expected: 2/2") == 2
+
+
+def test_a_called_sample_has_no_competing_paths_line(tmp_path):
+    obj, q = typed(tmp_path, ["A.1", "B.1"], {"A.1": 1, "B.1": 1, "B.2": 2})
+    notes = comments(os.path.join(obj.results_dir, "x_snps.txt"))
+    assert not [line for line in notes if line.startswith("# Competing paths")]

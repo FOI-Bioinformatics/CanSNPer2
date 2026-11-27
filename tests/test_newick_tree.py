@@ -436,3 +436,19 @@ def test_competing_paths_are_named_in_the_reason(tmp_path):
     newick_tree = NewickTree(db, name="fork", outdir=str(tmp_path), min_required_hits=1, strictness=0.5)
     result, msg, _dlist, _no_data = newick_tree.draw_tree({"R.1": 2, "A.2": 1}, ["A.2"], save_tree=False)
     assert result[2][0] is False and msg.startswith("A.2, the deepest derived SNP, was not confirmed")
+
+
+def test_competing_paths_are_kept_with_their_support(tmp_path):
+    """the candidates of a sample left NA by competing paths, for the result files (#91)"""
+    db = str(tmp_path / "fork.db")
+    make_fork_db(db)
+    newick_tree = NewickTree(db, name="fork", outdir=str(tmp_path), min_required_hits=1, strictness=0.5)
+    snps = {"R.1": 1, "A.2": 1, "B.2": 1}
+    newick_tree.draw_tree(snps, list(snps), save_tree=False)
+    assert newick_tree.competing == [
+        {"node": "A.2", "found": 2, "expected": 2, "no_data": []},
+        {"node": "B.2", "found": 2, "expected": 2, "no_data": []},
+    ]
+    newick_tree = NewickTree(db, name="fork", outdir=str(tmp_path), min_required_hits=1, strictness=0.5)
+    newick_tree.draw_tree({"R.1": 1, "A.2": 1, "B.2": 2}, ["R.1", "A.2"], save_tree=False)
+    assert newick_tree.competing == []

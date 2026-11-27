@@ -7,7 +7,7 @@
   "required": [
     "format", "format_version", "cansnper2_version", "date", "sample", "input", "status", "final_snp",
     "support", "snp_path", "path_snps", "reasons", "path_no_data", "edge_flagged", "derived_cansnps",
-    "no_data_cansnps", "site_states", "reads", "settings", "database", "result_files"
+    "no_data_cansnps", "competing_paths", "site_states", "reads", "settings", "database", "result_files"
   ],
   "properties": {
     "format": {"const": "cansnper2-sample"},
@@ -47,6 +47,19 @@
     "edge_flagged": {"type": "array", "items": {"type": "string"}},
     "derived_cansnps": {"type": "array", "items": {"type": "string"}},
     "no_data_cansnps": {"type": "array", "items": {"type": "string"}},
+    "competing_paths": {
+      "description": "the confirmed paths that ended at the same depth, when they left the sample not called; empty otherwise",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node", "support", "path_no_data"],
+        "properties": {
+          "node": {"type": "string"},
+          "support": {"$ref": "#/$defs/support"},
+          "path_no_data": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
     "site_states": {
       "type": "object",
       "additionalProperties": {"enum": ["derived", "ancestral", "other_base", "no_data"]}
