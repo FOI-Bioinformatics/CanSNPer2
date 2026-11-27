@@ -34,6 +34,8 @@ Git history.
 - `db export --format vcf` writes the canSNPs as sites-only VCF files, one per reference genome,
   with the reference base read from `--ref-dir`.
 - `--jobs N` types N samples at the same time; the results and their order are those of one job.
+- Read typing from BAM and CRAM files of reads mapped to a reference genome of the scheme; the
+  mapping is left out and the reads are counted as mapped reads are.
 
 ### Changed
 

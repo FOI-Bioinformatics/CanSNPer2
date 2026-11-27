@@ -15,6 +15,7 @@ order mark, and after decompression when the file is gzip-compressed):
 |---|---|
 | `>` | FASTA assembly |
 | `@` | FASTQ reads |
+| the header of a BAM or CRAM file | reads mapped already (see [BAM and CRAM files](#bam-and-cram-files)) |
 | anything else | a list file (see [List files](#list-files)) |
 
 Assemblies and reads cannot be typed in one run, because they are read with different settings.
@@ -67,6 +68,27 @@ A file named as one mate whose other mate is not given is refused, so that half 
 never typed as single-end reads unnoticed. To type such a file as single-end reads, list it in a
 samplesheet. Two files that give the same sample name and are not the two mates of one pair are
 also refused; rename one of them or use a samplesheet.
+
+### BAM and CRAM files
+
+Reads that are mapped already can be given as a BAM or CRAM file, told from other files by their
+content. Each file is one sample, named after the file without `.bam` or `.cram`
+(`isolate.sorted.bam` gives `isolate.sorted`); in a samplesheet it is given as `reads1` without
+`reads2`. BAM and CRAM files and FASTQ files can be typed in one run, but not with assemblies.
+
+- The reads must be mapped to one of the reference genomes of the scheme: the header must name
+  every sequence of that reference genome, with the same length, as in `--ref-dir`. Otherwise the
+  sample is refused with the sequences the header names and those of the reference genomes.
+- The mapping step is left out; the reads are counted at the canSNP positions as mapped reads
+  are (see [method.md](method.md#mapping-and-pileup)). A file that is not sorted by coordinate
+  is sorted into the temporary folder first. A CRAM file is decoded with the reference genome
+  from `--ref-dir`.
+- canSNPs on the other reference genomes of the scheme have no data. For a scheme with one
+  reference genome this makes no difference.
+- Every read of the file is counted: `--max-reads` does not apply (a warning says so), and the
+  `# Typing settings:` line records `max_reads=0`.
+- `--local-references` maps the reads again and needs the read files; it is refused with BAM or
+  CRAM input.
 
 ### Samplesheet
 

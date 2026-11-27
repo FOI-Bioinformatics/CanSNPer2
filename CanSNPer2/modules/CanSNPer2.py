@@ -22,7 +22,14 @@ logger = logging.getLogger(__name__)
 ## import CanSNPer2 specific modules
 from CanSNPer2.modules.Aligners import Aligner, ReadMapper, get_aligner, threads_per_mapping, write_sites_bed
 from CanSNPer2.modules.ParsePileup import DEFAULT_PLATFORM, read_site_counts, SITE_COUNT_COLUMNS
-from CanSNPer2.modules.ReadInput import ReadInputError, input_kind, pair_read_files, read_samplesheet
+from CanSNPer2.modules.ReadInput import (
+    ReadInputError,
+    ReadSample,
+    alignment_sample_name,
+    input_kind,
+    pair_read_files,
+    read_samplesheet,
+)
 from CanSNPer2.modules.LiftOver import lift
 from CanSNPer2.DownloadGenomes import LocalFetcher
 from CanSNPer2.modules.LocalReferences import (
@@ -42,7 +49,13 @@ from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, proven
 from CanSNPer2.modules import ResultJSON
 from CanSNPer2.modules import LogSetup
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
-from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
+from CanSNPer2.modules.ReferenceCheck import (
+    check_reference,
+    duplicate_names,
+    reference_snps,
+    listing,
+    read_sequences,
+)
 from CanSNPer2 import __version__
 
 
@@ -194,6 +207,12 @@ def _type_in_worker(q):
     }
 
 
+def _is_cram(path):
+    """a CRAM file starts with the bytes CRAM"""
+    with open(path, "rb") as handle:
+        return handle.read(4) == b"CRAM"
+
+
 @dataclass
 class SampleCall:
     """the call of one sample, as CanSNPer2.call_sample makes it: the final SNP (NA without a
@@ -284,6 +303,8 @@ class CanSNPer2(object):
 			its own mapper, with the thresholds given here or the defaults of the platform"""
         self.read_samples = {}
         self.read_mappers = {}
+        self.alignment_mappers = {}  ## the mapper of each platform for BAM and CRAM input (#96)
+        self.alignment_input = set()  ## the read samples given as a BAM or CRAM file (#96)
         self.platform = kwargs.get("platform") or DEFAULT_PLATFORM
         self.samplesheet = kwargs.get("samplesheet")
         """threads per sample, divided between the references a sample is mapped to at the same time"""
@@ -956,6 +977,8 @@ class CanSNPer2(object):
             len(references) == 0
         ):  ## If specific references are not given fetch references from the reference folder
             references = self.get_references()
+        if query in self.alignment_input:
+            return self.alignment_input_commands(query, references)
         threads = None
         if self.is_read(query):
             query_file = tuple(self.not_an_option(f) for f in self.query_files(query))
@@ -993,6 +1016,65 @@ class CanSNPer2(object):
             self.alignment_files.append(output)  ## the alignment files are read later
             self.alignment_references.append(ref_name)
         return commands, logs, names
+
+    def alignment_input_commands(self, query, references):
+        """The pileup of a BAM or CRAM file (#96): the reads are mapped to one reference genome
+        of the scheme already, the one whose sequences the header names with the same lengths.
+        canSNPs on the other reference genomes of the scheme get no data. Returns the command,
+        its log file and its names, as create_alignment_commands does."""
+        path = self.query_files(query)[0]
+        try:
+            sequences, order = self.aligner.header(path)
+        except ValueError as e:
+            raise CanSNPer2Error(str(e))
+        candidates = []
+        for ref in references:
+            ref_name = ref.rsplit(".", 1)[0]
+            ref_path = "{refdir}/{ref}".format(refdir=self.refdir, ref=ref)
+            lengths = {name: len(seq) for name, seq in read_sequences(ref_path)}
+            candidates.append((ref, ref_name, ref_path, lengths))
+            if all(sequences.get(name) == length for name, length in lengths.items()):
+                break
+        else:
+            shown = ", ".join("{0} ({1})".format(n, l) for n, l in list(sequences.items())[:5])
+            expected = "; ".join(
+                "{ref}: {seqs}".format(
+                    ref=c[1], seqs=", ".join("{0} ({1})".format(n, l) for n, l in c[3].items())
+                )
+                for c in candidates
+            )
+            raise CanSNPer2Error(
+                "{path} is mapped to {shown}, not to a reference genome of the scheme ({expected}); map the "
+                "reads to one of them, or give the read files".format(
+                    path=path, shown=shown or "no sequences", expected=expected
+                )
+            )
+        ref, ref_name, ref_path, _lengths = candidates[-1]
+        self.check_reference_file(ref_path, ref_name)
+        others = [c.rsplit(".", 1)[0] for c in references if c != ref]
+        if others:
+            logger.info(
+                "{name}: {path} is mapped to {ref}; the canSNPs on {others} have no data".format(
+                    name=self.query_name, path=path, ref=ref_name, others=", ".join(others)
+                )
+            )
+        output = self.aligner.alignment_path(self.tmpdir.rstrip("/"), ref_name, self.query_name)
+        command = self.aligner.pileup_command(
+            ref_path,
+            self.not_an_option(path),
+            output,
+            sort=order != "coordinate",
+            cram=input_kind(path) == "alignment" and _is_cram(path),
+        )
+        if not self.skip_alignment:
+            write_sites_bed(output + ".sites.bed", self.reference_snps.get(ref_name, []))
+        self.alignment_files.append(output)
+        self.alignment_references.append(ref_name)
+        return (
+            [command],
+            [self.aligner.log_path(self.logdir, ref_name, self.query_name)],
+            [(ref_name, self.query_name)],
+        )
 
     def not_an_option(self, path):
         """a relative path that starts with "-" (a query file named -x.fasta) was read by the aligner
@@ -1087,7 +1169,9 @@ class CanSNPer2(object):
         head = head[3:] if head.startswith(b"\xef\xbb\xbf") else head
         head = head.lstrip()
         '''a FASTQ file (reads) starts with "@"'''
-        return bool(head) and not head.startswith((b">", b"\x1f\x8b", b"@"))
+        return bool(head) and not head.startswith(
+            (b">", b"\x1f\x8b", b"@", b"CRAM")
+        )  ## CRAM: mapped reads (#96)
 
     def resolve_queries(self, queries):
         """The query files of the run. A file whose first non-blank line is not a FASTA header is a
@@ -1405,27 +1489,45 @@ class CanSNPer2(object):
                 raise CanSNPer2Error(str(e))
         else:
             kinds = {q: input_kind(q) for q in queries}
-            reads = [q for q in queries if kinds[q] == "reads"]
+            reads = [q for q in queries if kinds[q] in ("reads", "alignment")]
             if not reads:
                 return list(queries)
             if len(reads) != len(queries):
-                others = [q for q in queries if kinds[q] != "reads"]
+                others = [q for q in queries if kinds[q] not in ("reads", "alignment")]
                 raise CanSNPer2Error(
                     "reads and assemblies cannot be typed in one run: {n} read file(s) and {m} other file(s) were given ({files}); type them in separate runs".format(
                         n=len(reads), m=len(others), files=listing(others)
                     )
                 )
+            """a BAM or CRAM file is one sample of reads mapped already; the FASTQ files are
+				paired; the samples keep the order of the query files"""
+            fastq = [q for q in reads if kinds[q] == "reads"]
             try:
-                samples = pair_read_files(reads, self.platform)
+                samples = pair_read_files(fastq, self.platform) if fastq else []
             except ReadInputError as e:
                 raise CanSNPer2Error(str(e))
+            samples += [
+                ReadSample(alignment_sample_name(q), [q], self.platform)
+                for q in reads
+                if kinds[q] == "alignment"
+            ]
+            position = {q: i for i, q in enumerate(queries)}
+            samples.sort(key=lambda sample: position[sample.files[0]])
+        self.alignment_input = set(self.check_alignment_input(samples))
         self.read_samples = {sample.files[0]: sample for sample in samples}
         for sample in samples:
             if sample.platform not in self.read_mappers:
                 self.read_mappers[sample.platform] = ReadMapper(
                     platform=sample.platform, threads=self.threads, **self.read_options
                 )
-        self.aligner = self.read_mappers[samples[0].platform]
+        for sample in samples:
+            if sample.files[0] in self.alignment_input and sample.platform not in self.alignment_mappers:
+                """every read of a BAM or CRAM file is counted: max_reads=0 in the settings line"""
+                options = dict(self.read_options, max_reads=0)
+                self.alignment_mappers[sample.platform] = ReadMapper(
+                    platform=sample.platform, threads=self.threads, **options
+                )
+        self.aligner = self.mapper_of(samples[0].files[0])
         for platform, mapper in sorted(self.read_mappers.items()):
             max_reads = int(mapper.setting("max_reads"))
             logger.info(
@@ -1442,6 +1544,38 @@ class CanSNPer2(object):
                 "--mask is not used for reads: it leaves out canSNPs near the ends of assembly alignments, while read ends are filtered by base quality"
             )
         return [sample.files[0] for sample in samples]
+
+    def check_alignment_input(self, samples):
+        """the samples given as a BAM or CRAM file: one file each, and not with --local-references,
+        which maps the reads again; --max-reads does not apply to them"""
+        alignment = [s for s in samples if any(input_kind(f) == "alignment" for f in s.files)]
+        for sample in alignment:
+            if len(sample.files) != 1:
+                raise CanSNPer2Error(
+                    "{name}: a BAM or CRAM file is a sample of its own, give it as reads1 without reads2".format(
+                        name=sample.name
+                    )
+                )
+        if alignment and self.local_references:
+            raise CanSNPer2Error(
+                "--local-references maps the reads again to a genome closer to the sample and needs the "
+                "reads; it cannot be used with BAM or CRAM input ({files})".format(
+                    files=listing([s.files[0] for s in alignment])
+                )
+            )
+        if alignment and self.read_options.get("max_reads") is not None:
+            logger.warning(
+                "--max-reads is not applied to BAM or CRAM input: every read in the file is counted"
+            )
+        return [s.files[0] for s in alignment]
+
+    def mapper_of(self, query):
+        """the read mapper of a read sample: of its platform, and for a BAM or CRAM file the one
+        that counts every read"""
+        platform = self.read_samples[query].platform
+        if query in self.alignment_input:
+            return self.alignment_mappers[platform]
+        return self.read_mappers[platform]
 
     def provisional_call(self, states, called):
         """the call of the tree walk for states, without writing anything; "NA" without a call"""
@@ -2073,7 +2207,7 @@ class CanSNPer2(object):
             self.query_name = self.sample_name(q)  ## get name of file and remove ending
             if self.is_read(q):
                 """the mapper and the thresholds of the platform of this sample"""
-                self.aligner = self.read_mappers[self.read_samples[q].platform]
+                self.aligner = self.mapper_of(q)
                 alignment_reader = self.aligner.reader(database=database, verbose=self.verbose)
             self.type_sample(q, database, alignment_reader)
         except Exception as e:

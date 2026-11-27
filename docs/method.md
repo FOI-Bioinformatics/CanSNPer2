@@ -190,6 +190,11 @@ removes the depth limit; `-a` writes a line for every position, also without rea
 duplicate-flagged reads are excluded by the `mpileup` defaults, and a base covered by both reads
 of a pair is counted once.
 
+For a BAM or CRAM file of reads mapped already, the mapping is left out: `samtools mpileup` runs
+with the same options on the file, for the reference genome it is mapped to (sorted first when
+it is not sorted by coordinate; see
+[input-formats.md](input-formats.md#bam-and-cram-files)).
+
 Only the first `--max-reads` reads of each read file are mapped (default 300000; for paired-end
 reads, 300000 read pairs). Each file is cut with `head` in a process substitution, after
 `gzip -cd` when it is compressed, so no shortened copy is written to disk. The first reads of a
