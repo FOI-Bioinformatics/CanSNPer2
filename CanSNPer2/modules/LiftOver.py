@@ -15,7 +15,10 @@ canSNPs or the minimap2 version differ from those it was made with.
 
 import hashlib
 import os
+import tempfile
 import subprocess
+
+from CanSNPer2.modules.FileMode import set_default_mode
 from collections import namedtuple
 
 from CanSNPer2.modules.Aligners import Minimap2
@@ -106,7 +109,13 @@ def lift(reference_fasta, local_fasta, snps, cache_dir, tmpdir, aligner=None):
                     lifted[snp_id] = Lifted(contig, int(position), strand, base)
                 return lifted
     lifted = lift_snps(reference_fasta, local_fasta, snps, tmpdir, aligner)
-    partial = path + ".part"
+    """a temporary file of its own: two samples typed at the same time (--jobs, or two runs) can
+		lift the same genome, and the cache file is replaced only when it is complete (#100)"""
+    fd, partial = tempfile.mkstemp(
+        prefix=os.path.basename(path) + ".", suffix=".part", dir=os.path.dirname(path) or "."
+    )
+    os.close(fd)
+    set_default_mode(partial)  ## the cache file gets the mode of open(), not the 0600 of mkstemp
     with open(partial, "w") as out:
         out.write("# " + signature + "\n")
         out.write("snp_id\tcontig\tposition\tstrand\tbase\n")

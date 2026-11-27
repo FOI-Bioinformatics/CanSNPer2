@@ -309,7 +309,13 @@ def build_parser():
         "--threads",
         type=positive_int,
         default=4,
-        help="Threads of minimap2 and samtools sort per sample, divided between the references the reads are mapped to at the same time, at least one each (default 4)",
+        help="Threads per sample: for assemblies the alignments of a sample that run at the same time, for reads the threads of minimap2 and samtools sort, divided between the references the reads are mapped to at the same time, at least one each (default 4)",
+    )
+    read_options.add_argument(
+        "--jobs",
+        type=positive_int,
+        default=1,
+        help="Samples typed at the same time (default 1)",
     )
     read_options.add_argument(
         "--max_reads",
@@ -494,6 +500,7 @@ def run_command(args, parser):
             min_baseq=args.min_baseq,
             mixed_sites=args.mixed_sites,
             threads=args.threads,
+            jobs=args.jobs,
             max_reads=args.max_reads,
             local_references=args.local_references,
             local_rounds=args.local_rounds,

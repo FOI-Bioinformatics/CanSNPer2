@@ -204,6 +204,23 @@ def add_type_subparser(subparsers):
         help="assemblies only: ignore canSNPs closer than this many bases to the edge of an alignment block",
     )
     run.add_argument(
+        "--threads",
+        metavar="N",
+        type=typing_command.positive_int,
+        default=4,
+        help="threads per sample: for assemblies, the alignments of a sample that run at the "
+        "same time (one thread each); for reads, the threads of minimap2 and samtools sort, "
+        "divided between the reference genomes the reads are mapped to at the same time, "
+        "at least one each",
+    )
+    run.add_argument(
+        "--jobs",
+        metavar="N",
+        type=typing_command.positive_int,
+        default=1,
+        help="samples typed at the same time; the run uses about --jobs times --threads threads",
+    )
+    run.add_argument(
         "--keep-going",
         dest="keep_going",
         action="store_true",
@@ -346,15 +363,6 @@ def add_read_options(parser):
         type=typing_command.positive_int,
         default=3,
         help="number of mixed canSNP sites from which a sample is flagged as possibly mixed",
-    )
-    reads.add_argument(
-        "--threads",
-        metavar="N",
-        type=typing_command.positive_int,
-        default=4,
-        help="threads for minimap2 and samtools sort, per sample; they are divided "
-        "between the reference genomes the reads are mapped to at the same time, "
-        "at least one each",
     )
     reads.add_argument(
         "--max-reads",
