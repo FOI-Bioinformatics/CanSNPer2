@@ -231,6 +231,12 @@ Options given on the command line replace the defaults.
 | `hifi` | `map-hifi` | 20 | 20 | 5 | 0.8 | 300000 |
 | `clr` | `map-pb` | 20 | 0 | 10 | 0.7 | 300000 |
 
+The `ont` values were measured on simulated reads and afterwards on eleven real nanopore runs of
+five schemes ([validation.md](validation.md#read-typing-on-real-nanopore-reads)): with them a
+run needs about 20x over the genome, and about 30x for a scheme with many canSNPs, since the
+depth at the canSNP positions is about two thirds of the depth over the genome. A run below that
+stops above its lineage or gives `NA`.
+
 `clr` is for PacBio continuous long reads. Their quality lines carry no information, often one
 repeated character, so base quality filtering is off and the depth is raised instead. The
 values were measured on eight PacBio CLR read sets
@@ -262,7 +268,12 @@ known.
 
 Checked on seven read files of four kinds (2026-11-27): Illumina with and without the original
 read names, PacBio CLR subreads (PRJNA991498) and three nanopore runs of short fragments, all
-reported correctly.
+reported correctly. Measured afterwards on eleven real nanopore runs
+([validation.md](validation.md#read-typing-on-real-nanopore-reads)): the lengths and the
+qualities reported `ont` for seven of them and `hifi` for four, the four being R10.4.1 runs
+basecalled with a `sup` model whose mean base quality is above 25. Their calls at 30x were the
+same as with `--platform ont`. None of the eleven was read from its names, because the SRA
+conversion of a nanopore run puts the run accession first in the read name.
 
 ### Site state of a canSNP from its counts
 

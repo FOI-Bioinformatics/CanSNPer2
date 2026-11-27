@@ -50,6 +50,13 @@ PLATFORMS = {
         "min_allele_fraction": 0.8,
         "max_reads": 300000,
     },
+    ## Nanopore reads. Measured on eleven real runs of five schemes against the calls of the
+    ## assemblies and of the Illumina reads of the same BioSamples, 3577 results over six depths
+    ## and a grid of the two thresholds (#93, 2026-11-27): no call was on another branch and no
+    ## canSNP state differed at these values, homopolymer context changed no state, and the
+    ## errors appear only at min_depth 1. min_depth 3 would add the call at 10x for 6 of 7
+    ## samples where 5 gives it for 3, and was without error in that data; it changes calls, so
+    ## it belongs in a release of its own
     "ont": {
         "preset": "map-ont",
         "min_mapq": 20,

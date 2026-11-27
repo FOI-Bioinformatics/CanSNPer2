@@ -19,7 +19,10 @@ their alleles.
   from another taxon can be reported as `NA`, or as a node of the scheme (see below). Identify
   the species with another method first.
 - Taxa outside the scheme. A lineage that the scheme has no node for is placed at the deepest
-  node it shares with the scheme, or not called.
+  node it shares with the scheme, or not called. Two *B. suis* isolates typed with
+  `brucella_classical` were ancestral at every canSNP below the root, from Illumina reads at
+  129x as much as from nanopore runs, and were not called
+  ([validation.md](validation.md#read-typing-on-real-nanopore-reads)).
 - Metagenomes and other samples with several organisms. Reads of other organisms that map to a
   reference genome are counted at the canSNP positions like reads of the target.
 - Strain mixtures. For reads, CanSNPer2 flags a sample with several mixed canSNP sites
