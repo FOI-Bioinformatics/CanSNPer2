@@ -55,8 +55,10 @@ PLATFORMS = {
     ## and a grid of the two thresholds (#93, 2026-11-27): no call was on another branch and no
     ## canSNP state differed at these values, homopolymer context changed no state, and the
     ## errors appear only at min_depth 1. min_depth 3 would add the call at 10x for 6 of 7
-    ## samples where 5 gives it for 3, and was without error in that data; it changes calls, so
-    ## it belongs in a release of its own
+    ## samples where 5 gives it for 3 and was without error in that data, but it is one step from
+    ## min_depth 1, where every differing state and the one off-path call of the grid are, and
+    ## what 5 does at 10x is stop a node above on the same path, which is the safe way to be
+    ## wrong on thin data. 5 is kept for that reason, not for lack of evidence
     "ont": {
         "preset": "map-ont",
         "min_mapq": 20,
@@ -74,19 +76,19 @@ PLATFORMS = {
         "max_reads": 300000,
     },
     ## PacBio continuous long reads (#119): their quality lines carry no information, often one
-    ## repeated character, so base quality filtering is off and the depth is raised instead.
-    ## Measured on the eight CLR read sets of PRJNA991498 against the calls of their assemblies,
-    ## 4380 results over four presets, six depths and a grid of the two thresholds (#93,
-    ## 2026-11-27): min_baseq 0 is required, map-pb and map-ont reach every canSNP while
-    ## map-hifi and sr lose most of them against a reference genome of another species, and no
-    ## call was on another branch at min_allele_fraction 0.6 or 0.7. min_depth 10 asks for about
-    ## 30x; 5 gives the same calls from 20x and would be the value to try next, in a release of
-    ## its own since it changes calls
+    ## repeated character, so base quality filtering is off. Measured on the eight CLR read sets
+    ## of PRJNA991498 against the calls of their assemblies, 4380 results over four presets, six
+    ## depths and a grid of the two thresholds (#93, 2026-11-27): min_baseq 0 is required, map-pb
+    ## and map-ont reach every canSNP while map-hifi and sr lose most of them against a reference
+    ## genome of another species, and no call was on another branch at min_allele_fraction 0.6 or
+    ## 0.7. min_depth was 10 while it was being measured; 5, the value of the other platforms,
+    ## gives the same calls from 20x and adds calls at 10x with no call on another branch, so the
+    ## depth is not raised after all and nothing separates the platforms here
     "clr": {
         "preset": "map-pb",
         "min_mapq": 20,
         "min_baseq": 0,
-        "min_depth": 10,
+        "min_depth": 5,
         "min_allele_fraction": 0.7,
         "max_reads": 300000,
     },

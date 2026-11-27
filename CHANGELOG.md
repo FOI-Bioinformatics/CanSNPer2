@@ -36,10 +36,10 @@ Git history.
 - `--jobs N` types N samples at the same time; the results and their order are those of one job.
 - Read typing from BAM and CRAM files of reads mapped to a reference genome of the scheme; the
   mapping is left out and the reads are counted as mapped reads are.
-- `--platform clr` for PacBio continuous long reads: the minimap2 preset `map-pb`, no base
-  quality filter (`--min-baseq` 0, since their quality lines carry no information) and
-  `--min-depth` 10. The values of the other platforms are unchanged. They were measured on eight
-  PacBio CLR read sets, see `docs/validation.md`.
+- `--platform clr` for PacBio continuous long reads: the minimap2 preset `map-pb` and no base
+  quality filter (`--min-baseq` 0, since their quality lines carry no information). Every
+  platform uses `--min-depth` 5. The values were measured on eight PacBio CLR read sets and the
+  long read platforms also on real nanopore runs, see `docs/validation.md`.
 - The platform of a read sample is read from the input as well, from the first records of each
   file: the read lengths, the base qualities, the read names, and the `@RG PL:` tag of a BAM or
   CRAM file. A run whose reads do not look like the platform in effect warns and names both; the

@@ -229,7 +229,7 @@ Options given on the command line replace the defaults.
 | `illumina` (default) | `sr` | 20 | 20 | 5 | 0.8 | 300000 |
 | `ont` | `map-ont` | 20 | 10 | 5 | 0.7 | 300000 |
 | `hifi` | `map-hifi` | 20 | 20 | 5 | 0.8 | 300000 |
-| `clr` | `map-pb` | 20 | 0 | 10 | 0.7 | 300000 |
+| `clr` | `map-pb` | 20 | 0 | 5 | 0.7 | 300000 |
 
 The `ont` values were measured on simulated reads and afterwards on eleven real nanopore runs of
 five schemes ([validation.md](validation.md#read-typing-on-real-nanopore-reads)): with them a
@@ -238,10 +238,10 @@ depth at the canSNP positions is about two thirds of the depth over the genome. 
 stops above its lineage or gives `NA`.
 
 `clr` is for PacBio continuous long reads. Their quality lines carry no information, often one
-repeated character, so base quality filtering is off and the depth is raised instead. The
-values were measured on eight PacBio CLR read sets
-([validation.md](validation.md#thresholds-of-the-clr-preset)): with them such reads need about
-30x at the canSNP positions, and a sample below 20x stops above its lineage or gives `NA`.
+repeated character, so base quality filtering is off. The values were measured on eight PacBio
+CLR read sets ([validation.md](validation.md#thresholds-of-the-clr-preset)): with them such
+reads need about 20x, and a sample below that stops above its lineage or gives `NA`. The depth
+is the same as for the other platforms; nothing in the measurement separated them.
 
 ### Reading the platform from the input
 

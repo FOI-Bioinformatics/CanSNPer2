@@ -179,7 +179,8 @@ Against the reference genome of another species `map-hifi` keeps 76 of the 283 p
 `sr` 96, while `map-pb` and `map-ont` keep 276 and 277. `map-pb` is confirmed, `map-ont` is
 equivalent on these reads, and `map-hifi` is not a substitute for CLR reads.
 
-**Results, depth.** At the shipped thresholds (`min_depth` 10, `min_allele_fraction` 0.7).
+**Results, depth.** At `min_depth` 10 and `min_allele_fraction` 0.7, the values the preset had
+while it was being measured (`min_depth` is 5 since this measurement).
 "a node above" is a node on the path from the root to the call of the assembly:
 
 | depth of the reads | depth at the canSNPs, the two schemes | brucella_anthropi | brucella_genus |
@@ -222,15 +223,14 @@ canSNPs of the path are derived in all eight samples. Single-pass long reads map
 reference genome of another species therefore give mixed sites that are not a mixture of
 strains.
 
-**Conclusion.** The values of the `clr` preset hold. `min_baseq` 0 is required, `map-pb` is the
-right preset, and `min_allele_fraction` 0.7 lies in the band that gave no call on another branch
-(0.6 and 0.7); 0.5 gave the one off-path call and most of the differing states, 0.8 and above
-lose calls that are correct. `min_depth` 10 is the conservative value: it asks for about 30x,
-where 5 gives the same calls from 20x and adds calls at 10x with no error in this data. That
-change would change calls, so it belongs in a release of its own with the comparison in the
-CHANGELOG (issue #93); the preset is unchanged. For a run of CLR reads this means about 30x at
-the canSNP positions, and a sample below 20x should be expected to stop above its lineage or to
-give `NA`.
+**Conclusion.** `min_baseq` 0 is required, `map-pb` is the right preset, and
+`min_allele_fraction` 0.7 lies in the band that gave no call on another branch (0.6 and 0.7);
+0.5 gave the one off-path call and most of the differing states, 0.8 and above lose calls that
+are correct. `min_depth` was 10 while the preset was being measured, which asks for about 30x.
+The measurement moved it to 5, the value of the other platforms: 5 gives the same calls from 20x
+and adds calls at 10x, and no value of `min_depth` gave a call on another branch at
+`min_allele_fraction` 0.7. For a run of CLR reads this means about 20x, and a sample below that
+should be expected to stop above its lineage or to give `NA`.
 
 **Open.** One species, eight isolates of one experiment, two draft schemes, one instrument and
 two reference distances. The depth series is drawn from one deep run per isolate, so it does not
@@ -347,8 +347,8 @@ basecalling model, but the SRA conversion puts the run accession first and the U
 `ReadPlatform.NAME_FORMS` is anchored at the start of the name, so the name signal was not used
 for any file. An unanchored form matches 400 of 400 names in each of the ten files that still
 have a UUID and none of the 400 names of either Illumina file. That is a candidate change for
-#119, in a release of its own since it changes what `--platform auto` reports; this evaluation
-measures the shipped behavior.
+#119; this evaluation measures the behavior as it stands, which is why the four files are
+reported as `hifi` above.
 
 **A scheme that does not cover the sample.** Neither *B. suis* isolate was called, from any
 input: 22 of the 23 canSNPs with data are ancestral and only the root is derived, from the
@@ -363,10 +363,12 @@ differed. About 20x over the genome is the depth to plan for, 30x for a scheme w
 canSNPs, and a run below that should be expected to stop above its lineage or to give `NA`.
 Homopolymer context did not change a single state, which is the error the simulated reads could
 not cover, although only 15 canSNP positions of these schemes sit in a run of five or more
-bases. The errors that the thresholds hold back appear at `--min-depth` 1; the shipped 5 and the
-lower 3 were both without error here, and 3 would add the call at 10x for 6 of 7 samples instead
-of 3. Such a change belongs in a release of its own with the comparison in the CHANGELOG, as for
-the `clr` value.
+bases. The errors that the thresholds hold back appear at `--min-depth` 1; 5 and 3 were both
+without error here, and 3 would add the call at 10x for 6 of 7 samples instead of 3. The value
+stays 5: 3 is one step from the value where every differing state and the one off-path call of
+the grid are, and what 5 does at 10x is stop a node above on the same path, which is the safe
+way to be wrong on thin data. The same measurement moved `clr` from 10 to 5, where the gain is
+at 20x rather than at the thinnest depths and all four platforms then ask for the same depth.
 
 **Open.** Seven isolates, five schemes, two laboratories for the nanopore runs and one
 instrument type. The depth series is drawn from one deep run per isolate, so it does not show
