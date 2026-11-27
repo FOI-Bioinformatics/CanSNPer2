@@ -69,9 +69,10 @@ have no data.
 
 ### Running the aligner
 
-The query is aligned against each reference genome in a separate process; all alignments of
-one query run at the same time. A round of alignments that takes longer than
-`--alignment-timeout` (default 60 minutes; 0 for no limit) is stopped. The aligner is chosen
+The query is aligned against each reference genome in a separate process, with one thread
+each. At most `--threads` (default 4) of the alignments of one query run at the same time; the
+others start as alignments finish. An alignment that takes longer than `--alignment-timeout`
+(default 60 minutes; 0 for no limit) is stopped, together with the others of the query. The aligner is chosen
 with `--aligner`; minimap2 is the default from 2.6.0 (progressiveMauve was the default up to
 2.4.0). The command lines are defined in
 `CanSNPer2/modules/Aligners.py`.
@@ -203,6 +204,15 @@ reference genomes of the scheme at the same time, and the threads are divided be
 mappings, at least one each: with 4 threads and the five reference genomes of
 `francisella_tularensis`, each mapping uses one thread for minimap2 and for `samtools sort`. A
 mapping to a local reference runs alone and uses all threads.
+
+### Several samples at the same time
+
+`--jobs N` (default 1) types N samples at the same time, each in a process of its own, for
+assemblies and reads. A run uses about `--jobs` times `--threads` threads. The results are the
+same as with one job, and the samples are listed in the order of the queries in the summary,
+`summary.html` and `run.json`; the lines printed to the terminal and written to the log can come
+in another order. Without `--keep-going`, a sample that fails stops the run: samples already
+being typed in other processes are finished, and the ones not started are not typed.
 
 ### Platform defaults
 

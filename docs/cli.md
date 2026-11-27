@@ -59,16 +59,17 @@ usage: cansnper2 type [-h] [-d DB] [-o DIR] [--save-tree] [--no-snp-files]
                       [--summary] [--node-labels FILE] [--ref-dir DIR]
                       [--allow-missing-references] [--workdir DIR]
                       [--min-required-hits N] [--strictness FRACTION]
-                      [--mask BASES] [--keep-going] [--rerun]
+                      [--mask BASES] [--threads N] [--jobs N] [--keep-going]
+                      [--rerun]
                       [--aligner {minimap2,mummer4,progressiveMauve}]
                       [--alignment-timeout MINUTES] [--aligner-path PATH]
                       [--skip-alignment] [--keep-temp] [--tmp-dir DIR]
                       [--platform {hifi,illumina,ont}] [--samplesheet FILE]
                       [--min-depth N] [--min-allele-fraction FRACTION]
                       [--min-mapq Q] [--min-baseq Q] [--mixed-sites N]
-                      [--threads N] [--max-reads N] [--local-references]
-                      [--local-rounds N] [--screen-reads N] [--fetch-local]
-                      [--log-dir DIR] [-v] [--debug] [--quiet]
+                      [--max-reads N] [--local-references] [--local-rounds N]
+                      [--screen-reads N] [--fetch-local] [--log-dir DIR] [-v]
+                      [--debug] [--quiet]
                       [query ...]
 
 Type assemblies or sequencing reads against a scheme database: each query is
@@ -118,6 +119,14 @@ Run options:
                         0.7)
   --mask BASES          assemblies only: ignore canSNPs closer than this many
                         bases to the edge of an alignment block (default: 0)
+  --threads N           threads per sample: for assemblies, the alignments of
+                        a sample that run at the same time (one thread each);
+                        for reads, the threads of minimap2 and samtools sort,
+                        divided between the reference genomes the reads are
+                        mapped to at the same time, at least one each
+                        (default: 4)
+  --jobs N              samples typed at the same time; the run uses about
+                        --jobs times --threads threads (default: 1)
   --keep-going          continue with the other queries when one cannot be
                         typed
   --rerun               type queries again although their result file exists
@@ -162,10 +171,6 @@ Read typing options:
                         hifi 20)
   --mixed-sites N       number of mixed canSNP sites from which a sample is
                         flagged as possibly mixed (default: 3)
-  --threads N           threads for minimap2 and samtools sort, per sample;
-                        they are divided between the reference genomes the
-                        reads are mapped to at the same time, at least one
-                        each (default: 4)
   --max-reads N         number of reads mapped per sample, the first ones in
                         each read file; read pairs for paired-end reads; 0
                         maps all reads (default: 300000 for all platforms)

@@ -33,9 +33,12 @@ Git history.
   `<sample>_snps.txt` and `competing_paths` in its JSON, with each candidate and its support.
 - `db export --format vcf` writes the canSNPs as sites-only VCF files, one per reference genome,
   with the reference base read from `--ref-dir`.
+- `--jobs N` types N samples at the same time; the results and their order are those of one job.
 
 ### Changed
 
+- For assemblies, `--threads` is the number of alignments of a sample that run at the same time
+  (one thread each); all of them used to start at once. The results are unchanged.
 - The commands `CanSNPer2`, `CanSNPer2-database`, `CanSNPer2-download` and `CanSNPer2-test` are
   no longer installed. Options use hyphens (`--min-required-hits`); messages and help name the
   options in this spelling. See [docs/upgrading.md](docs/upgrading.md).

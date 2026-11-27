@@ -4,6 +4,8 @@ Copyright (C) 2019 David Sundell @ FOI bioinformatics group
 """
 
 import gzip
+import sys
+from concurrent.futures import ProcessPoolExecutor
 import os
 import re
 import zlib
@@ -38,6 +40,7 @@ from CanSNPer2.modules.ParsePileup import PLATFORMS
 import subprocess
 from CanSNPer2.modules.NewickTree import NewickTree, database_provenance, provenance_lines, path_details
 from CanSNPer2.modules import ResultJSON
+from CanSNPer2.modules import LogSetup
 from CanSNPer2.modules.DatabaseConnection import CanSNPdbFunctions
 from CanSNPer2.modules.ReferenceCheck import check_reference, duplicate_names, reference_snps, listing
 from CanSNPer2 import __version__
@@ -163,6 +166,32 @@ def competing_line(competing):
     return "Competing paths: " + "; ".join(
         "{node} found/expected: {found}/{expected}".format(**path) for path in competing
     )
+
+
+## the run, the database and the reader that the workers of --jobs type with; set before the
+## workers are forked, so that each worker has its own copy (#100)
+_WORKER = None
+
+
+def _type_in_worker(q):
+    """type one query in a worker of --jobs and return the entries of its sample"""
+    obj, database, alignment_reader = _WORKER
+    before = LogSetup.quiet_warning_count()
+    error = None
+    try:
+        obj.type_query(q, database, alignment_reader)
+    except CanSNPer2Error as e:
+        error = str(e)
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    name = obj.sample_name(q)
+    return {
+        "name": name,
+        "state": obj.sample_state(name),
+        "error": error,
+        "hidden": LogSetup.quiet_warning_count() - before,
+    }
 
 
 @dataclass
@@ -347,6 +376,7 @@ class CanSNPer2(object):
         self.annotations = annotations or []
         self.keep_temp = kwargs.get("keep_temp", False)
         self.keep_going = keep_going
+        self.jobs = max(1, int(kwargs.get("jobs") or 1))  ## samples typed at the same time (#100)
 
         if kwargs.get("summary", False):
             self.summary = True
@@ -581,8 +611,10 @@ class CanSNPer2(object):
         To run subprocesses securely this function uses Popen with an argument list; stderr
         is passed to the stdout of the process, which goes to one log file per alignment.
 
-        The number of processes is the number of references in the database; there is no
-        further limit, the OS distributes the processes.
+        For assemblies, at most --threads alignments run at the same time (each aligner runs
+        with one thread); the others wait and start as alignments finish (#100). Read mappings
+        all run at the same time, since the threads of the sample are divided between them.
+        --alignment-timeout counts from the start of each alignment.
 
         names holds (reference, query) for each command, used in the messages. Returns 0
         when every process succeeded, a code of self.aligner.retry_codes when a process
@@ -599,7 +631,11 @@ class CanSNPer2(object):
         logger.info("Starting {program} on {n} references".format(program=program, n=len(commands)))
         running_names = []  # reference/query name of each running alignment, parallel to processes
         logpaths = []  # log path of each running alignment, parallel to processes
-        for i in range(len(commands)):  # Loop through commands,
+        starts = []  # start time of each running alignment, parallel to processes
+        pending = list(range(len(commands)))  # the alignments that have not started yet, in order
+        limit = len(commands) if isinstance(self.aligner, ReadMapper) else max(1, int(self.threads))
+
+        def start(i):
             command = commands[i]
             logger.debug(command)  ## In verbose mode print the actual command
             ## stdout/stderr go straight to the log file: a pipe buffer would fill up and
@@ -612,6 +648,10 @@ class CanSNPer2(object):
             processes.append(p)
             running_names.append(names[i])
             logpaths.append(logs[i])
+            starts.append(time())
+
+        while pending and len(processes) < limit:
+            start(pending.pop(0))
 
         ## SIGTERM (timeout, cluster schedulers, kill) ends the process at once and would leave every
         ## aligner child running unattended, so route it through the cleanup below (issue #151)
@@ -623,10 +663,9 @@ class CanSNPer2(object):
             old_sigterm = signal.signal(signal.SIGTERM, stop_on_sigterm)
         except ValueError:
             logger.debug("SIGTERM handling is only possible in the main thread, no child cleanup installed")
-        started = time()
         try:
             while processes:
-                if self.alignment_timeout and time() - started > self.alignment_timeout:
+                if self.alignment_timeout and any(time() - s > self.alignment_timeout for s in starts):
                     """an aligner that never returns used to hang the whole run"""
                     for idx in range(len(processes)):
                         ref_name, query_name = running_names[idx]
@@ -645,8 +684,8 @@ class CanSNPer2(object):
                         except Exception:
                             p.kill()
                         logfiles[idx].close()
-                    error += len(processes)
-                    processes, logfiles, running_names, logpaths = [], [], [], []
+                    error += len(processes) + len(pending)  ## the waiting alignments are not started
+                    processes, logfiles, running_names, logpaths, starts, pending = [], [], [], [], [], []
                     break
                 finished = False
                 for idx in range(
@@ -692,6 +731,9 @@ class CanSNPer2(object):
                         logfiles.pop(idx)
                         running_names.pop(idx)
                         logpaths.pop(idx)
+                        starts.pop(idx)
+                while pending and len(processes) < limit:  ## the next alignments take the free places
+                    start(pending.pop(0))
                 if (
                     not finished
                 ):  ## the poll loop would otherwise run flat out while the aligner works (issue #152)
@@ -1434,6 +1476,10 @@ class CanSNPer2(object):
         cache_dir = os.path.join(self.refdir, LOCAL_FOLDER, "lift")
         if not os.access(os.path.join(self.refdir, LOCAL_FOLDER), os.W_OK):
             cache_dir = os.path.join(self.tmpdir, "lift")
+        """the screen and lift files of this sample, apart from those of samples that --jobs types
+			at the same time (#100)"""
+        scratch = os.path.join(self.tmpdir, "local_{name}".format(name=sample.name))
+        os.makedirs(scratch, exist_ok=True)
         for round_number in range(1, self.local_rounds + 1):
             states, _info, called = states_from_rows(site_rows)
             call = self.provisional_call(states, called)
@@ -1472,7 +1518,7 @@ class CanSNPer2(object):
                     genomes,
                     preset=PLATFORMS[mapper.platform]["preset"],
                     n_reads=n_reads,
-                    tmpdir=self.tmpdir,
+                    tmpdir=scratch,
                     threads=mapper.threads,
                     minimap2=mapper.executable(),
                 )
@@ -1509,7 +1555,7 @@ class CanSNPer2(object):
                 snps = self.reference_snps.get(ref_name, [])
                 if snps:
                     lifts[ref_name] = lift(
-                        os.path.join(self.refdir, ref), local.path, snps, cache_dir, self.tmpdir
+                        os.path.join(self.refdir, ref), local.path, snps, cache_dir, scratch
                     )
             if not self.local_reference_fits(database, local, lifts):
                 logger.warning(
@@ -2012,32 +2058,94 @@ class CanSNPer2(object):
                         program=self.aligner.name,
                     )
                 )
-            for q in self.query:  ## For each query file_path
-                try:
-                    self.query_name = self.sample_name(q)  ## get name of file and remove ending
-                    if self.is_read(q):
-                        """the mapper and the thresholds of the platform of this sample"""
-                        self.aligner = self.read_mappers[self.read_samples[q].platform]
-                        alignment_reader = self.aligner.reader(database=database, verbose=self.verbose)
-                    self.type_sample(q, database, alignment_reader)
-                except Exception as e:
-                    """log the real failure before wrapping it, otherwise the cause is invisible (issue #121)"""
-                    logger.debug("Traceback for {file}".format(file=self.query_name), exc_info=True)
-                    logger.error("Error while processing {file}: {err}".format(file=self.query_name, err=e))
-                    self.not_typed[self.query_name] = "failed: {err}".format(err=e)
-                    if not self.keep_going:
-                        raise CanSNPer2Error(
-                            "A query could not be typed and the run was stopped; use --keep-going to continue with the next query"
-                        ) from e
-                    logger.warning(
-                        "An error occured during processing of {file}, continuing!".format(
-                            file=self.query_name
-                        )
-                    )
-                    self.add_sample_report(
-                        self.query_name, "failed", "NA", "NA", ["processing failed: {err}".format(err=e)]
-                    )
+            if self.jobs > 1 and len(self.query) > 1:
+                self.type_in_parallel(database, alignment_reader)
+            else:
+                for q in self.query:  ## For each query file_path
+                    alignment_reader = self.type_query(q, database, alignment_reader)
         self.finish_run()
+
+    def type_query(self, q, database, alignment_reader):
+        """Type one query, and handle its failure: the run stops, or with --keep-going the
+        sample is reported as failed. Returns the reader of the alignment files, which is the
+        mapper of the platform for a read sample."""
+        try:
+            self.query_name = self.sample_name(q)  ## get name of file and remove ending
+            if self.is_read(q):
+                """the mapper and the thresholds of the platform of this sample"""
+                self.aligner = self.read_mappers[self.read_samples[q].platform]
+                alignment_reader = self.aligner.reader(database=database, verbose=self.verbose)
+            self.type_sample(q, database, alignment_reader)
+        except Exception as e:
+            """log the real failure before wrapping it, otherwise the cause is invisible (issue #121)"""
+            logger.debug("Traceback for {file}".format(file=self.query_name), exc_info=True)
+            logger.error("Error while processing {file}: {err}".format(file=self.query_name, err=e))
+            self.not_typed[self.query_name] = "failed: {err}".format(err=e)
+            if not self.keep_going:
+                raise CanSNPer2Error(
+                    "A query could not be typed and the run was stopped; use --keep-going to continue with the next query"
+                ) from e
+            logger.warning(
+                "An error occured during processing of {file}, continuing!".format(file=self.query_name)
+            )
+            self.add_sample_report(
+                self.query_name, "failed", "NA", "NA", ["processing failed: {err}".format(err=e)]
+            )
+        return alignment_reader
+
+    ## what typing a sample records about it, per sample name; a worker of --jobs returns its
+    ## entries and the run takes them over, in the order of the queries (#100)
+    SAMPLE_STATE = (
+        "typed",
+        "not_typed",
+        "skipped",
+        "sample_reports",
+        "result_paths",
+        "sample_supports",
+        "sample_json",
+        "sample_competing",
+    )
+
+    def sample_state(self, name):
+        """the entries the typing of sample name made"""
+        state = {attr: getattr(self, attr)[name] for attr in self.SAMPLE_STATE if name in getattr(self, attr)}
+        state["reused"] = name in self.reused
+        return state
+
+    def take_sample_state(self, name, state):
+        """take over the entries of a sample typed in a worker"""
+        for attr in self.SAMPLE_STATE:
+            if attr in state:
+                getattr(self, attr)[name] = state[attr]
+        if state.get("reused"):
+            self.reused.add(name)
+
+    def type_in_parallel(self, database, alignment_reader):
+        """--jobs: the samples are typed in worker processes, --jobs at a time. Each worker
+        returns the entries of its sample, and they are taken over in the order of the queries,
+        so that the summary, summary.html and run.json list the samples as a run of one job
+        does. A sample that fails without --keep-going stops the run; samples already being
+        typed in other workers are finished, the ones not started are not typed."""
+        global _WORKER
+        _WORKER = (self, database, alignment_reader)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        workers = min(self.jobs, len(self.query))
+        logger.info("Typing {n} samples, {k} at a time (--jobs)".format(n=len(self.query), k=workers))
+        with ProcessPoolExecutor(max_workers=workers, mp_context=_MP_CTX) as pool:
+            futures = [pool.submit(_type_in_worker, q) for q in self.query]
+            try:
+                for future in futures:
+                    outcome = future.result()
+                    self.take_sample_state(outcome["name"], outcome["state"])
+                    if outcome["hidden"] and LogSetup.console_filter is not None:
+                        LogSetup.console_filter.hidden += outcome["hidden"]
+                    if outcome["error"]:
+                        raise CanSNPer2Error(outcome["error"])
+            finally:
+                for future in futures:
+                    future.cancel()
+                _WORKER = None
 
     def prepare_queries(self):
         """Resolve the queries of the run into samples and check them, the database and the
