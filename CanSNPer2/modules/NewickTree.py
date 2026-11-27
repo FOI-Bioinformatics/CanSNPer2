@@ -747,6 +747,7 @@ tr.selected { background: #e8f0fe; }
 .sev-review { background: #b45309; }
 .sev-clean { background: #2e8b57; }
 .sev-reused { background: #8a9099; }
+.earlier { display: inline-block; border: 1px solid #8a9099; border-radius: 999px; padding: 0 6px; font-size: 11px; color: #5f6670; }
 .warn { color: #b45309; font-weight: 600; }
 @media print {
   #side { width: auto; border: none; display: block; }
@@ -793,7 +794,8 @@ tr.selected { background: #e8f0fe; }
 <div><span class="badge sev-review">review</span>SNP path confirmed, but SNPs on it have no alignment data or lie near an alignment edge, or derived SNPs lie outside it.</div>
 <div><span class="badge sev-notcalled">not called</span>No SNP path met min_required_hits and strictness, no derived SNP was found, or two SNP paths competed at the same depth.</div>
 <div><span class="badge sev-failed">failed</span>The alignment or the processing of the sample failed.</div>
-<div><span class="badge sev-reused">reused</span>Result read from an earlier run; --rerun computes it again and shows it in the tree.</div>
+<div><span class="badge sev-reused">reused</span>Result read from an earlier run that has no sample JSON (made before CanSNPer2 2.6.0), so its status is not known; --rerun computes it again and shows it in the tree.</div>
+<div><span class="earlier">earlier run</span> The result was typed by an earlier run in the same output folder and is shown as that run reported it; --rerun types the sample again.</div>
 </details>
 <input id="search" type="text" placeholder="Filter samples by name">
 <input id="pathFilter" type="text" placeholder="Filter by any SNP in the path, e.g. B.33 (also one not shown)">
@@ -821,18 +823,23 @@ order.sort(function(a, b){
 	if (ra !== rb) { return ra - rb; }
 	return sa.name < sb.name ? -1 : 1;
 });
-var counts = {};
-samples.forEach(function(s){ counts[s.severity] = (counts[s.severity] || 0) + 1; });
+var counts = {}, earlier = 0;
+samples.forEach(function(s){ counts[s.severity] = (counts[s.severity] || 0) + 1; if (s.reused) { earlier++; } });
 document.getElementById("title").textContent = "CanSNPer2 results" + (INFO.scheme ? ": " + INFO.scheme : "");
 document.getElementById("counts").innerHTML = samples.length + " samples: "
 	+ "<b>" + (counts["clean"] || 0) + "</b> clean, "
 	+ "<b>" + (counts["review"] || 0) + "</b> review, "
 	+ "<b>" + (counts["not called"] || 0) + "</b> not called, "
-	+ "<b>" + (counts["failed"] || 0) + "</b> failed, "
-	+ "<b>" + (counts["reused"] || 0) + "</b> reused";
+	+ "<b>" + (counts["failed"] || 0) + "</b> failed"
+	+ (counts["reused"] ? ", <b>" + counts["reused"] + "</b> reused" : "")
+	+ (earlier ? "; <b>" + earlier + "</b> from an earlier run" : "");
 provHtml();
 legendHtml([["derived", "Derived"], ["ancestral", "Ancestral"], ["other_base", "Other base"], ["no_data", "No alignment data"], ["untested", "Not tested"], ["path", "SNP path"], ["edge", "Near an alignment edge"]]);
 function called(s){ return s.final && s.final !== "NA"; }
+function earlierMark(s){
+	if (!s.reused || s.severity === "reused") { return ""; }
+	return ' <span class="earlier" title="typed by an earlier run' + (s.earlier_run ? " (" + esc(s.earlier_run) + ")" : "") + '; --rerun types it again">earlier run</span>';
+}
 function support(s){ return called(s) && s.support ? s.support : "NA"; }
 function noData(s){ return called(s) && s.path_no_data ? String(s.path_no_data.length) : "NA"; }
 function pathOf(s){
@@ -890,9 +897,10 @@ function paint(i){
 	if (called(s)) { line += " &middot; Support " + esc(support(s)) + " &middot; No data " + esc(noData(s)); }
 	var path = pathOf(s);
 	var head = called(s) ? "SNP path, root to final SNP" : (path.length ? "Derived SNPs (no SNP path confirmed)" : "SNP path");
-	document.getElementById("detail").innerHTML = "<h2>" + esc(s.name) + ' <span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span></h2>"
+	var from = s.reused && s.severity !== "reused" ? '<div class="line">Typed by an earlier run in this folder' + (s.earlier_run ? " (" + esc(s.earlier_run) + ")" : "") + "; --rerun types it again.</div>" : "";
+	document.getElementById("detail").innerHTML = "<h2>" + esc(s.name) + ' <span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span>" + earlierMark(s) + "</h2>"
 		+ '<details><summary>details, files and SNP path</summary>'
-		+ '<div class="line">' + line + "</div>" + reasons
+		+ '<div class="line">' + line + "</div>" + from + reasons
 		+ (links.length ? '<div class="links">' + links.join(" &middot; ") + "</div>" : "")
 		+ '<div class="panelTitle">' + head + "</div>" + pathHtml(path, s.final)
 		+ "</details>";
@@ -926,7 +934,7 @@ function buildTable(filter, snpFilter){
 		var note = (s.reasons || []).length ? ' <span class="warn" title="' + esc(s.reasons.join("; ")) + '">&#9888; ' + s.reasons.length + "</span>" : "";
 		tr.innerHTML = '<td class="cut" title="' + esc(s.name) + '">' + esc(s.name) + '</td><td class="cut" title="' + esc(s.final) + '">' + esc(s.final) + "</td>"
 			+ '<td class="num">' + esc(support(s)) + '</td><td class="num">' + esc(noData(s)) + "</td>"
-			+ '<td><span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span>" + note + "</td>";
+			+ '<td><span class="badge ' + SEVCLS[s.severity] + '">' + esc(s.severity) + "</span>" + note + earlierMark(s) + "</td>";
 		tr.onclick = function(){ paint(i); };
 		rows.appendChild(tr);
 	});

@@ -98,6 +98,7 @@ def test_run_json_lists_every_sample_with_the_failed_one(tmp_path):
         "failed": 1,
         "reused": 0,
     }
+    assert [s["reused"] for s in document["samples"]] == [False, False]
     assert document["settings"] == {
         "min_required_hits": 2,
         "strictness": 0.7,
@@ -119,9 +120,9 @@ def test_a_reused_sample_keeps_its_json(tmp_path):
     assert pathlib.Path(path).read_text() == first
     document = load(os.path.join(again.outdir, "run.json"))
     validate(document, "cansnper2-run")
-    assert (
-        document["samples"][0]["status"] == "reused" and document["samples"][0]["result"] == "samples/x.json"
-    )
+    """the sample keeps the status of the earlier run and is marked as reused (#117)"""
+    assert document["samples"][0]["status"] == "clean" and document["samples"][0]["reused"] is True
+    assert document["samples"][0]["result"] == "samples/x.json"
     assert document["samples"][0]["support"] == {"found": 2, "expected": 2}
 
 

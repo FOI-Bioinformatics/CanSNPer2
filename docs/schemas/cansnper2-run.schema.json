@@ -26,20 +26,22 @@
     "counts": {
       "type": "object",
       "required": ["samples", "clean", "review", "not called", "failed", "reused"],
-      "additionalProperties": {"type": "integer", "minimum": 0}
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "description": "clean, review, not called and failed count the samples by status; reused counts the samples whose result was taken from an earlier run, whatever their status"
     },
     "samples": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["sample", "status", "final_snp", "support", "snp_path", "reasons", "result"],
+        "required": ["sample", "status", "final_snp", "support", "snp_path", "reasons", "reused", "result"],
         "properties": {
           "sample": {"type": "string"},
-          "status": {"enum": ["clean", "review", "not called", "failed", "reused"]},
+          "status": {"enum": ["clean", "review", "not called", "failed", "reused"], "description": "reused only for an earlier result without its sample JSON, which holds no status"},
           "final_snp": {"type": ["string", "null"]},
           "support": {"$ref": "cansnper2-sample.schema.json#/$defs/support"},
           "snp_path": {"type": "array", "items": {"type": "string"}},
           "reasons": {"type": "array", "items": {"type": "string"}},
+          "reused": {"type": "boolean", "description": "the result was taken from an earlier run in the same --outdir"},
           "result": {"type": ["string", "null"], "description": "samples/<sample>.json, relative to --outdir"}
         }
       }

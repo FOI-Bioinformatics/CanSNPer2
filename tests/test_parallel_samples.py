@@ -110,10 +110,12 @@ def test_a_sample_that_fails_while_it_is_typed_is_reported_with_keep_going(tmp_p
 
 
 def test_jobs_reuse_earlier_results(tmp_path):
-    typed_samples(tmp_path, jobs=2)
+    first = typed_samples(tmp_path, jobs=2)
     again = typed_samples(tmp_path, jobs=2)
     assert again.reused == {"a", "b", "c", "d"}
-    assert again.sample_reports["a"]["severity"] == "reused"
+    """a reused sample keeps the status the earlier run gave it (#117)"""
+    assert again.sample_reports["a"]["severity"] == first.sample_reports["a"]["severity"] == "clean"
+    assert again.sample_reports["a"]["reused"] is True
 
 
 # --threads limits the alignments of one assembly that run at the same time

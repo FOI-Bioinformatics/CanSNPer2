@@ -203,8 +203,11 @@ run that stops with an error writes none. It is a single HTML file that opens in
 
 `Status` is the call status: `clean`, `review` or `not called`, and in addition `failed` (the
 alignment or processing of the sample failed) and `reused` (the result was read from an earlier
-run). The rules are given in [method.md](method.md#call-status). Each `review` and `not called`
-row lists its reasons.
+run that has no sample JSON, so its status is not known). The rules are given in
+[method.md](method.md#call-status). Each `review` and `not called` row lists its reasons. A sample
+whose result was taken from an earlier run in the same output folder keeps the status, reasons
+and tree of that run and is marked `earlier run`; the counts at the top give how many samples
+came from an earlier run (see [Results from an earlier run](#results-from-an-earlier-run)).
 
 The button `Download table (TSV)` saves the table as a tab-separated file with the run
 information as `#` lines and the columns `sample`, `final_snp`, `support`, `no_data`, `status`,
@@ -317,10 +320,12 @@ Written in `--outdir` for every run with a sample, also with `--no-snp-files`. I
 `format` (`cansnper2-run`), `format_version`, `cansnper2_version`, `date`, `database` (as above),
 `settings` (`min_required_hits`, `strictness`, `mask`, `aligner`), `read_settings` (one entry
 per read platform of the run, as the `# Read settings:` lines of `snps_summary.txt`), `counts`
-(the number of `samples` and of each status: `clean`, `review`, `not called`, `failed`,
-`reused`) and `samples`. Each entry of `samples` gives `sample`, `status`, `final_snp`,
-`support`, `snp_path`, `reasons` and `result`, the path of `samples/<sample>.json` relative to
-`--outdir` or `null` when there is none.
+(the number of `samples`, of each status `clean`, `review`, `not called` and `failed`, and
+`reused`, the number of samples whose result was taken from an earlier run, whatever their
+status) and `samples`. Each entry of `samples` gives `sample`, `status`, `final_snp`, `support`,
+`snp_path`, `reasons`, `reused` (`true` when the result was taken from an earlier run) and
+`result`, the path of `samples/<sample>.json` relative to `--outdir` or `null` when there is
+none. `status` is `reused` only for an earlier result without its sample JSON.
 
 ## MultiQC table (--summary)
 
@@ -393,10 +398,21 @@ from another query file with the same sample name.
 ## Results from an earlier run
 
 When `<sample>_snps.txt` already exists in the output folder, the sample is not typed again: its
-call is read from the file, printed with `(from an earlier run, use --rerun to type it again)`,
-and shown as `reused` in `summary.html`. The earlier file is used only when its `# Query file:`
-sha256 and its `# Typing settings:` line match the current run; otherwise the run stops and asks
-for `--rerun` or another `--outdir`. `--rerun` types all samples again and replaces their files.
+call is read from the file and printed with `(earlier run)`, and the end of the run says how many
+samples were taken from an earlier run and that `--rerun` types them again. The earlier file is
+used only when its `# Query file:` sha256 and its `# Typing settings:` line match the current
+run; otherwise the run stops and asks for `--rerun` or another `--outdir`. `--rerun` types all
+samples again and replaces their files.
+
+So samples can be added to a folder and typed into the same output folder: the samples typed
+before are reported with the result of the run that typed them. `summary.html`, `run.json` and
+`snps_summary.txt` list every sample. The status, reasons, support and site states of an earlier
+sample are read from its `samples/<sample>.json`, which is used only when it records the same
+input (sha256) and the same final SNP as `<sample>_snps.txt`; the sample is then counted under
+its status, drawn in the tree and marked `earlier run`, with the date of that run. Without a
+usable sample JSON (a result from a version before 2.6.0, or from a run with `--no-snp-files`,
+which writes neither file) the sample is shown with the status `reused`, its final SNP and SNP
+path, and no tree.
 
 For assemblies the aligner is part of the `# Typing settings:` line, so a run with another
 `--aligner` into the same output folder stops instead of reusing the result. A result file
