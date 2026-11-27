@@ -12,6 +12,7 @@ import zlib
 import shutil
 import hashlib
 import datetime
+import json
 from dataclasses import dataclass, field
 import tempfile
 import logging
@@ -2059,12 +2060,14 @@ class CanSNPer2(object):
         support="NA",
         path_no_data=None,
         path_snps=None,
+        reused=False,
     ):
         """one row of the results dashboard: what the sample became, why a manual look may be
         wanted, and the SNP states the embedded tree paints when it is selected. support is
         found/n, the derived SNPs on the SNP path out of the SNPs on it (NA when not called),
         path_no_data the SNPs on the SNP path without alignment data and path_snps the SNP
-        path with the bases of each SNP (NewickTree.path_details)"""
+        path with the bases of each SNP (NewickTree.path_details); reused marks a sample whose
+        result was taken from an earlier run (#117)"""
         self.sample_reports[name] = {
             "name": name,
             "severity": severity,
@@ -2077,6 +2080,7 @@ class CanSNPer2(object):
             "no_data": sorted(no_data or []),
             "support": support,
             "path_no_data": list(path_no_data or []),
+            "reused": reused,
         }
         if path_snps is not None:
             self.sample_reports[name]["path_snps"] = list(path_snps)
@@ -2120,8 +2124,10 @@ class CanSNPer2(object):
             if os.path.isfile(path):
                 sample_files[name] = self.relative_output(path)
         counts = {"samples": len(reports)}
-        for status in ("clean", "review", "not called", "failed", "reused"):
+        for status in ("clean", "review", "not called", "failed"):
             counts[status] = sum(1 for report in reports if report.get("severity") == status)
+        """reused counts the samples taken from an earlier run, whatever their status (#117)"""
+        counts["reused"] = sum(1 for report in reports if report.get("reused"))
         info = self.run_info()
         ResultJSON.write_json(
             os.path.join(self.outdir, "run.json"),
@@ -2184,12 +2190,26 @@ class CanSNPer2(object):
             alignment_reader = self.aligner.reader(database=database, mask=self.mask, verbose=self.verbose)
             """Walk through the list of queries supplied"""
             if not self.skip_alignment:
+                """the queries with a result from an earlier run are not aligned again (#117)"""
+                earlier = (
+                    0
+                    if self.rerun
+                    else sum(
+                        1 for q in self.query if self.sample_output_exists(self.sample_name(q), "_snps.txt")
+                    )
+                )
+                count = len(self.query) - earlier
                 print(
-                    "Run alignments for {queries} {noun} against the references in {refdir} using {program}".format(
-                        queries=len(self.query),
+                    "Run alignments for {queries} {noun} against the references in {refdir} using {program}{note}".format(
+                        queries="{0} of {1}".format(count, len(self.query)) if earlier else count,
                         noun="query" if len(self.query) == 1 else "queries",
                         refdir=self.refdir,
                         program=self.aligner.name,
+                        note="; {0} {1} a result from an earlier run".format(
+                            earlier, "has" if earlier == 1 else "have"
+                        )
+                        if earlier
+                        else "",
                     )
                 )
             if self.jobs > 1 and len(self.query) > 1:
@@ -2373,30 +2393,56 @@ class CanSNPer2(object):
                     outputfile=outputfile
                 )
             )
-        logger.debug("{outputfile} already exits, skip!".format(outputfile=outputfile))
-        """the skip used to be a debug line, so a run that typed nothing said nothing
-			after announcing the alignments (issue #78); the call of the earlier run is
-			printed like a computed one, with what to do to recompute it"""
-        self.skipped[self.query_name] = "{outputfile} already exists, use --rerun".format(
-            outputfile=outputfile
-        )
+        logger.debug("{outputfile} already exists, its result is used".format(outputfile=outputfile))
         self.reused.add(self.query_name)
-        """the dashboard lists reused samples too, but without states: the tree cannot
-			paint a result it did not compute in this run"""
         old_final, old_path = self.read_result_file(outputfile)
-        print(
-            "{query}: {SNP} (from an earlier run, use --rerun to type it again)".format(
-                query=self.query_name, SNP=old_final
-            )
-        )
+        """the call of the earlier run is printed like a computed one (issue #78); the --rerun
+			hint is given once at the end of the run (#117)"""
+        print("{query}: {SNP} (earlier run)".format(query=self.query_name, SNP=old_final))
+        restored = self.earlier_report(old_final)
+        if restored is not None:
+            """the sample is reported as the earlier run reported it: status, reasons and site
+				states, so that it is counted under its status and drawn in the tree (#117)"""
+            report, competing, date = restored
+            report["reused"] = True
+            report["earlier_run"] = date
+            self.sample_reports[self.query_name] = report
+            self.sample_competing[self.query_name] = competing
+            return
+        """a result without its sample JSON (made before 2.6.0) holds the call and the SNP path
+			only, so the sample is listed without status and site states"""
         self.add_sample_report(
             self.query_name,
             "reused",
             old_final,
             old_path,
-            ["result from an earlier run, use --rerun to recompute it and see it in the tree"],
+            [
+                "result from an earlier run without its sample JSON, use --rerun to recompute it and see it in the tree"
+            ],
             support=self.read_result_support(outputfile),
+            reused=True,
         )
+
+    def earlier_report(self, final_snp):
+        """(report, competing paths, date) of the sample from the samples/<sample>.json of the
+        run that typed it, or None when there is none, it cannot be read, or it does not belong
+        to the result file: another input, or another final SNP"""
+        path = self.sample_output(self.query_name, ".json")
+        try:
+            with open(path) as fin:
+                document = json.load(fin)
+            if document.get("format") != "cansnper2-sample":
+                return None
+            if (document.get("input") or {}).get("sha256") != self.query_sha256:
+                return None
+            if (document.get("final_snp") or "NA") != final_snp:
+                return None
+            report, competing = ResultJSON.report_from_sample(document)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            logger.debug("{path} is not used: {e}".format(path=path, e=e))
+            return None
+        report["name"] = self.query_name
+        return report, competing, document.get("date")
 
     def align_sample(self, q):
         """Align the sample to every reference genome (map its reads), or with --skip-alignment
@@ -2732,13 +2778,22 @@ class CanSNPer2(object):
 			"finished successfully" and exit code 0 (issue #191)"""
         if len(self.query) > 0:
             logger.info(
-                "{typed} of {n} samples were typed, {na} were not called, {skipped} were skipped".format(
+                "{typed} of {n} samples were typed, {reused} were taken from an earlier run, {na} were not called, {skipped} were skipped".format(
                     typed=len(self.typed),
                     n=len(self.query),
+                    reused=len(self.reused),
                     na=len(self.not_typed),
                     skipped=len(self.skipped),
                 )
             )
+            if self.reused:
+                print(
+                    "{n} {samples} taken from an earlier run in this folder; use --rerun to type {them} again".format(
+                        n=len(self.reused),
+                        samples="sample was" if len(self.reused) == 1 else "samples were",
+                        them="it" if len(self.reused) == 1 else "them",
+                    )
+                )
             if not self.typed and not self.reused:
                 reasons = [
                     "{sample}: {why}".format(sample=sample, why=why)

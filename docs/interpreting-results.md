@@ -38,7 +38,11 @@ Support is a count, not a probability. A short path (a node near the root) has a
 | `review` | A final SNP was called, but at least one of the conditions above does not hold. | Read the reasons, and look at the sample in the tree of `summary.html` and in its result files (sections below). |
 | `not called` | No final SNP (`NA`). | See [NA results](#na-results). |
 | `failed` | The alignment, the mapping or the processing of the sample failed. | Read the log of the sample in `--log-dir`. |
-| `reused` | The result was read from an earlier run in the same output folder. | Type again with `--rerun` to see the sample in the tree. |
+| `reused` | The result was read from an earlier run in the same output folder that left no sample JSON (before 2.6.0), so its status is not known. | Type again with `--rerun` to see its status and the sample in the tree. |
+
+A sample whose result was taken from an earlier run in the same output folder normally keeps the
+status that run gave it, with its reasons and tree, and is marked `earlier run` in `summary.html`
+and `"reused": true` in `run.json`.
 
 ## Reasons for review
 

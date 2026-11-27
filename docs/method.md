@@ -363,7 +363,7 @@ not typed in the run:
 | Status | Condition |
 |---|---|
 | `failed` | The alignment or mapping produced no output (with `--keep-going`), or the processing of the sample failed. |
-| `reused` | The result file of an earlier run in the same `--outdir` was read instead of typing the sample again. A result file made from another input file (by sha256) or with another database or settings stops the run instead; a result file from an older version that records neither is reused as it is. For assemblies the aligner is one of the settings (see [output-formats.md](output-formats.md#results-from-an-earlier-run)). `--rerun` types the sample again. |
+| `reused` | The result file of an earlier run in the same `--outdir` was read instead of typing the sample again, and the earlier run left no sample JSON to restore its status from (versions before 2.6.0). With a sample JSON the sample keeps the status of the earlier run and is only marked as coming from it. A result file made from another input file (by sha256) or with another database or settings stops the run instead; a result file from an older version that records neither is reused as it is. For assemblies the aligner is one of the settings (see [output-formats.md](output-formats.md#results-from-an-earlier-run)). `--rerun` types the sample again. |
 
 Sources of no data at a canSNP, as named in the result files and the log:
 

@@ -49,6 +49,13 @@ Git history.
   `--aligner progressiveMauve` gives the earlier behavior.
 - The overview page `summary.html` shows the tree of every sample; a separate tree page per
   sample is written with `--save-tree`.
+- A sample whose result is taken from an earlier run in the same output folder keeps the status,
+  reasons, support and tree of that run, read from its `samples/<sample>.json`, and is marked
+  `earlier run` in `summary.html` and `"reused": true` in `run.json`, where `counts.reused` gives
+  their number apart from the status counts. It used to be shown with the status `reused` and
+  without a tree, so adding samples to a folder made the earlier ones look untyped (#117). The
+  `--rerun` hint is printed once at the end of the run instead of on every sample, and the line
+  that announces the alignments counts only the samples that are aligned.
 - Log files are named after the verb, for example `cansnper2-type-<date>.log`.
 - The documentation was reorganized into a short README and topic pages in `docs/`, including a
   command line reference generated from the program (`docs/cli.md`), a description of the typing

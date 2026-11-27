@@ -122,6 +122,40 @@ def sample_document(
     }
 
 
+STATE_NUMBERS = {name: number for number, name in STATE_NAMES.items()}
+
+
+def report_from_sample(document):
+    """the sample report of summary.html, and the competing paths, as the run that wrote
+    samples/<sample>.json made them (#117): the inverse of sample_document, so that a sample
+    whose result is used again is reported with its status, reasons and site states"""
+    support = document.get("support")
+    report = {
+        "name": document["sample"],
+        "severity": document["status"],
+        "final": document.get("final_snp") or "NA",
+        "path": ";".join(document.get("snp_path") or []) or "NA",
+        "reasons": list(document.get("reasons") or []),
+        "states": {snp: STATE_NUMBERS[state] for snp, state in (document.get("site_states") or {}).items()},
+        "called": list(document.get("derived_cansnps") or []),
+        "edge": sorted(document.get("edge_flagged") or []),
+        "no_data": sorted(document.get("no_data_cansnps") or []),
+        "support": "{found}/{expected}".format(**support) if support else "NA",
+        "path_no_data": list(document.get("path_no_data") or []),
+        "path_snps": list(document.get("path_snps") or []),
+    }
+    competing = [
+        {
+            "node": path["node"],
+            "found": path["support"]["found"],
+            "expected": path["support"]["expected"],
+            "no_data": list(path.get("path_no_data") or []),
+        }
+        for path in document.get("competing_paths") or []
+    ]
+    return report, competing
+
+
 def run_document(info, reports, sample_files, counts):
     """run.json: the run information and one entry per sample, in the order of the run.
     sample_files: the samples/<sample>.json path of each sample that has one, relative to
@@ -150,6 +184,7 @@ def run_document(info, reports, sample_files, counts):
                 "support": support_fields(report.get("support")),
                 "snp_path": [] if report.get("path") in (None, "", "NA") else report["path"].split(";"),
                 "reasons": list(report.get("reasons") or []),
+                "reused": bool(report.get("reused")),
                 "result": sample_files.get(report["name"]),
             }
             for report in reports
