@@ -53,10 +53,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install progressiveMauve, minimap2 and samtools
+      - name: Install progressiveMauve, minimap2, samtools and bcftools
         run: |
           sudo apt-get update
-          sudo apt-get install -y progressivemauve minimap2 samtools
+          sudo apt-get install -y progressivemauve minimap2 samtools bcftools
 
       - name: Install MUMmer4 from bioconda
         uses: mamba-org/setup-micromamba@v2

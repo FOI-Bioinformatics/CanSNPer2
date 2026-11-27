@@ -31,6 +31,8 @@ Git history.
   content table.
 - A sample left `NA` by confirmed paths at the same depth gets a `# Competing paths:` line in
   `<sample>_snps.txt` and `competing_paths` in its JSON, with each candidate and its support.
+- `db export --format vcf` writes the canSNPs as sites-only VCF files, one per reference genome,
+  with the reference base read from `--ref-dir`.
 
 ### Changed
 

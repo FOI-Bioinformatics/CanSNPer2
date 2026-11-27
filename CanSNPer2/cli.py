@@ -550,6 +550,7 @@ def add_db_subparsers(subparsers):
         epilog=examples(
             "cansnper2 db export -d scheme.db -o export/",
             "cansnper2 db export -d scheme.db --format newick > scheme.nwk",
+            "cansnper2 db export -d scheme.db --format vcf --ref-dir references/ -o vcf/",
         ),
         formatter_class=HelpFormatter,
     )
@@ -561,7 +562,14 @@ def add_db_subparsers(subparsers):
         help="source: the tree, canSNP, reference genome and (when the database "
         "has them) genomes files that db import reads; newick: the tree only, "
         "to <outdir>/<database>_tree.nwk, or to standard output without "
-        "-o; tab: former name of source (default: source)",
+        "-o; vcf: the canSNPs as sites-only VCF files, <outdir>/<database>_<genome>.vcf "
+        "for each reference genome; tab: former name of source (default: source)",
+    )
+    export.add_argument(
+        "--ref-dir",
+        dest="refdir",
+        metavar="DIR",
+        help="the reference genome files <genome>.fna, for --format vcf (default: references)",
     )
     export.add_argument(
         "-o", "--outdir", metavar="DIR", help="folder for the exported files (default: the current folder)"

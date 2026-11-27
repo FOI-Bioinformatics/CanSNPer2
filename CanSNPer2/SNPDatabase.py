@@ -26,6 +26,7 @@ from CanSNPer2.modules.DatabaseConnection import TreeError as DatabaseTreeError
 from CanSNPer2.modules.SourceCheck import check_modification
 from CanSNPer2.modules.ReadTaxonomyCanSNPer import InputError as TreeFileError
 from CanSNPer2.modules.ExportDatabase import export_source, tree_paths, ExportError, write_outputs
+from CanSNPer2.modules.ExportVCF import export_vcf
 from CanSNPer2.modules.ImportDatabase import import_from_sources, DatabaseImportError
 from CanSNPer2.modules.NewickTree import NewickTree
 from CanSNPer2.modules.SchemeInfo import (
@@ -59,7 +60,8 @@ def get_read_modules():
 supported_input = set(get_read_modules())
 ## "source" writes the tree, SNP and reference files that --create reads; "tab" is its old name,
 ## which wrote node and link tables that could not rebuild the database
-supported_output = ["source", "newick", "tab"]
+## "vcf" writes the canSNPs as sites-only VCF files, one per reference genome (#98)
+supported_output = ["source", "newick", "tab", "vcf"]
 
 
 import argparse
@@ -668,6 +670,18 @@ def export_database(args, logger):
     """db export"""
     outdir = args.outdir or "."  ## without -o the export goes to the current directory (issue #132)
     log_scheme_notice(args.database, logger)  ## the scheme_info table itself is not exported
+    if args.refdir and args.export_format != "vcf":
+        logger.error("--ref-dir is read by --format vcf only, for the reference bases")
+        exit(1)
+    if args.export_format == "vcf":
+        refdir = args.refdir or "references"
+        try:
+            files = export_vcf(args.database, outdir, refdir)
+        except (ExportError, OSError) as e:
+            logger.error("The database cannot be exported: {error}".format(error=e))
+            exit(1)
+        print("Exported to {files}".format(files=", ".join(files[genome] for genome in sorted(files))))
+        exit()
     if args.export_format == "newick":
         logger.info("Export Newick tree!")
         NT = NewickTree(args.database, outdir=outdir)
