@@ -216,6 +216,18 @@ def _is_cram(path):
 
 
 @dataclass
+class Alignment:
+    """one running alignment: the subprocess, the log file it writes to, the (reference, query)
+    of its command for the messages, the path of that log file, and when it started"""
+
+    process: object
+    logfile: object
+    names: tuple
+    logpath: str
+    started: float
+
+
+@dataclass
 class SampleCall:
     """the call of one sample, as CanSNPer2.call_sample makes it: the final SNP (NA without a
     call), the reason when there is none, what create_tree returned for the final SNP and the
@@ -631,6 +643,115 @@ class CanSNPer2(object):
 
     """Alignment functions"""
 
+    def start_alignment(self, command, log, names):
+        """Start one alignment as a subprocess that writes to the log file log; returns the
+        Alignment. names is the (reference, query) of the command, used in the messages."""
+        logger.debug(command)  ## In verbose mode print the actual command
+        ## stdout/stderr go straight to the log file: a pipe buffer would fill up and
+        ## block the aligner while this loop only polls for exitcodes, hanging the run (issue #68)
+        handle = open(log, "w")
+        process = Popen(
+            command, stdout=handle, stderr=STDOUT
+        )  ##command is an argument list, no shell and no fragile splitting (issue #3)
+        return Alignment(process, handle, names, log, time())
+
+    def stop_alignments(self, running):
+        """Stop the alignments in running and close their log files: they are terminated, and
+        killed when they do not end within ten seconds."""
+        for job in running:
+            if job.process.poll() is None:
+                job.process.terminate()
+        for job in running:
+            try:
+                job.process.wait(timeout=10)
+            except Exception:
+                job.process.kill()
+            job.logfile.close()
+
+    def timed_out(self, running):
+        """whether an alignment of running has been running longer than --alignment-timeout"""
+        return bool(self.alignment_timeout) and any(
+            time() - job.started > self.alignment_timeout for job in running
+        )
+
+    def stop_timed_out_alignments(self, running):
+        """--alignment-timeout: an aligner that never returns used to hang the whole run. Every
+        alignment of the round is stopped and reported, since which of them did not finish
+        within the limit is not known."""
+        for job in running:
+            ref_name, query_name = job.names
+            logger.error(
+                "{program} did not finish within {minutes:g} minutes for genome {query} against reference {ref}, it was stopped (--alignment-timeout)".format(
+                    program=self.aligner.name,
+                    minutes=self.alignment_timeout / 60,
+                    query=query_name,
+                    ref=ref_name,
+                )
+            )
+        self.stop_alignments(running)
+
+    def collect_alignments(self, running):
+        """Take the alignments that have finished out of running and report how each ended.
+        Returns (the retry code of the aligner when one of them failed in a way it retries and
+        0 otherwise, how many failed, whether any of them had finished)."""
+        program = self.aligner.name
+        retvalue, error, finished = 0, 0, False
+        for idx in range(
+            len(running) - 1, -1, -1
+        ):  ## Loop through processes, walking backwards so removals are safe
+            job = running[idx]
+            exitcode = job.process.poll()  # get exitcode for each process
+            if exitcode is None:  ## if there is no exitcode the program is still running
+                continue
+            finished = True
+            ## When a process is finished close its log file
+            job.logfile.close()
+            ref_name, query_name = job.names
+            status, code = self.aligner.exit_status(exitcode)
+            if status == "retry":
+                logger.warning(
+                    "{message} for genome {query} against reference {ref}".format(
+                        message=self.aligner.retry_message(code), query=query_name, ref=ref_name
+                    )
+                )
+                retvalue = code
+            elif status == "error":
+                if not self.keep_going:
+                    logger.error(
+                        "{program} failed with exitcode {exitcode} for {log}".format(
+                            program=program, exitcode=exitcode, log=job.logpath
+                        )
+                    )
+                error += 1
+                logger.warning(
+                    "WARNING {program} finished with a non zero exitcode: {exitcode} for genome {query} against reference {ref}\nThe script will terminate when all processes are finished read {log} for more info".format(
+                        program=program,
+                        log=job.logpath,
+                        exitcode=exitcode,
+                        query=query_name,
+                        ref=ref_name,
+                    )
+                )
+            running.pop(idx)
+        return retvalue, error, finished
+
+    def alignment_round_result(self, retvalue, error):
+        """What run_alignments returns when the round is over: the retry code of the aligner,
+        or, without --keep_going, AlignmentError when an alignment failed. With --keep_going a
+        failure is 1: it only means that a failing sample is skipped instead of stopping the
+        run, a run where every process succeeded must still report success (issue #126)"""
+        if retvalue in self.aligner.retry_codes:
+            return retvalue
+        if not self.keep_going:
+            if error:  ## stop the run if any of the alignments failed
+                message = "Error: {errors} {program} processes did not run correctly check log files for more information".format(
+                    errors=error, program=self.aligner.name
+                )
+                logger.error(message)
+                raise AlignmentError(message)
+            return retvalue
+        return 1 if error else retvalue
+
     def run_alignments(self, commands, logs, names=None):
         """Run the alignment commands as parallel subprocesses
 
@@ -646,38 +767,25 @@ class CanSNPer2(object):
         when every process succeeded, a code of self.aligner.retry_codes when a process
         failed in a way the aligner retries, and 1 when a process failed with --keep_going;
         without --keep_going a failure raises AlignmentError.
+
+        One running alignment is an Alignment; the steps are the methods above.
         """
         program = self.aligner.name
         if names is None:
             names = [self._names_from_command(command) for command in commands]
         retvalue = 0
-        processes = []  # process container
-        logfiles = []  # open log file container, parallel to processes
         error = 0  # Variable for errors
         logger.info("Starting {program} on {n} references".format(program=program, n=len(commands)))
-        running_names = []  # reference/query name of each running alignment, parallel to processes
-        logpaths = []  # log path of each running alignment, parallel to processes
-        starts = []  # start time of each running alignment, parallel to processes
-        pending = list(range(len(commands)))  # the alignments that have not started yet, in order
+        running = []  # the alignments that are running
+        pending = list(zip(commands, logs, names))  # the alignments that have not started yet, in order
         limit = len(commands) if isinstance(self.aligner, ReadMapper) else max(1, int(self.threads))
 
-        def start(i):
-            command = commands[i]
-            logger.debug(command)  ## In verbose mode print the actual command
-            ## stdout/stderr go straight to the log file: a pipe buffer would fill up and
-            ## block the aligner while this loop only polls for exitcodes, hanging the run (issue #68)
-            log = open(logs[i], "w")
-            p = Popen(
-                command, stdout=log, stderr=STDOUT
-            )  ##command is an argument list, no shell and no fragile splitting (issue #3)
-            logfiles.append(log)
-            processes.append(p)
-            running_names.append(names[i])
-            logpaths.append(logs[i])
-            starts.append(time())
+        def start_waiting():
+            """the next alignments take the free places"""
+            while pending and len(running) < limit:
+                running.append(self.start_alignment(*pending.pop(0)))
 
-        while pending and len(processes) < limit:
-            start(pending.pop(0))
+        start_waiting()
 
         ## SIGTERM (timeout, cluster schedulers, kill) ends the process at once and would leave every
         ## aligner child running unattended, so route it through the cleanup below (issue #151)
@@ -690,76 +798,16 @@ class CanSNPer2(object):
         except ValueError:
             logger.debug("SIGTERM handling is only possible in the main thread, no child cleanup installed")
         try:
-            while processes:
-                if self.alignment_timeout and any(time() - s > self.alignment_timeout for s in starts):
-                    """an aligner that never returns used to hang the whole run"""
-                    for idx in range(len(processes)):
-                        ref_name, query_name = running_names[idx]
-                        logger.error(
-                            "{program} did not finish within {minutes:g} minutes for genome {query} against reference {ref}, it was stopped (--alignment-timeout)".format(
-                                program=program,
-                                minutes=self.alignment_timeout / 60,
-                                query=query_name,
-                                ref=ref_name,
-                            )
-                        )
-                        processes[idx].terminate()
-                    for idx, p in enumerate(processes):
-                        try:
-                            p.wait(timeout=10)
-                        except Exception:
-                            p.kill()
-                        logfiles[idx].close()
-                    error += len(processes) + len(pending)  ## the waiting alignments are not started
-                    processes, logfiles, running_names, logpaths, starts, pending = [], [], [], [], [], []
+            while running:
+                if self.timed_out(running):
+                    self.stop_timed_out_alignments(running)
+                    error += len(running) + len(pending)  ## the waiting alignments are not started
+                    running, pending = [], []
                     break
-                finished = False
-                for idx in range(
-                    len(processes) - 1, -1, -1
-                ):  ## Loop through processes, walking backwards so removals are safe
-                    p = processes[idx]
-                    exitcode = p.poll()  # get exitcode for each process
-                    if exitcode is not None:  ## if there is no exitcode the program is still running
-                        finished = True
-                        ## When a process is finished close its log file
-                        logfiles[idx].close()
-                        ## the containers are popped as processes finish, so the running position
-                        ## in these containers is the index for the names and logs, not the one
-                        ## in the original commands list (issue #12)
-                        ref_name, query_name = running_names[idx]
-                        status, code = self.aligner.exit_status(exitcode)
-                        if status == "retry":
-                            logger.warning(
-                                "{message} for genome {query} against reference {ref}".format(
-                                    message=self.aligner.retry_message(code), query=query_name, ref=ref_name
-                                )
-                            )
-                            retvalue = code
-                        elif status == "error":
-                            if not self.keep_going:
-                                logger.error(
-                                    "{program} failed with exitcode {exitcode} for {log}".format(
-                                        program=program, exitcode=exitcode, log=logpaths[idx]
-                                    )
-                                )
-                            error += 1
-                            logger.warning(
-                                "WARNING {program} finished with a non zero exitcode: {exitcode} for genome {query} against reference {ref}\nThe script will terminate when all processes are finished read {log} for more info".format(
-                                    program=program,
-                                    log=logpaths[idx],
-                                    exitcode=exitcode,
-                                    query=query_name,
-                                    ref=ref_name,
-                                )
-                            )
-                        ## Remove process from container
-                        processes.pop(idx)
-                        logfiles.pop(idx)
-                        running_names.pop(idx)
-                        logpaths.pop(idx)
-                        starts.pop(idx)
-                while pending and len(processes) < limit:  ## the next alignments take the free places
-                    start(pending.pop(0))
+                code, failed, finished = self.collect_alignments(running)
+                retvalue = code or retvalue
+                error += failed
+                start_waiting()
                 if (
                     not finished
                 ):  ## the poll loop would otherwise run flat out while the aligner works (issue #152)
@@ -769,43 +817,16 @@ class CanSNPer2(object):
 				was still aligning sixteen hours after its parent had been stopped (issue #151)"""
             logger.warning(
                 "CanSNPer2 was interrupted, stopping {n} running {program} processes".format(
-                    n=len(processes), program=program
+                    n=len(running), program=program
                 )
             )
-            for p in processes:
-                if p.poll() is None:
-                    p.terminate()
-            for p in processes:
-                try:
-                    p.wait(timeout=10)
-                except Exception:
-                    p.kill()
-            for log in logfiles:
-                log.close()
+            self.stop_alignments(running)
             raise
         finally:
             """the SIGTERM handler belongs to this alignment round only, put the previous one back"""
             if old_sigterm is not None:
                 signal.signal(signal.SIGTERM, old_sigterm)
-        if retvalue in self.aligner.retry_codes:
-            return retvalue
-        elif not self.keep_going:
-            if error:  ## stop the run if any of the alignments failed
-                logger.error(
-                    "Error: {errors} {program} processes did not run correctly check log files for more information".format(
-                        errors=error, program=program
-                    )
-                )
-                raise AlignmentError(
-                    "Error: {errors} {program} processes did not run correctly check log files for more information".format(
-                        errors=error, program=program
-                    )
-                )
-        elif error:
-            """keep_going only means that a failing sample is skipped instead of stopping the run,
-				a run where every process succeeded must still report success (issue #126)"""
-            retvalue = 1
-        return retvalue
+        return self.alignment_round_result(retvalue, error)
 
     def _names_from_command(self, command):
         """(reference, query) from a progressiveMauve command [program, --output, xmfa, ref_file,

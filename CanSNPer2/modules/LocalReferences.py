@@ -235,6 +235,185 @@ PER_SUBTREE = 3  ## representatives screened for each subtree, from different te
 MIN_SCREENED = 0.1  ## fraction of the screened bases the best genome must match for the walk to go on
 
 
+def tree_and_representatives(database, refdir, can_fetch=False):
+    """The tree of a scheme and its representative genomes: ({node id: name}, {node id: the ids
+    of its children}, {node id: the Candidates of that node}). A representative counts as a
+    candidate when its file is in refdir, or, with can_fetch (--fetch_local), when it can still
+    be downloaded; members and the outgroup are never candidates."""
+    conn = sqlite3.connect(str(database))
+    try:
+        names = dict(conn.execute("SELECT id, name FROM nodes"))
+        children = {}
+        for parent, child in conn.execute("SELECT parent, child FROM tree WHERE parent != child"):
+            children.setdefault(parent, []).append(child)
+        reps = {}
+        ids = {name: i for i, name in names.items()}
+        for genome, node, role in read_genomes(conn):
+            path = local_path(refdir, genome)
+            if role == "representative" and node in ids and (can_fetch or os.path.isfile(path)):
+                reps.setdefault(ids[node], []).append(Candidate(genome, node, path))
+    finally:
+        conn.close()
+    return names, children, reps
+
+
+class Descent(object):
+    """The walk down the tree that chooses the local reference of a read sample, step by step:
+    the tree and its representative genomes, the states of the canSNPs from the first round,
+    the screen, and the genomes that could not be fetched. descend() walks it; one step is
+    step(), and choose() gives the genome the walk ends on."""
+
+    def __init__(
+        self,
+        database,
+        refdir,
+        site_rows,
+        screen_fn,
+        per_subtree=None,
+        min_screened=None,
+        fetch=None,
+    ):
+        self.refdir = refdir
+        self.screen_fn = screen_fn
+        self.per_subtree = PER_SUBTREE if per_subtree is None else per_subtree
+        self.min_screened = MIN_SCREENED if min_screened is None else min_screened
+        self.fetch = fetch
+        self.names, self.children, self.reps = tree_and_representatives(
+            database, refdir, can_fetch=fetch is not None
+        )
+        self.ids = {name: i for i, name in self.names.items()}
+        self.states = {row["Name"]: row["state"] for row in site_rows}
+        self.below = {}
+        self.failed = set()
+
+    def subtree(self, i):
+        """node ids of the subtree of i, i first, in depth-first order"""
+        if i not in self.below:
+            out = [i]
+            for c in self.children.get(i, []):
+                out.extend(self.subtree(c))
+            self.below[i] = out
+        return self.below[i]
+
+    def genomes_in(self, i):
+        """the candidates of the subtree of i, without the ones that could not be fetched"""
+        return [c for n in self.subtree(i) for c in self.reps.get(n, []) if c.genome not in self.failed]
+
+    def ensure(self, cands):
+        """fetch the genomes of cands that have no file; returns False when one could not be fetched"""
+        absent = [c.genome for c in cands if not os.path.isfile(c.path)]
+        if not absent:
+            return True
+        got = set(self.fetch(absent)) if self.fetch is not None else set()
+        self.failed.update(
+            g for g in absent if g not in got or not os.path.isfile(local_path(self.refdir, g))
+        )
+        return not self.failed.intersection(absent)
+
+    def start_node(self, call):
+        """the node the walk starts at: the call of the first round, or the root of the tree when
+        there is no call; None when the tree has no root"""
+        if call in self.ids:
+            return self.ids[call]
+        has_parent = {c for kids in self.children.values() for c in kids}
+        roots = [i for i in self.names if i not in has_parent]
+        return roots[0] if roots else None
+
+    def options(self, node):
+        """(the child subtrees of node that hold candidates, the ones that hold a derived canSNP):
+        a subtree whose own canSNP is ancestral is not an option, the sample is not in it"""
+        options = [
+            c
+            for c in self.children.get(node, [])
+            if self.genomes_in(c) and self.states.get(self.names[c]) != "ancestral"
+        ]
+        supported = [
+            c for c in options if any(self.states.get(self.names[n]) == "derived" for n in self.subtree(c))
+        ]
+        return options, supported
+
+    def screened(self, pool):
+        """The genomes of the subtrees in pool that are screened against each other, up to
+        per_subtree of each and of different terminal nodes: ({genome: its subtree},
+        {genome: its fasta file}). A genome that cannot be fetched is replaced by the next of
+        its subtree."""
+        while True:
+            owner, paths, chosen = {}, {}, []
+            for c in pool:
+                taken = []
+                for cand in self.genomes_in(c):
+                    if cand.node not in {t.node for t in taken}:
+                        taken.append(cand)
+                    if len(taken) == self.per_subtree:
+                        break
+                for cand in taken:
+                    owner[cand.genome] = c
+                    paths[cand.genome] = cand.path
+                chosen.extend(taken)
+            if self.ensure(chosen):
+                return owner, paths
+
+    def step(self, node, steps):
+        """One step down from node, appended to steps: the single child subtree the derived
+        canSNPs point to, or the subtree of the best genome of a screen. Returns (the node the
+        walk goes to, None when it ends at node; whether the walk is given up, the reads
+        matching too little of the screened genomes to belong under node at all)."""
+        options, supported = self.options(node)
+        if not options:
+            return None, False
+        if len(supported) == 1 or len(options) == 1:
+            chosen = supported[0] if len(supported) == 1 else options[0]
+            steps.append(
+                {
+                    "node": self.names[chosen],
+                    "how": "counts",
+                    "share": None,
+                    "runner_up": None,
+                    "runner_up_node": None,
+                }
+            )
+            return chosen, False
+        return self.screen_step(supported or options, steps)
+
+    def screen_step(self, pool, steps):
+        """One step down taken by the screen: the subtree of the genome that matched the reads
+        best, appended to steps with its share and the best share of the other subtrees.
+        Returns what step() returns."""
+        owner, paths = self.screened(pool)
+        if not paths:
+            return None, False
+        ranked = self.screen_fn(paths)
+        fraction = ranked[0][3] if ranked and len(ranked[0]) > 3 else 1.0
+        if not ranked or ranked[0][2] == 0 or fraction < self.min_screened:
+            """the reads are not from the genomes below this node, or not from this scheme:
+				the walk ends here, without a choice when nothing was chosen before"""
+            return None, not steps
+        chosen = owner[ranked[0][0]]
+        other = [(r[1], owner[r[0]]) for r in ranked if owner[r[0]] != chosen]
+        second = max(other, key=lambda o: o[0]) if other else None
+        steps.append(
+            {
+                "node": self.names[chosen],
+                "how": "screen",
+                "share": ranked[0][1],
+                "runner_up": second[0] if second else None,
+                "runner_up_node": self.names[second[1]] if second else None,
+                "fraction": fraction,
+            }
+        )
+        return chosen, False
+
+    def choose(self, node):
+        """the genome the walk ends on: a representative of node itself, or of its subtree;
+        None when none of them has a file and none could be fetched"""
+        for cand in [c for c in self.reps.get(node, []) if c.genome not in self.failed] or self.genomes_in(
+            node
+        ):
+            if self.ensure([cand]):
+                return cand
+        return None
+
+
 def descend(
     database,
     call,
@@ -262,115 +441,29 @@ def descend(
     fetch: None, or a function that downloads the files of a list of genomes and returns the
     set of genomes it fetched (--fetch_local). With it, representatives without a file count
     as options too, and only the genomes the walk screens or chooses are fetched; a genome
-    that cannot be fetched is passed over."""
-    conn = sqlite3.connect(str(database))
-    try:
-        names = dict(conn.execute("SELECT id, name FROM nodes"))
-        children = {}
-        for parent, child in conn.execute("SELECT parent, child FROM tree WHERE parent != child"):
-            children.setdefault(parent, []).append(child)
-        reps = {}
-        ids = {name: i for i, name in names.items()}
-        for genome, node, role in read_genomes(conn):
-            path = local_path(refdir, genome)
-            if role == "representative" and node in ids and (fetch is not None or os.path.isfile(path)):
-                reps.setdefault(ids[node], []).append(Candidate(genome, node, path))
-    finally:
-        conn.close()
-    states = {row["Name"]: row["state"] for row in site_rows}
-    below = {}
-
-    def subtree(i):
-        """node ids of the subtree of i, i first, in depth-first order"""
-        if i not in below:
-            out = [i]
-            for c in children.get(i, []):
-                out.extend(subtree(c))
-            below[i] = out
-        return below[i]
-
-    failed = set()
-
-    def genomes_in(i):
-        return [c for n in subtree(i) for c in reps.get(n, []) if c.genome not in failed]
-
-    def ensure(cands):
-        """fetch the genomes of cands that have no file; returns False when one could not be fetched"""
-        absent = [c.genome for c in cands if not os.path.isfile(c.path)]
-        if not absent:
-            return True
-        got = set(fetch(absent)) if fetch is not None else set()
-        failed.update(g for g in absent if g not in got or not os.path.isfile(local_path(refdir, g)))
-        return not failed.intersection(absent)
-
-    if call in ids:
-        node = ids[call]
-    else:
-        has_parent = {c for kids in children.values() for c in kids}
-        roots = [i for i in names if i not in has_parent]
-        if not roots:
-            return None, []
-        node = roots[0]
+    that cannot be fetched is passed over.
+    The steps of the walk are the methods of Descent."""
+    walk = Descent(
+        database,
+        refdir,
+        site_rows,
+        screen_fn,
+        per_subtree=per_subtree,
+        min_screened=min_screened,
+        fetch=fetch,
+    )
+    node = walk.start_node(call)
+    if node is None:
+        return None, []
     steps = []
     while True:
-        options = [c for c in children.get(node, []) if genomes_in(c) and states.get(names[c]) != "ancestral"]
-        if not options:
+        nxt, given_up = walk.step(node, steps)
+        if given_up:
+            return None, steps
+        if nxt is None:
             break
-        supported = [c for c in options if any(states.get(names[n]) == "derived" for n in subtree(c))]
-        if len(supported) == 1 or len(options) == 1:
-            node = supported[0] if len(supported) == 1 else options[0]
-            steps.append(
-                {
-                    "node": names[node],
-                    "how": "counts",
-                    "share": None,
-                    "runner_up": None,
-                    "runner_up_node": None,
-                }
-            )
-            continue
-        pool = supported or options
-        while True:
-            """a genome that cannot be fetched is replaced by the next of its subtree"""
-            owner, paths, chosen = {}, {}, []
-            for c in pool:
-                taken = []
-                for cand in genomes_in(c):
-                    if cand.node not in {t.node for t in taken}:
-                        taken.append(cand)
-                    if len(taken) == per_subtree:
-                        break
-                for cand in taken:
-                    owner[cand.genome] = c
-                    paths[cand.genome] = cand.path
-                chosen.extend(taken)
-            if ensure(chosen):
-                break
-        if not paths:
-            break
-        ranked = screen_fn(paths)
-        fraction = ranked[0][3] if ranked and len(ranked[0]) > 3 else 1.0
-        if not ranked or ranked[0][2] == 0 or fraction < min_screened:
-            if not steps:
-                return None, steps
-            break
-        node = owner[ranked[0][0]]
-        other = [(r[1], owner[r[0]]) for r in ranked if owner[r[0]] != node]
-        second = max(other, key=lambda o: o[0]) if other else None
-        steps.append(
-            {
-                "node": names[node],
-                "how": "screen",
-                "share": ranked[0][1],
-                "runner_up": second[0] if second else None,
-                "runner_up_node": names[second[1]] if second else None,
-                "fraction": fraction,
-            }
-        )
-    for cand in [c for c in reps.get(node, []) if c.genome not in failed] or genomes_in(node):
-        if ensure([cand]):
-            return cand, steps
-    return None, steps
+        node = nxt
+    return walk.choose(node), steps
 
 
 CLOSE_SECOND = 0.2  ## a screen is close when the second subtree has at least this share
