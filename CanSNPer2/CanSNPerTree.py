@@ -355,9 +355,9 @@ def build_parser():
     return parser
 
 
-def run_command(args, parser):
-    """everything after parsing, given the parsed options: shared by CanSNPer2 and cansnper2 type;
-    reads are recognised by their content, so --read_input is accepted and does nothing"""
+def check_run_options(args):
+    """The options a typing run cannot start without: a database that can be opened, and
+    queries. Each is reported as a message and exit 1, not as a traceback or an empty run."""
     if not args.database:
         print("A database is required: cansnper2 type query.fasta -d database.db", file=sys.stderr)
         exit(1)
@@ -374,29 +374,43 @@ def run_command(args, parser):
         )  ## an error message, so a script that reads stdout does not take it as output
         exit(1)
 
-    logval = args.supress
+
+def check_temp_options(args, parser):
+    """The options of the temporary folder, checked once the log is set up: a usage error and
+    exit 2, as argparse reports one"""
+    if args.tmpdir is not None and not args.tmpdir.strip():
+        """Fix temp path, see resolve_tmpdir (issue #177)"""
+        parser.error("--tmp-dir cannot be empty")
+    if args.fetch_local and not args.local_references:
+        parser.error(
+            "{f} is used with {l}".format(
+                f=option_name(parser, "fetch_local"), l=option_name(parser, "local_references")
+            )
+        )
+
+
+def log_level(args):
+    """the level of the log and the console: --debug, then --verbose, then --supress"""
     if args.debug:
-        logval = args.debug
-    elif args.verbose:
-        logval = args.verbose
+        return args.debug
+    if args.verbose:
+        return args.verbose
+    return args.supress
 
-    if (
-        args.skip_alignment and not args.keep_temp
-    ):  ## Make sure keep temp is default if --skip_alignment is used
-        args.keep_temp = True
 
-    """--logdir, --tmpdir and --outdir are relative to --workdir. The log and temporary folders used to
-		be created relative to the current folder before CanSNPer2 resolved them against the workdir,
-		so the main log and an empty tmp folder ended up outside it."""
-    in_workdir = lambda path: os.path.abspath(os.path.join(args.workdir, path))
-    args.logdir = in_workdir(args.logdir)
-    if args.tmpdir is not None and args.tmpdir.strip():
-        args.tmpdir = in_workdir(args.tmpdir)
+def in_workdir(args, path):
+    """path as --logdir, --tmpdir and --outdir are read: relative to --workdir. The log and
+    temporary folders used to be created relative to the current folder before CanSNPer2
+    resolved them against the workdir, so the main log and an empty tmp folder ended up
+    outside it."""
+    return os.path.abspath(os.path.join(args.workdir, path))
 
-    """Make sure log directory path exists"""
-    logdircreated = False
-    if not os.path.exists(args.logdir):
-        logdircreated = True
+
+def start_logging(args, parser):
+    """Create --logdir and set up the log of the run; returns the path of the log file.
+    A log folder that cannot be created is reported as a message and exit 1."""
+    args.logdir = in_workdir(args, args.logdir)
+    logdircreated = not os.path.exists(args.logdir)
     try:
         ensure_directory(args.logdir, "--log-dir")
     except CanSNPer2Error as e:
@@ -405,70 +419,63 @@ def run_command(args, parser):
     args.logdir = (
         args.logdir.rstrip("/") + "/"
     )  ## a logdir without a trailing slash would glue straight onto the log file name (issue #71)
-
     logpath = setup_logging(
-        args.logdir, log_tag(parser.prog), level=logval
+        args.logdir, log_tag(parser.prog), level=log_level(args)
     )  ## shared log naming for all commands (issue #217)
     logger = logging.getLogger(__name__)
     if logdircreated:
         logger.info("Creating logs directory {logdir}".format(logdir=args.logdir))
     log_scheme_notice(args.database, logger)  ## which scheme is typed against, before any work starts
+    return logpath
 
-    """Fix temp path, see resolve_tmpdir (issue #177)"""
-    if args.tmpdir is not None and not args.tmpdir.strip():
-        parser.error("--tmp-dir cannot be empty")
-    if args.fetch_local and not args.local_references:
-        parser.error(
-            "{f} is used with {l}".format(
-                f=option_name(parser, "fetch_local"), l=option_name(parser, "local_references")
-            )
-        )
+
+def resolve_temp_folder(args, logger):
+    """Set args.tmpdir to the run folder of this run: the first of the default locations that
+    can be written to, or the folder --tmpdir names. A folder that cannot be used is reported
+    and ends the run with exit 1, before anything is aligned."""
     if args.tmpdir is None:
         """no --tmpdir: use the first folder that can be written to"""
         problems = []
-        for candidate in default_tmpdir_candidates(in_workdir(args.outdir)):
+        for candidate in default_tmpdir_candidates(in_workdir(args, args.outdir)):
             candidate = resolve_tmpdir(candidate)
             try:
                 ensure_directory(candidate, "--tmp-dir")
                 args.tmpdir = candidate
-                break
+                return
             except CanSNPer2Error as e:
                 problems.append(e.value)
                 logger.warning("{0}; trying another location".format(e.value))
-        else:
-            logger.error(
-                "No folder for temporary files could be used ({0}); give one with --tmp-dir".format(
-                    "; ".join(problems)
-                )
+        logger.error(
+            "No folder for temporary files could be used ({0}); give one with --tmp-dir".format(
+                "; ".join(problems)
             )
-            exit(1)
-    else:
-        args.tmpdir = resolve_tmpdir(args.tmpdir)
-        if args.skip_alignment and not os.path.isdir(args.tmpdir):
-            """alignments are only read with --skip_alignment: a missing folder is not created"""
-            logger.error(
-                "--skip-alignment reads the alignments in --tmp-dir, but {path} does not exist".format(
-                    path=args.tmpdir
-                )
+        )
+        exit(1)
+    args.tmpdir = resolve_tmpdir(in_workdir(args, args.tmpdir))
+    if args.skip_alignment and not os.path.isdir(args.tmpdir):
+        """alignments are only read with --skip_alignment: a missing folder is not created"""
+        logger.error(
+            "--skip-alignment reads the alignments in --tmp-dir, but {path} does not exist".format(
+                path=args.tmpdir
             )
-            exit(1)
-        if not os.path.exists(args.tmpdir):
-            logger.debug(
-                "Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(
-                    path=args.tmpdir
-                )
-            )
-        try:
-            ensure_directory(args.tmpdir, "--tmp-dir")
-        except CanSNPer2Error as e:
-            logger.error(e.value)
-            exit(1)
-
-    ## Add log level and log file path
-    logger.debug(args)
-
+        )
+        exit(1)
+    if not os.path.exists(args.tmpdir):
+        logger.debug(
+            "Tmp directory {path} did not exist tmp, add subfolder(s) for CanSNPer2 ".format(path=args.tmpdir)
+        )
     try:
-        CanSNPer2_obj = CanSNPer2(
+        ensure_directory(args.tmpdir, "--tmp-dir")
+    except CanSNPer2Error as e:
+        logger.error(e.value)
+        exit(1)
+
+
+def build_run(args, logger):
+    """The CanSNPer2 object of the run, with the options it reads. An unusable output, log or
+    tmp folder is reported and ends the run with exit 1, before anything is aligned."""
+    try:
+        return CanSNPer2(
             args.query,
             refdir=args.refdir,
             allow_missing_references=args.allow_missing_references,
@@ -510,10 +517,11 @@ def run_command(args, parser):
     except CanSNPer2Error as e:
         logger.error(e.value)  ## an unusable output, log or tmp folder is reported before anything is aligned
         exit(1)
-    if args.keep_temp:
-        print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))
 
-    """Run CanSNPer2"""
+
+def type_queries(CanSNPer2_obj, args, logger):
+    """Type the queries; an interrupted or refused run is reported as a message and leaves no
+    run directory behind, instead of a traceback"""
     try:
         CanSNPer2_obj.run(database=args.database)
     except KeyboardInterrupt:
@@ -532,9 +540,12 @@ def run_command(args, parser):
         if not args.keep_temp:
             CanSNPer2_obj.cleanup()
         exit(1)
+
+
+def report_hidden_warnings(logpath):
     """warnings that asked to stay in the log (SNP positions without alignment data):
-		say that they are there and where, instead of filling the terminal with one
-		block per sample; --verbose shows them as they come"""
+    say that they are there and where, instead of filling the terminal with one
+    block per sample; --verbose shows them as they come"""
     hidden = quiet_warning_count()
     if hidden:
         print(
@@ -546,14 +557,40 @@ def run_command(args, parser):
                 logpath=logpath,
             )
         )
-    """a run that typed nothing (all NA, all skipped) is a failure and must not exit 0,
-		the reason was already logged by run() (issue #191); a sample whose earlier result
-		was used again, made from the same input, counts as typed"""
-    if (
+
+
+def typed_nothing(CanSNPer2_obj):
+    """whether the run typed nothing at all: a run that is all NA or all skipped is a failure
+    and must not exit 0, the reason was already logged by run() (issue #191); a sample whose
+    earlier result was used again, made from the same input, counts as typed"""
+    return (
         not CanSNPer2_obj.typed
         and not CanSNPer2_obj.reused
-        and (CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped)
-    ):
+        and bool(CanSNPer2_obj.not_typed or CanSNPer2_obj.skipped)
+    )
+
+
+def run_command(args, parser):
+    """everything after parsing, given the parsed options: shared by CanSNPer2 and cansnper2 type;
+    reads are recognised by their content, so --read_input is accepted and does nothing.
+    The steps are the functions above: the options are checked, the log and the folders of the
+    run are set up, the CanSNPer2 object is built and the queries are typed."""
+    check_run_options(args)
+    if (
+        args.skip_alignment and not args.keep_temp
+    ):  ## Make sure keep temp is default if --skip_alignment is used
+        args.keep_temp = True
+    logpath = start_logging(args, parser)
+    logger = logging.getLogger(__name__)
+    check_temp_options(args, parser)
+    resolve_temp_folder(args, logger)
+    logger.debug(args)  ## Add log level and log file path
+    CanSNPer2_obj = build_run(args, logger)
+    if args.keep_temp:
+        print("Alignments and temporary files are kept in {path}".format(path=CanSNPer2_obj.tmpdir))
+    type_queries(CanSNPer2_obj, args, logger)
+    report_hidden_warnings(logpath)
+    if typed_nothing(CanSNPer2_obj):
         exit(1)
 
 
