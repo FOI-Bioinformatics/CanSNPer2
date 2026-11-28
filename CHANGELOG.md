@@ -93,6 +93,11 @@ Git history.
 - The scheme line names a commit given with `scheme get --branch <commit>` once
   (`owner/repository@abc1234`), not as the branch and again as the commit.
 - `db info` writes a log file only when `--log-dir` is given; it left an empty log file in `logs/`.
+- Two runs of the same input write the same result files. The rows of `<sample>_not_called.txt`
+  are ordered by reference genome, sequence and position, and the `derived_cansnps` of
+  `samples/<sample>.json` by node; both followed the order in which the SNP calling workers
+  reported them, so a loaded machine gave files that could not be compared byte for byte, and the
+  same held for the data of `summary.html`. The calls and the site states were not affected.
 
 ## [2.4.0] - 2026-11-22 (tag v2.4.0)
 

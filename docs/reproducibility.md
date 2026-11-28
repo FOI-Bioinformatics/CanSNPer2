@@ -17,6 +17,12 @@ workflow.
 The columns and lines of the result files are described in
 [output-formats.md](output-formats.md).
 
+Two runs of the same input, with the same settings and the same database, write the same result
+files byte for byte, apart from the lines that name the paths and the time of the run (`# Query
+file:`, the header of `snps_summary.txt`, the pages). The rows are in a fixed order, which does
+not depend on how many samples or alignments ran at the same time, so two result folders can be
+compared with `diff`.
+
 CanSNPer2 does not record the versions of the external programs: the aligner (minimap2 by default,
 or progressiveMauve or MUMmer4 with `--aligner`) and, for reads, minimap2 and samtools. Only the aligner name is recorded.
 Note these versions yourself, for example:
