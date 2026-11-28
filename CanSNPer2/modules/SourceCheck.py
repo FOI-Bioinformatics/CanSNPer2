@@ -20,7 +20,7 @@ nodes and the reference genomes that database already holds.
 
 import re
 import sqlite3
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, namedtuple
 
 from CanSNPer2.modules.DatabaseConnection import (
     CANSNP_SOURCE_COLUMNS,
@@ -252,155 +252,186 @@ def check_references(path, problems, known=None, database=None, known_accessions
     return names
 
 
-def check_snps(
-    path,
-    problems,
-    tree_nodes=None,
-    genomes=None,
-    references_path=None,
-    tree_name="the tree file",
-    existing=None,
-):
-    """Check every canSNP row of a canSNP file, or of a SNP file of 2.3.0 and earlier, which is
-    read as one typed canSNP of rank 1 per node; tree_nodes and genomes are skipped when not
-    given. existing: (database name, {(node, rank)}, {node with a typed canSNP},
-    {(genome, sequence, position)}) of the canSNPs a database already holds, which a new row
-    must not repeat"""
-    ranks = OrderedDict()
-    typed_rows = Counter()
-    positions = Counter()
-    with open_source(path) as snps:
-        headers = _header(snps)
-        if headers is None:
-            problems.append(
-                "{0}: the SNP file is empty, it needs a header row and one row per SNP".format(path)
+## the header of a canSNP file: its column names, and the number of columns a row must have
+## (the trailing comment columns of the header may be left out, issue #22)
+SnpHeader = namedtuple("SnpHeader", ("columns", "required"))
+
+## what the canSNP rows of a file are checked against: the file in the messages, the nodes of
+## the tree and the genome names of the references file (None when they are not checked), the
+## references file and the tree in the messages, and existing, the canSNPs a database already
+## holds as (its name, {(node, rank)}, {node with a typed canSNP}, {(genome, sequence, position)})
+SnpContext = namedtuple(
+    "SnpContext", ("path", "tree_nodes", "genomes", "references_path", "tree_name", "existing")
+)
+
+
+def snp_header(path, snps, problems):
+    """The header of a canSNP file, or of a SNP file of 2.3.0 and earlier, as a SnpHeader;
+    None when the header itself makes the file unusable, with the reason in problems"""
+    headers = _header(snps)
+    if headers is None:
+        problems.append("{0}: the SNP file is empty, it needs a header row and one row per SNP".format(path))
+        return None
+    repeated = duplicate_columns(headers)
+    if repeated:
+        problems.append(
+            "{0}:1: the header names the column(s) {1} more than once".format(
+                path, ", ".join("'{0}'".format(name) for name in repeated)
             )
-            return
-        repeated = duplicate_columns(headers)
-        if repeated:
-            problems.append(
-                "{0}:1: the header names the column(s) {1} more than once".format(
-                    path, ", ".join("'{0}'".format(name) for name in repeated)
-                )
-            )
-            return
-        if "position" in headers and "sequence_position" not in headers:
-            problems.append("{0}:1: this SNP file cannot be used. {1}".format(path, JOINED_FORMAT_HINT))
-            return
-        ## a header with an snp_id column is the SNP file of 2.3.0; anything else is read as a
-        ## canSNP file, so that a header naming neither is reported against the canSNP columns
-        required = (
-            SNP_SOURCE_COLUMNS if ("snp_id" in headers and "node" not in headers) else CANSNP_SOURCE_COLUMNS
         )
-        missing = [column for column in required if column not in headers]
-        if missing:
+        return None
+    if "position" in headers and "sequence_position" not in headers:
+        problems.append("{0}:1: this SNP file cannot be used. {1}".format(path, JOINED_FORMAT_HINT))
+        return None
+    ## a header with an snp_id column is the SNP file of 2.3.0; anything else is read as a
+    ## canSNP file, so that a header naming neither is reported against the canSNP columns
+    required = (
+        SNP_SOURCE_COLUMNS if ("snp_id" in headers and "node" not in headers) else CANSNP_SOURCE_COLUMNS
+    )
+    missing = [column for column in required if column not in headers]
+    if missing:
+        problems.append(
+            "{0}:1: the header has no column(s) {1}, it must name {2}".format(
+                path, ", ".join(missing), ", ".join(CANSNP_SOURCE_COLUMNS)
+            )
+        )
+        return None
+    optional = 0
+    for head in reversed(headers):
+        if head.strip().lower().lstrip("#") in COMMENT_COLUMNS:
+            optional += 1
+        else:
+            break
+    return SnpHeader(headers, len(headers) - optional)
+
+
+def snp_row(path, number, line, header, problems):
+    """One line of a canSNP file as the canSNP columns (cansnp_row reads a row of the SNP file
+    of 2.3.0 as rank 1 of its node); None for an empty line, a comment, or a row that does not
+    have the columns of the header, which is reported"""
+    if line.strip() == "" or line.strip().startswith("#"):
+        return None
+    data = split_row(line, len(header.columns))
+    if not header.required <= len(data) <= len(header.columns):
+        expected = (
+            str(header.required)
+            if header.required == len(header.columns)
+            else "{0} to {1}".format(header.required, len(header.columns))
+        )
+        problems.append("{0}:{1}: expected {2} columns, found {3}".format(path, number, expected, len(data)))
+        return None
+    return cansnp_row(dict(zip(header.columns, data)))
+
+
+def check_snp_values(context, number, row, problems):
+    """The rank, score, typed and reference columns of a canSNP row. Returns (the rank as an
+    integer, None when it is not a positive one; whether the row is a typed canSNP)"""
+    path = context.path
+    rank, score, typed = row["rank"].strip(), row["score"].strip(), row["typed"].strip().lower()
+    numbered = int(rank) if RANK_RE.match(rank) else None
+    if numbered is None:
+        problems.append("{0}:{1}: rank '{2}' is not a positive integer".format(path, number, row["rank"]))
+    if score != "" and not SCORE_RE.match(score):
+        problems.append("{0}:{1}: score '{2}' is not a number".format(path, number, row["score"]))
+    if typed not in TYPED_VALUES:
+        problems.append("{0}:{1}: typed '{2}' is not yes or no".format(path, number, row["typed"]))
+    if row["reference"].strip() == "":
+        problems.append(
+            "{0}:{1}: reference is empty, it must name where the canSNP is published or NA".format(
+                path, number
+            )
+        )
+    return numbered, bool(TYPED_VALUES.get(typed, 0))
+
+
+def check_snp_node(context, number, row, problems, rank, typed):
+    """The node of a canSNP row: it must appear in the tree, and a database given as existing
+    must not already hold a canSNP of this rank, or a typed canSNP, for it. rank and typed are
+    what check_snp_values returned for the row"""
+    node = row["node"]
+    if context.tree_nodes is not None and node not in context.tree_nodes:
+        problems.append(
+            "{0}:{1}: node '{2}' does not appear in {3}".format(context.path, number, node, context.tree_name)
+        )
+    if context.existing is None:
+        return
+    database, held_ranks, typed_nodes = context.existing[0], context.existing[1], context.existing[2]
+    if rank is not None and (node, rank) in held_ranks:
+        problems.append(
+            "{0}:{1}: node '{2}' already has a canSNP of rank {3} in {4}".format(
+                context.path, number, node, rank, database
+            )
+        )
+    if typed and node in typed_nodes:
+        problems.append(
+            "{0}:{1}: node '{2}' already has a typed canSNP in {3}".format(
+                context.path, number, node, database
+            )
+        )
+
+
+def check_snp_site(context, number, row, problems):
+    """The genome, sequence and position of a canSNP row, and the position a database given as
+    existing already annotates. Returns the (genome, sequence, position) the row annotates, the
+    genome under the name the references file gives it; None when the row does not name one"""
+    path = context.path
+    genome, sequence, position = row["genome"], row["sequence"], row["sequence_position"]
+    if context.genomes is not None:
+        if genome not in context.genomes:
             problems.append(
-                "{0}:1: the header has no column(s) {1}, it must name {2}".format(
-                    path, ", ".join(missing), ", ".join(CANSNP_SOURCE_COLUMNS)
+                "{0}:{1}: genome '{2}' is not listed in {3}".format(
+                    path, number, genome, context.references_path
                 )
             )
-            return
-        optional = 0
-        for head in reversed(headers):
-            if head.strip().lower().lstrip("#") in COMMENT_COLUMNS:
-                optional += 1
-            else:
-                break
-        required = len(headers) - optional
-        rows = 0
-        for number, line in enumerate(snps, start=2):
-            if line.strip() == "" or line.strip().startswith("#"):
-                continue
-            data = split_row(line, len(headers))
-            if not required <= len(data) <= len(headers):
-                expected = str(required) if optional == 0 else "{0} to {1}".format(required, len(headers))
-                problems.append(
-                    "{0}:{1}: expected {2} columns, found {3}".format(path, number, expected, len(data))
-                )
-                continue
-            rows += 1
-            row = cansnp_row(dict(zip(headers, data)))
-            node, genome = row["node"], row["genome"]
-            sequence, position = row["sequence"], row["sequence_position"]
-            derived, ancestral = row["derived_base"], row["ancestral_base"]
-            rank, score, typed = row["rank"].strip(), row["score"].strip(), row["typed"].strip().lower()
-            if not RANK_RE.match(rank):
-                problems.append(
-                    "{0}:{1}: rank '{2}' is not a positive integer".format(path, number, row["rank"])
-                )
-            else:
-                ranks.setdefault(node, []).append(int(rank))
-            if score != "" and not SCORE_RE.match(score):
-                problems.append("{0}:{1}: score '{2}' is not a number".format(path, number, row["score"]))
-            if typed not in TYPED_VALUES:
-                problems.append("{0}:{1}: typed '{2}' is not yes or no".format(path, number, row["typed"]))
-            elif TYPED_VALUES[typed]:
-                typed_rows[node] += 1
-            if row["reference"].strip() == "":
-                problems.append(
-                    "{0}:{1}: reference is empty, it must name where the canSNP is published or NA".format(
-                        path, number
-                    )
-                )
-            if tree_nodes is not None and node not in tree_nodes:
-                problems.append(
-                    "{0}:{1}: node '{2}' does not appear in {3}".format(path, number, node, tree_name)
-                )
-            if existing is not None and RANK_RE.match(rank) and (node, int(rank)) in existing[1]:
-                problems.append(
-                    "{0}:{1}: node '{2}' already has a canSNP of rank {3} in {4}".format(
-                        path, number, node, rank, existing[0]
-                    )
-                )
-            if existing is not None and typed in TYPED_VALUES and TYPED_VALUES[typed] and node in existing[2]:
-                problems.append(
-                    "{0}:{1}: node '{2}' already has a typed canSNP in {3}".format(
-                        path, number, node, existing[0]
-                    )
-                )
-            if genomes is not None:
-                if genome not in genomes:
-                    problems.append(
-                        "{0}:{1}: genome '{2}' is not listed in {3}".format(
-                            path, number, genome, references_path
-                        )
-                    )
-                else:
-                    genome = genomes[genome]
-            if sequence.strip() == "":
-                problems.append(
-                    "{0}:{1}: sequence is empty, it must name a sequence of the reference genome".format(
-                        path, number
-                    )
-                )
-            if not POSITION_RE.match(position) or int(position) < 1:
-                problems.append(
-                    "{0}:{1}: sequence_position '{2}' is not a positive integer".format(
-                        path, number, position
-                    )
-                )
-            elif int(position) > MAX_POSITION:
-                problems.append(
-                    "{0}:{1}: sequence_position {2} is larger than {3}, the largest position the "
-                    "database can hold".format(path, number, position, MAX_POSITION)
-                )
-            elif sequence.strip() != "":
-                positions[(genome, sequence, int(position))] += 1
-                if existing is not None and (genome, sequence, int(position)) in existing[3]:
-                    problems.append(
-                        "{0}:{1}: position {2} on sequence '{3}' of '{4}' is already annotated in {5}".format(
-                            path, number, position, sequence, genome, existing[0]
-                        )
-                    )
-            for column, base in (("derived_base", derived), ("ancestral_base", ancestral)):
-                if base not in BASES:
-                    problems.append(
-                        "{0}:{1}: {2} '{3}' is not one of A, C, G, T".format(path, number, column, base)
-                    )
-            if derived == ancestral and derived in BASES:
-                problems.append(
-                    "{0}:{1}: derived and ancestral base are both '{2}'".format(path, number, derived)
-                )
+        else:
+            genome = context.genomes[genome]
+    if sequence.strip() == "":
+        problems.append(
+            "{0}:{1}: sequence is empty, it must name a sequence of the reference genome".format(path, number)
+        )
+    if not POSITION_RE.match(position) or int(position) < 1:
+        problems.append(
+            "{0}:{1}: sequence_position '{2}' is not a positive integer".format(path, number, position)
+        )
+        return None
+    if int(position) > MAX_POSITION:
+        problems.append(
+            "{0}:{1}: sequence_position {2} is larger than {3}, the largest position the "
+            "database can hold".format(path, number, position, MAX_POSITION)
+        )
+        return None
+    if sequence.strip() == "":
+        return None
+    site = (genome, sequence, int(position))
+    if context.existing is not None and site in context.existing[3]:
+        problems.append(
+            "{0}:{1}: position {2} on sequence '{3}' of '{4}' is already annotated in {5}".format(
+                path, number, position, sequence, genome, context.existing[0]
+            )
+        )
+    return site
+
+
+def check_snp_bases(context, number, row, problems):
+    """The derived and ancestral base of a canSNP row: both are one of A, C, G, T, and they differ"""
+    derived, ancestral = row["derived_base"], row["ancestral_base"]
+    for column, base in (("derived_base", derived), ("ancestral_base", ancestral)):
+        if base not in BASES:
+            problems.append(
+                "{0}:{1}: {2} '{3}' is not one of A, C, G, T".format(context.path, number, column, base)
+            )
+    if derived == ancestral and derived in BASES:
+        problems.append(
+            "{0}:{1}: derived and ancestral base are both '{2}'".format(context.path, number, derived)
+        )
+
+
+def check_snp_totals(context, problems, rows, ranks, typed_rows, positions):
+    """The checks that need the whole canSNP file: it holds canSNP rows, the ranks of each node
+    count from 1 in order, every node has one typed canSNP, and no position is annotated twice.
+    ranks: the ranks of each node in the order of the file; typed_rows: the typed canSNPs it
+    holds per node; positions: how often it annotates each (genome, sequence, position)"""
+    path = context.path
     if rows == 0:
         problems.append(
             "{0}: the canSNP file has a header but no canSNP rows, a scheme without "
@@ -414,7 +445,7 @@ def check_snps(
                 )
             )
     for node in ranks:
-        count = typed_rows[node]
+        count = typed_rows.get(node, 0)
         if count == 0:
             problems.append(
                 "{0}: node '{1}' has no canSNP marked typed yes, CanSNPer2 would not call it".format(
@@ -433,6 +464,48 @@ def check_snps(
                     path, position, sequence, genome, count
                 )
             )
+
+
+def check_snps(
+    path,
+    problems,
+    tree_nodes=None,
+    genomes=None,
+    references_path=None,
+    tree_name="the tree file",
+    existing=None,
+):
+    """Check every canSNP row of a canSNP file, or of a SNP file of 2.3.0 and earlier, which is
+    read as one typed canSNP of rank 1 per node; tree_nodes and genomes are skipped when not
+    given. existing: (database name, {(node, rank)}, {node with a typed canSNP},
+    {(genome, sequence, position)}) of the canSNPs a database already holds, which a new row
+    must not repeat. The row is read by snp_row and checked in the four groups below; the
+    checks that need the whole file are in check_snp_totals"""
+    context = SnpContext(path, tree_nodes, genomes, references_path, tree_name, existing)
+    ranks = OrderedDict()
+    typed_rows = Counter()
+    positions = Counter()
+    rows = 0
+    with open_source(path) as snps:
+        header = snp_header(path, snps, problems)
+        if header is None:
+            return
+        for number, line in enumerate(snps, start=2):
+            row = snp_row(path, number, line, header, problems)
+            if row is None:
+                continue
+            rows += 1
+            rank, typed = check_snp_values(context, number, row, problems)
+            if rank is not None:
+                ranks.setdefault(row["node"], []).append(rank)
+            if typed:
+                typed_rows[row["node"]] += 1
+            check_snp_node(context, number, row, problems, rank, typed)
+            site = check_snp_site(context, number, row, problems)
+            if site is not None:
+                positions[site] += 1
+            check_snp_bases(context, number, row, problems)
+    check_snp_totals(context, problems, rows, ranks, typed_rows, positions)
 
 
 def check_sources(tree=None, annotation=None, references=None):
