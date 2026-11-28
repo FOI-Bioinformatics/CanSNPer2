@@ -344,11 +344,15 @@ thresholds were still met at that depth.
 
 The read names of these files still carry the nanopore read UUID, and in one case the
 basecalling model, but the SRA conversion puts the run accession first and the UUID form of
-`ReadPlatform.NAME_FORMS` is anchored at the start of the name, so the name signal was not used
-for any file. An unanchored form matches 400 of 400 names in each of the ten files that still
-have a UUID and none of the 400 names of either Illumina file. That is a candidate change for
-#119; this evaluation measures the behavior as it stands, which is why the four files are
-reported as `hifi` above.
+`ReadPlatform.NAME_FORMS` was anchored at the start of the name, so the name signal was not used
+for any file while this was measured. An unanchored form matches 400 of 400 names in each of the
+ten files that still have a UUID and none of the 400 names of either Illumina file, which is why
+the forms are searched from the start of the name and after each space since this measurement
+(#124). Nine of the eleven nanopore files are now read from their names, the four reported as
+`hifi` above among them, and they are reported as `ont`; the two whose names the SRA replaced
+altogether are still read from their lengths and qualities. The base quality that separates `ont`
+from `hifi` is left at 25 all the same: these four runs show that no value separates the
+platforms, so the names are the signal to rely on where they survive.
 
 **A scheme that does not cover the sample.** Neither *B. suis* isolate was called, from any
 input: 22 of the 23 canSNPs with data are ancestral and only the root is derived, from the
@@ -372,11 +376,12 @@ at 20x rather than at the thinnest depths and all four platforms then ask for th
 
 **Open.** Seven isolates, five schemes, two laboratories for the nanopore runs and one
 instrument type. The depth series is drawn from one deep run per isolate, so it does not show
-the uneven coverage of a run that is shallow to begin with. Twelve of the runs were taken from
-the NCBI Open Data bucket and converted with `fasterq-dump`, which drops the nanopore tags from
-the read names; the files ENA serves keep them, so the detection of the platform from read
-names is not covered by this data. R10.4.1 duplex reads and barcoded runs were not separated
-out. No PacBio HiFi run is included, which remains open together with the aligner comparison.
+the uneven coverage of a run that is shallow to begin with. R10.4.1 duplex reads and barcoded
+runs were not separated out. Twelve of the runs were taken from the NCBI Open Data bucket and converted with
+`fasterq-dump`, which drops the nanopore tags that follow the read name; the read UUID itself
+survives in nine of the eleven files and is what the names are read from, so a file served with
+its full nanopore tags is not covered by this data. No PacBio HiFi run is included, which remains
+open together with the aligner comparison.
 
 ## Local references
 
