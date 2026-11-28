@@ -209,6 +209,31 @@ def _type_in_worker(q):
     }
 
 
+def _row_order(row):
+    """the sort key of a result row: its reference genome, the sequence of that genome, the
+    position on it as a number, and the node. A position that is not a number sorts first; the
+    rows of the canSNPs without alignment data carry one, and they are written after the table"""
+    position = row[3] if len(row) > 3 else ""
+    return (
+        row[1],
+        row[2],
+        0 if not str(position).isdigit() else 1,
+        int(position) if str(position).isdigit() else 0,
+        row[0],
+    )
+
+
+def sort_site_rows(rows):
+    """The result rows in a fixed order, by reference genome, sequence, position and node.
+
+    The rows arrive from one worker process per alignment, in the order the workers happen to
+    report them, which follows how the machine is loaded: two runs of the same input wrote the
+    rows of <sample>_not_called.txt, the derived_cansnps of the sample JSON and the data of
+    summary.html in different orders, and were not comparable byte for byte (#126). The set of
+    canSNPs, the call and every site state were the same."""
+    return sorted(rows, key=_row_order)
+
+
 def _is_cram(path):
     """a CRAM file starts with the bytes CRAM"""
     with open(path, "rb") as handle:
@@ -1316,7 +1341,10 @@ class CanSNPer2(object):
         )
         self.stop_snp_workers(jobs, idle_timeout_hit)
         self.check_snp_reports(xmfa_files, finish_signals, failed_reports)
-        return SNPS, SNP_info, called_snps
+        """the rows and the derived canSNPs are put in a fixed order here, where every consumer
+			of them gets the same one: the order they arrive in is the order the workers reported
+			them in, which depends on how the machine is loaded (#126)"""
+        return SNPS, sort_site_rows(SNP_info), sorted(called_snps)
 
     def check_alignment_files(self, xmfa_files, references):
         """the alignments are checked before the workers start: ParseXMFA.read_xmfa swallows a

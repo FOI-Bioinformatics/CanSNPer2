@@ -64,6 +64,13 @@ alternative canSNPs of a node are not read. Together the two files list every no
 - `<sample>_not_called.txt` holds all other canSNPs: ancestral, other base, gaps and `N`, and,
   at the end, the canSNPs without any alignment data.
 
+The rows of `<sample>_not_called.txt` are ordered by reference genome, by sequence of that
+genome and by position, and two rows of one position by node name; the canSNPs without alignment
+data follow in the order of the tree. The rows of `<sample>_snps.txt` follow the SNP path, from
+the root down, and for a sample that was not called the same order as `<sample>_not_called.txt`.
+Two runs of the same input with the same settings therefore write the same bytes, apart from the
+`# Query file:` and `# Typing settings:` lines, which name the paths of that run.
+
 | Column | Content |
 |---|---|
 | `Name` | Name of the node whose typed canSNP the row gives. |
