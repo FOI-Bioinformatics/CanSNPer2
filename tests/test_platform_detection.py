@@ -121,6 +121,43 @@ def test_a_name_form_that_says_illumina_is_not_trusted_on_long_reads(tmp_path):
     assert (found.platform, found.source) == ("hifi", "reads")
 
 
+@pytest.mark.parametrize(
+    "name, length, quality, platform",
+    [
+        ("SRR9999999.{i} e89c0416-6dad-4a7d-bb6b-302fa5f440{i:02d} length=9340", 5000, Q40, "ont"),
+        ("SRR9999999.{i} m64011_190830_220126/{i}/ccs length=15000", 15000, Q40, "hifi"),
+        ("SRR9999999.{i} m64011_190830_220126/{i}/0_3000 length=3000", 3000, Q40, "clr"),
+        ("SRR9999999.{i} M01234:12:000000000-ABCDE:1:1101:15589:{i} length=150", 150, Q40, "illumina"),
+    ],
+)
+def test_a_read_name_the_sra_rewrote_still_names_the_instrument(tmp_path, name, length, quality, platform):
+    """An SRA download puts the run accession and the read number first and keeps the name the
+    instrument wrote as the second field (#124). The name forms are therefore looked for at the
+    start of the name or after a space."""
+    found = detect_platform(fastq(tmp_path, "r.fastq", records(50, length, quality, name=name)), "reads")
+    assert found.platform == platform
+    assert found.source == "read_names"
+
+
+def test_a_nanopore_run_of_high_quality_is_not_taken_for_hifi(tmp_path):
+    """The case #124 was filed for: four R10.4.1 runs basecalled with a sup model reached a mean
+    base quality of 25.8 to 37.3, above HIFI_BASEQ, and were reported as hifi because the SRA had
+    put the run accession before the read UUID. The qualities cannot separate the two platforms
+    any more, so the names have to be read where they survive."""
+    name = "ERR15335117.{i} e89c0416-6dad-4a7d-bb6b-302fa5f440{i:02d} length=9340"
+    found = detect_platform(fastq(tmp_path, "r.fastq", records(50, 5000, Q40, name=name)), "reads")
+    assert (found.platform, found.source) == ("ont", "read_names")
+    assert found.mean_baseq >= HIFI_BASEQ, "the lengths and the qualities alone would say hifi"
+
+
+@pytest.mark.parametrize("name", ["SRR9015667.{i} 1/1", "ERR10820689.{i} 1 length=301"])
+def test_names_the_sra_replaced_entirely_leave_the_lengths_to_decide(tmp_path, name):
+    """the other form of SRA name, with nothing of the instrument left: these are the Illumina
+    files of the measurement of #124, and no name form may match them"""
+    found = detect_platform(fastq(tmp_path, "r.fastq", records(50, 250, Q40, name=name)), "reads")
+    assert (found.platform, found.source) == ("illumina", "reads")
+
+
 def test_short_nanopore_reads_are_told_by_their_names(tmp_path):
     """a nanopore run of short fragments is still ONT: the names decide, not the lengths. The
     name is the one dorado writes, the read identifier followed by tab separated tags"""

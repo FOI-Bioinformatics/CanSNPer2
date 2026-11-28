@@ -18,11 +18,21 @@ The signals are the ones the first few hundred records of a file carry:
 The read names are checked first, because they name the instrument: a nanopore run of short
 fragments is still ONT, so a long read platform read from the names stands whatever the read
 lengths are. Only a name form that says illumina is dropped on long reads, where something has
-rewritten the names. When the names are gone, as SRA downloads leave them, the lengths and the
-qualities decide, and they separate the platforms only roughly: ONT reads now reach the base
-quality of HiFi reads, so a file of long reads of high quality is reported as hifi, and a
-nanopore run of short fragments as illumina. The platform in effect is not changed by any of
-this unless --platform auto was given.
+rewritten the names. A name form is looked for at the start of the name and after a space, since
+an SRA download puts the run accession and the read number first and keeps the instrument's name
+as the second field (issue #124).
+
+When nothing of the instrument's name is left, as the SRA also leaves files, the lengths and the
+qualities decide, and they separate the platforms only roughly: a nanopore run of short fragments
+is reported as illumina, and a file of long reads of high quality as hifi. The base quality cannot
+separate ONT from HiFi any more. Measured on nine nanopore runs (#93, #124): four R10.4.1 runs
+basecalled with a sup model have a mean base quality of 25.8, 31.5, 36.8 and 37.3 over their first
+400 reads, which is the range of HiFi reads, while the five older R9 runs are at 11.0 to 20.9.
+HIFI_BASEQ is left at 25 for that reason: no value separates the two platforms, so raising it
+would only move which files are named wrongly, from nanopore runs of high quality to HiFi runs of
+ordinary quality. Where the names survive they settle it, and that is what they are read for.
+
+The platform in effect is not changed by any of this unless --platform auto was given.
 """
 
 import gzip
@@ -39,7 +49,9 @@ RECORDS = 400
 MAX_BYTES = 8 * 1024 * 1024
 
 """a median read length below this is short reads; the mean base quality from which long reads
-	are taken for hifi, and the one below which the qualities carry no information (clr)"""
+	are taken for hifi, and the one below which the qualities carry no information (clr).
+	HIFI_BASEQ separates no longer: modern nanopore basecalling reaches it, see the module
+	docstring and #124. It only decides files whose read names are gone"""
 LONG_READ = 500
 HIFI_BASEQ = 25
 NO_BASEQ = 3
@@ -50,15 +62,26 @@ Detection = namedtuple("Detection", ["platform", "source", "reads", "median_leng
 
 UNKNOWN = Detection(None, "none", 0, None, None, "")
 
+
+def _name_form(pattern):
+    """a read name form at the start of the name or after a space: an SRA download puts the run
+    accession and the read number first and keeps the name the instrument wrote as the second
+    field, so a form anchored at the start of the name is not found in it (issue #124). The
+    forms were anchored, and four R10.4.1 nanopore runs served that way were reported as hifi,
+    from their lengths and qualities, while an ENA-served copy of one of them was read from
+    its names."""
+    return re.compile(r"(?:^| )" + pattern)
+
+
 """the read name forms of the instruments, in the order they are tried: PacBio
 	(movie/zmw/ccs for HiFi, movie/zmw/start_end for CLR), ONT (a UUID, or the tags its
 	basecallers write) and Illumina (instrument:run:flowcell:lane:tile:x:y)"""
 NAME_FORMS = (
-    ("hifi", re.compile(r"^m[0-9A-Za-z_]+/\d+/ccs")),
-    ("clr", re.compile(r"^m[0-9A-Za-z_]+/\d+/\d+_\d+")),
-    ("ont", re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")),
-    ("ont", re.compile(r"(?:^| )(?:runid|sampleid|flow_cell_id|basecall_model_version_id)=")),
-    ("illumina", re.compile(r"^[^:\s]+:\d+:[^:\s]+:\d+:\d+:\d+:\d+")),
+    ("hifi", _name_form(r"m[0-9A-Za-z_]+/\d+/ccs")),
+    ("clr", _name_form(r"m[0-9A-Za-z_]+/\d+/\d+_\d+")),
+    ("ont", _name_form(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")),
+    ("ont", _name_form(r"(?:runid|sampleid|flow_cell_id|basecall_model_version_id)=")),
+    ("illumina", _name_form(r"[^:\s]+:\d+:[^:\s]+:\d+:\d+:\d+:\d+")),
 )
 
 """the @RG PL: values of the platforms that have a preset; PACBIO needs the records or the

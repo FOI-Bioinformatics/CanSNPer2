@@ -45,7 +45,11 @@ Git history.
   CRAM file. A run whose reads do not look like the platform in effect warns and names both; the
   platform is not changed by the warning, and the call is unchanged. `--platform auto` uses the
   platform read from each sample's reads instead. The platform read from the input is recorded in
-  the `# Reads:` line of `<sample>_snps.txt` and in `samples/<sample>.json`.
+  the `# Reads:` line of `<sample>_snps.txt` and in `samples/<sample>.json`. A read name is
+  searched for an instrument's name form from its start and after each space, so that the names
+  are still used when an SRA download has put the run accession and the read number in front of
+  them; measured on nine real nanopore runs served that way, four of which the read lengths and
+  base qualities alone reported as `hifi`.
 
 ### Changed
 

@@ -260,20 +260,26 @@ cannot be read is typed with `illumina`. The platform read from the input is rec
 
 The read names are used first, because they name the instrument: a nanopore run of short
 fragments is still ONT, so a long read platform read from the names stands whatever the lengths
-are. When the names are gone, as SRA downloads leave them, the lengths and the base qualities
-decide, and they separate the platforms only roughly: ONT reads now reach the base quality of
-HiFi reads, so a file of long reads of high quality is reported as `hifi`, and a nanopore run of
-short fragments as `illumina`. `--platform` is therefore the setting to use when the platform is
-known.
+are. A name is searched from its start and after each space, since an SRA download puts the run
+accession and the read number first and keeps the name the instrument wrote as the second field.
+
+When nothing of that name is left, as the SRA also leaves files, the lengths and the base
+qualities decide, and they separate the platforms only roughly: a nanopore run of short fragments
+is reported as `illumina`, and a file of long reads of high quality as `hifi`, because the base
+quality no longer separates nanopore reads from HiFi reads. `--platform` is therefore the setting
+to use when the platform is known.
 
 Checked on seven read files of four kinds (2026-11-27): Illumina with and without the original
 read names, PacBio CLR subreads (PRJNA991498) and three nanopore runs of short fragments, all
 reported correctly. Measured afterwards on eleven real nanopore runs
 ([validation.md](validation.md#read-typing-on-real-nanopore-reads)): the lengths and the
-qualities reported `ont` for seven of them and `hifi` for four, the four being R10.4.1 runs
-basecalled with a `sup` model whose mean base quality is above 25. Their calls at 30x were the
-same as with `--platform ont`. None of the eleven was read from its names, because the SRA
-conversion of a nanopore run puts the run accession first in the read name.
+qualities alone reported `ont` for seven of them and `hifi` for four, the four being R10.4.1 runs
+basecalled with a `sup` model whose mean base quality is 25.8 to 37.3, the range of HiFi reads.
+Nine of the eleven keep the nanopore read UUID after the run accession, and all nine, the four
+among them, are read from their names since 2.6.0 (#124); the two whose names the SRA replaced
+altogether are still read from their lengths and qualities, which get them right because their
+quality is low. The threshold between `ont` and `hifi` is left where it is: no value separates
+the two platforms now, so raising it would only move which files are named wrongly.
 
 ### Site state of a canSNP from its counts
 
