@@ -676,8 +676,8 @@ class CanSNPer2(object):
 
     def stop_timed_out_alignments(self, running):
         """--alignment-timeout: an aligner that never returns used to hang the whole run. Every
-        alignment of the round is stopped, and reported as the one that did not finish is not
-        known: any of them may be the one."""
+        alignment of the round is stopped and reported, since which of them did not finish
+        within the limit is not known."""
         for job in running:
             ref_name, query_name = job.names
             logger.error(

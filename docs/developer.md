@@ -145,6 +145,16 @@ inputs, the database and the reference folder once. `type_sample` then types eac
 sample is handled in `_run`, which stops the run or, with `--keep-going`, goes on to the next
 sample.
 
+The steps around the run are written the same way, one function per step, so that each can be
+read and tested on its own:
+
+| Where | Steps |
+| --- | --- |
+| `CanSNPer2/CanSNPerTree.py` | everything after parsing: `check_run_options`, `check_temp_options`, `start_logging`, `resolve_temp_folder`, `build_run`, `type_queries`, `report_hidden_warnings`, `typed_nothing`; `run_command` calls them in order |
+| `CanSNPer2/modules/CanSNPer2.py` | one round of alignments: `start_alignment` starts one (an `Alignment`), `collect_alignments` takes the finished ones out of the round, `timed_out` and `stop_timed_out_alignments` are `--alignment-timeout`, `stop_alignments` is the cleanup of an interrupted run, and `alignment_round_result` is what the round returns |
+| `CanSNPer2/modules/LocalReferences.py` | the walk down the tree that chooses a local reference: a `Descent` holds the tree, the representative genomes (`tree_and_representatives`), the canSNP states and the screen; `step` is one step down, `screen_step` the screen, `choose` the genome the walk ends on |
+| `CanSNPer2/modules/SourceCheck.py` | the canSNP file: `snp_header`, `snp_row`, the row checks `check_snp_values`, `check_snp_node`, `check_snp_site` and `check_snp_bases`, and `check_snp_totals` for the checks that need the whole file |
+
 ## Regenerate the command line reference
 
 `docs/cli.md` is generated from the parsers in `CanSNPer2/cli.py`. After a change to an option
